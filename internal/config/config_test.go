@@ -102,3 +102,22 @@ func TestMissingFilesAreFine(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTimingKeys(t *testing.T) {
+	d := t.TempDir()
+	p := write(t, d, "a.toml", "warm_on_session_start = true\n[worktree]\nmanage = \"detect\"\n")
+	cfg, err := LoadFiles(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.WarmOnSessionStart || cfg.Worktree.Manage != "detect" {
+		t.Fatalf("keys not read: %+v", cfg)
+	}
+	p = write(t, d, "b.toml", "[worktree]\nmanage = \"auto\"\n")
+	if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "worktree.manage") {
+		t.Fatalf("want enum error, got %v", err)
+	}
+	if Defaults().WarmOnSessionStart || Defaults().Worktree.Manage != "off" {
+		t.Fatal("defaults: warm off, manage off")
+	}
+}

@@ -159,7 +159,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		if err != nil {
 			return *r, err
 		}
-		if err := r.replaceBlock(filepath.Join(codexHome(), "config.toml"), block); err != nil {
+		if err := r.replaceBlock(filepath.Join(codexHome(), "config.toml"), blockStart, blockEnd, block); err != nil {
 			return *r, err
 		}
 		r.Notes = append(r.Notes, "User-level hooks need no project trust and ride along when an orchestrator copies config.toml into a managed CODEX_HOME (Paperclip).")
@@ -244,8 +244,9 @@ func codexHooksTOML(hooks any) (string, error) {
 	return b.String(), nil
 }
 
-// replaceBlock writes block into path, replacing a previous boxer block or appending.
-func (r *Result) replaceBlock(path, block string) error {
+// replaceBlock writes block into path, replacing the text between a previous start and end
+// marker or appending.
+func (r *Result) replaceBlock(path, blockStart, blockEnd, block string) error {
 	cur, _ := os.ReadFile(path)
 	s := string(cur)
 	if i := strings.Index(s, blockStart); i >= 0 {

@@ -97,6 +97,14 @@ func TestStatusStoppedExitCodeAndHumanDoctor(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "sandbox:   stopped, image alpine") || !strings.Contains(out, "smolvm:    smolvm 0.0.0-fake") {
 		t.Fatalf("doctor human output: %d\n%s", code, out)
 	}
+	if !strings.Contains(out, "signals:") || !strings.Contains(out, "claude-code  yes      yes      -      yes") || !strings.Contains(out, "boxer install git") {
+		t.Fatalf("doctor signal table: %s", out)
+	}
+	var d map[string]any
+	call(t, &d, "doctor", "--json")
+	if rows, _ := d["signals"].([]any); len(rows) == 0 || rows[0].(map[string]any)["effective_isolation"] != "worktree" {
+		t.Fatalf("doctor --json signals: %v", d["signals"])
+	}
 }
 
 func TestDoctorWarnsOnInstalledVersionMismatch(t *testing.T) {

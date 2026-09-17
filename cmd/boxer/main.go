@@ -31,7 +31,7 @@ var Version = "dev"
 
 const usage = `boxer — run agent commands in a microVM per worktree
 
-  boxer up [--recreate]            create and start the sandbox for this scope
+  boxer up [--recreate|--detach]   create and start the sandbox for this scope (--detach: in the background)
   boxer run -c '<shell>'           run a shell line in the sandbox
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all]               delete this scope's sandbox (or every boxer sandbox)
@@ -45,6 +45,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer package plugin|<harness>|all  render the Agent Plugins package (dist/boxer), one client's view, or both
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
                                    (the layer orchestrators like T3 Code and Paperclip also load)
+  boxer install git                post-checkout hook: boxer up --detach in every new worktree (not in all)
   boxer install <harness> --user   write ~/.claude/settings.json or ~/.codex/config.toml hooks
                                    (the files Paperclip seeds its managed harness homes from)
   boxer shell <harness> [-e K=V] [-- args]   run the harness itself inside the sandbox (integration = inside)
@@ -127,6 +128,7 @@ func identity(name string, args []string) (*flag.FlagSet, *string, *scope.Identi
 func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs, harness, id := identity(cmd, args)
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
+	detach := fs.Bool("detach", false, "start the sandbox in a background boxer and return at once (up)")
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
@@ -153,6 +155,14 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	case "up":
 		for _, w := range e.Warnings {
 			fmt.Fprintln(stderr, "boxer: warning:", w)
+		}
+		if *detach {
+			if err := e.UpDetached(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "boxer: %s starting in the background\n", e.Scope.Key)
+			return 0
 		}
 		created, err := e.Ensure(true, *recreate)
 		if err != nil {
@@ -352,6 +362,7 @@ type doctorReport struct {
 	SandboxError  string            `json:"sandbox_error,omitempty"`
 	Shims         *doctorShims      `json:"shims,omitempty"`
 	Installed     map[string]string `json:"installed_versions,omitempty"`
+	Signals       []hook.Signal     `json:"signals,omitempty"`
 	Warnings      []string          `json:"warnings"`
 	Error         string            `json:"error,omitempty"`
 	resolved      bool              // Env exists (config could be loaded)
@@ -437,6 +448,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		{"isolation", e.Cfg.Isolation}, {"mode", e.Cfg.Mode}, {"enforcement", e.Cfg.Enforcement},
 		{"require_worktree", e.Cfg.RequireWorktree}, {"on_sandbox_unavailable", e.Cfg.OnSandboxUnavailable},
 		{"create_on", strings.Join(e.Cfg.CreateOn, ",")}, {"destroy_on", strings.Join(e.Cfg.DestroyOn, ",")},
+		{"warm_on_session_start", fmt.Sprint(e.Cfg.WarmOnSessionStart)}, {"worktree.manage", e.Cfg.Worktree.Manage},
 		{"intercept", strings.Join(e.Cfg.Intercept, ",")}, {"passthrough", strings.Join(e.Cfg.Passthrough, ",")},
 		{"network.mode", e.Cfg.Network.Mode}, {"mount_at", e.Cfg.MountAt}, {"cpus", fmt.Sprint(e.Cfg.CPUs)}, {"memory", e.Cfg.Memory},
 	} {
@@ -476,6 +488,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		r.Shims = sh
 	}
 	r.Warnings = append(r.Warnings, e.Warnings...)
+	r.Signals = hook.Signals(e.Cfg.Isolation, install.GitInstalled(e.Scope.Root))
 	r.Installed = install.InstalledVersions(e.Scope.Root)
 	for _, p := range sortedKeys(r.Installed) {
 		if v := r.Installed[p]; v != Version {
@@ -548,10 +561,26 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		}
 		fmt.Fprintln(w)
 	}
+	if len(r.Signals) > 0 {
+		fmt.Fprintf(w, "signals:   %-12s %-8s %-8s %-6s %-9s %-8s %-5s %-9s %s\n", "harness", "session", "rewrite", "block", "subagent", "sess_end", "mcp", "git_hook", "isolation")
+		for _, s := range r.Signals {
+			fmt.Fprintf(w, "           %-12s %-8s %-8s %-6s %-9s %-8s %-5s %-9s %s\n", s.Harness, yn(s.SessionStart), yn(s.Rewrite), yn(s.BlockOnly), yn(s.SubagentStart), yn(s.SessionEnd), yn(s.MCP), yn(s.GitHook), s.EffectiveIsolation)
+		}
+		if !r.Signals[0].GitHook {
+			fmt.Fprintln(w, "           git_hook: none; `boxer install git` warms new worktrees as git creates them")
+		}
+	}
 	for _, wn := range r.Warnings {
 		fmt.Fprintln(w, "warning:  ", wn)
 	}
 	return 0
+}
+
+func yn(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "-"
 }
 
 func isShim(path string) bool {
@@ -857,6 +886,18 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if pos[0] == "git" {
+		r, err := install.Git(repo)
+		if err != nil {
+			fmt.Fprintln(stderr, "boxer install git:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "git:\n  wrote %s\n", r.Written[0])
+		for _, n := range r.Notes {
+			fmt.Fprintf(stdout, "  note: %s\n", n)
+		}
+		return 0
 	}
 	names := pos
 	if pos[0] == "all" {

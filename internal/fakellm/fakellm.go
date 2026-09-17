@@ -23,6 +23,10 @@ type Scenario struct {
 	// Tools is the preference order for the tool to call. A name is matched exactly, or as a
 	// substring when it starts with "~" (so "~boxer_run" matches "mcp__plugin_boxer_boxer__boxer_run").
 	Tools []string `json:"tools"`
+	// Delegate names a delegation tool (Claude Code's Agent). The first conversation that offers
+	// it calls it once, in the foreground, with the command as the task; every later conversation
+	// (the subagent's) falls through to Tools. Empty: never delegate.
+	Delegate string `json:"delegate,omitempty"`
 	// Answer is the final text. "{{os}}" is Linux or Darwin when the last tool result names one,
 	// else its first word; "{{first_word}}" and "{{last_result}}" refer to the last tool result.
 	Answer string `json:"answer"`
@@ -54,6 +58,8 @@ type tool struct {
 	props    map[string]any
 	schema   any
 	ns       string // Responses "namespace" the tool belongs to, when any
+	// foreground is set on a delegation call so a run_in_background argument is pinned false.
+	foreground bool
 }
 
 // arguments builds the call arguments: the command under argKey, plus a placeholder for every
@@ -69,12 +75,16 @@ func (t tool) arguments(command string) map[string]any {
 			args[r] = "boxer eval"
 		}
 	}
+	if _, ok := t.props["run_in_background"]; ok && t.foreground {
+		args["run_in_background"] = false
+	}
 	return args
 }
 
 // argKey finds the argument that carries the shell line: command, then cmd, then the first one.
+// prompt is a delegation tool's (Claude Code's Agent): the line becomes the subagent's task.
 func (t tool) argKey() string {
-	for _, want := range []string{"command", "cmd", "script", "input"} {
+	for _, want := range []string{"command", "cmd", "script", "input", "prompt"} {
 		for _, a := range t.args {
 			if a == want {
 				return a
@@ -126,9 +136,10 @@ func schemas(ts []tool) map[string]any {
 
 // Server serves one scenario and records what it saw.
 type Server struct {
-	Scenario Scenario
-	mu       sync.Mutex
-	requests []Request
+	Scenario  Scenario
+	mu        sync.Mutex
+	requests  []Request
+	delegated bool
 }
 
 // New returns a server for the scenario with defaults filled.
@@ -202,6 +213,9 @@ func (st step) args() map[string]any { return st.def.arguments(st.command) }
 
 func (s *Server) step(offered []tool, toolResults int, lastResult string) step {
 	if toolResults < len(s.Scenario.Commands) {
+		if t, ok := s.delegate(offered); ok {
+			return step{turn: toolResults, command: s.Scenario.Commands[toolResults], tool: t.name, ns: t.ns, argKey: t.argKey(), def: t}
+		}
 		t, ok := s.pick(offered)
 		if !ok {
 			// A side request (title generation, summaries) that offers no shell tool: answer briefly.
@@ -224,6 +238,27 @@ func (s *Server) step(offered []tool, toolResults int, lastResult string) step {
 	}
 	ans = strings.ReplaceAll(ans, "{{os}}", osWord)
 	return step{turn: toolResults, text: ans}
+}
+
+// delegate returns the delegation tool the first time it is offered, marked so its arguments
+// keep the subagent in the foreground: the result must be the subagent's answer, not a launch notice.
+func (s *Server) delegate(offered []tool) (tool, bool) {
+	if s.Scenario.Delegate == "" {
+		return tool{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.delegated {
+		return tool{}, false
+	}
+	for _, have := range offered {
+		if have.name == s.Scenario.Delegate {
+			s.delegated = true
+			have.foreground = true
+			return have, true
+		}
+	}
+	return tool{}, false
 }
 
 func (s *Server) pick(offered []tool) (tool, bool) {

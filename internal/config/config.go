@@ -26,6 +26,13 @@ type Branch struct {
 	Warm    []string `toml:"warm"`
 }
 
+// Worktree mirrors the [worktree] table. Manage is "off" (boxer only reacts to worktrees others
+// create) or "detect" (a session in the main checkout shares the repository sandbox, with a
+// warning, until it moves into a linked worktree).
+type Worktree struct {
+	Manage string `toml:"manage"`
+}
+
 // Override is a [harness.<name>] table: the keys a harness may change.
 type Override struct {
 	Mode        string `toml:"mode"`
@@ -43,6 +50,9 @@ type Config struct {
 	DestroyOn             []string `toml:"destroy_on"`
 	IdleTimeout           string   `toml:"idle_timeout"`
 	ReuseExisting         bool     `toml:"reuse_existing"`
+	// WarmOnSessionStart makes the SessionStart hook provision in a detached `boxer up` and
+	// return at once, so the session is never blocked on a VM create.
+	WarmOnSessionStart bool `toml:"warm_on_session_start"`
 
 	Integration          string   `toml:"integration"` // outside | inside
 	Mode                 string   `toml:"mode"`
@@ -60,9 +70,10 @@ type Config struct {
 	EnvPassthrough []string `toml:"env_passthrough"`
 	Secrets        []string `toml:"secrets"`
 
-	Network Network             `toml:"network"`
-	Branch  Branch              `toml:"branch"`
-	Harness map[string]Override `toml:"harness"`
+	Network  Network             `toml:"network"`
+	Branch   Branch              `toml:"branch"`
+	Worktree Worktree            `toml:"worktree"`
+	Harness  map[string]Override `toml:"harness"`
 
 	// Sources maps a top-level key to the file or "env" or "default" it came from.
 	Sources map[string]string `toml:"-"`
@@ -91,6 +102,7 @@ func Defaults() Config {
 		Memory:                "4G",
 		EnvPassthrough:        []string{"CI"},
 		Network:               Network{Mode: "allowlist", AllowHosts: []string{}},
+		Worktree:              Worktree{Manage: "off"},
 		Harness:               map[string]Override{},
 		Sources:               map[string]string{},
 		RequireLinkedWorktree: false,
@@ -191,7 +203,13 @@ var envKeys = map[string]func(c *Config, v string) error{
 		c.CPUs = n
 		return err
 	},
-	"BOXER_NETWORK_MODE": func(c *Config, v string) error { c.Network.Mode = v; return nil },
+	"BOXER_NETWORK_MODE":    func(c *Config, v string) error { c.Network.Mode = v; return nil },
+	"BOXER_WORKTREE_MANAGE": func(c *Config, v string) error { c.Worktree.Manage = v; return nil },
+	"BOXER_WARM_ON_SESSION_START": func(c *Config, v string) error {
+		b, err := strconv.ParseBool(v)
+		c.WarmOnSessionStart = b
+		return err
+	},
 }
 
 func (c *Config) applyEnv() {
@@ -241,6 +259,7 @@ func (c Config) Validate() error {
 		{"enforcement", c.Enforcement, []string{"hook", "shim", "both", "audit"}},
 		{"on_sandbox_unavailable", c.OnSandboxUnavailable, []string{"fail", "passthrough"}},
 		{"network.mode", c.Network.Mode, []string{"off", "allowlist", "on"}},
+		{"worktree.manage", c.Worktree.Manage, []string{"off", "detect"}},
 	}
 	for _, ch := range checks {
 		if !oneOf(ch.val, ch.allowed) {

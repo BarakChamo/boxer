@@ -173,6 +173,29 @@ signals, the scope key follows the cwd of each command (main checkout, then the 
 the agent moves), no host leak in any timing, reclaim by the first available layer. `doctor`'s
 signal report for the harness must match what the trace shows fired.
 
+#### Claude Code at t1, third pass (2026-09-17, real smolvm 1.16.1, alpine from the host pack)
+
+Cells `claude-code/rewrite/plugin/worktree/timing-*`, `.../session`, `.../subagent`, one run each,
+one at a time under the host lock. Signal set: core + Claude hooks (plugin); the git hook is unit
+tested against a real repository (`internal/install/git_test.go`), not in a cell yet.
+
+| Row | How the cell makes it happen | Oracle additions | Result |
+| --- | --- | --- | --- |
+| before | `git worktree add` in Prepare; the session opens in the worktree | VM root is the linked worktree; canary in it | pass, 3.6 s |
+| at session start | main checkout, `warm_on_session_start = true` | `SessionStart` hook `<-`/`->` gap; VM `created_at` at or before the first `PreToolUse` `<-` (trace lines are timestamped) | pass, 3.6 s; hook returned in 9 ms (750 ms when it blocks on the create); VM present 1 s before the first tool call |
+| mid-session | scripted `git worktree add <repo>/wt`, `cd <repo>/wt`, then the canary; the shell keeps the cwd and `boxer run` keys off it | second VM rooted at the new worktree holds the canary; the main checkout's VM still exists | pass, 5.3 s |
+| never | main checkout only (the same shape as every earlier cell) | root is not a linked worktree | pass, 4.2 s |
+| session isolation | `isolation = "session"`; the rewrite carries `--session <id>` | exactly one VM for the repo, keyed by the `session_id` in the shell tool's payload | pass, 3.8 s |
+| subagent isolation | scripted main agent delegates once (`Agent`, foreground); the subagent's `Bash` carries `agent_id`; rewrite carries `--session --agent` | VM keyed by session and agent ids holds the canary; it is not the session's VM (created at `SessionStart` by degradation) | pass, 4.8 s |
+
+Found on the way: Claude Code resets the shell cwd when a `cd` leaves the project directory
+("Shell cwd was reset"), so a mid-session worktree must be nested in the repository for the
+agent's own shell to move into it; this build launches `Agent` in the background unless
+`run_in_background` is false (the scripted model pins it); `created_at` is whole seconds, so the
+"VM before first tool call" check is lenient by up to a second and the hook gap is the sharper
+number. `boxer down` from the repository does not reach a session, subagent or second-worktree
+VM; the driver reaps every VM rooted under the cell's scratch directory.
+
 ### Inside mode cells, second pass (2026-09-17, harness packs)
 
 After the first successful install of a harness boxer packs that VM (`smolvm pack create

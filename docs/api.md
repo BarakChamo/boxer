@@ -113,13 +113,24 @@ still reported when the configuration loaded but the scope could not be resolved
   "image_reason": "no lockfile found; boxer base",
   "sandbox": { "scope": "sb-7e1852e4a3c3", "state": "running", "image": "alpine", "created_at": 1, "last_used": "2026-09-17T10:28:03Z", "isolation": "", "worktree": "", "integration": "" },
   "shims": { "on_path": [], "missing": ["npm", "npx", "..."] },
+  "signals": [
+    { "harness": "claude-code", "session_start": true, "rewrite": true, "block_only": false, "subagent_start": true, "session_end": true, "mcp": true, "git_hook": false, "effective_isolation": "worktree" },
+    "..."
+  ],
   "warnings": []
 }
 ```
 
+`signals` has one row per harness boxer speaks: which lifecycle signals it can deliver
+(derived from the hook dialect table), whether the repository's `post-checkout` hook from
+`boxer install git` is present, and `effective_isolation`, the configured isolation degraded to
+what those signals can support (`subagent` needs `subagent_start`; `session` needs
+`session_start` or `mcp`; else `worktree`).
+
 Optional fields: `smolvm_error` (smolvm missing), `image_warning` (`network.mode = off`),
 `sandbox_error`, `shims` (only when enforcement uses shims), `installed_versions` (marker file →
-boxer version that wrote it, for project-layer installs under the worktree), `error`. `sandbox`
+boxer version that wrote it, for project-layer installs under the worktree), `signals` (once the
+scope resolved), `error`. `sandbox`
 is `null` when absent. A project layer written by another boxer version adds a warning naming
 the file and both versions.
 

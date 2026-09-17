@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -46,6 +47,7 @@ type Env struct {
 	Cfg     config.Config
 	Git     scope.Git
 	Scope   scope.Scope
+	ID      scope.Identity // what the harness said about the caller, for hooks that re-invoke boxer
 	VM      vm.Client
 	Stderr  io.Writer
 	// Warnings collected during resolution, printed by doctor and by run when relevant.
@@ -79,7 +81,7 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if harness != "" {
 		cfg = cfg.ForHarness(harness)
 	}
-	e := &Env{CWD: cwd, Harness: harness, Cfg: cfg, Git: g, VM: vm.New(), Stderr: os.Stderr}
+	e := &Env{CWD: cwd, Harness: harness, Cfg: cfg, Git: g, ID: id, VM: vm.New(), Stderr: os.Stderr}
 	if g.Toplevel == "" {
 		return e, &Error{Reason: "not inside a git repository", Cause: "NO_REPOSITORY", Fix: "cd into a git worktree, or `git init`"}
 	}
@@ -96,7 +98,14 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if cfg.Integration == "inside" {
 		tag = "inside"
 	}
-	s, err := scope.ResolveTagged(cfg.Isolation, cfg.OnMissingID, g, id, tag)
+	isolation := cfg.Isolation
+	if cfg.Worktree.Manage == "detect" && !g.Linked && isolation == "worktree" {
+		// The worktree may still appear (the agent runs `git worktree add` mid-session); until
+		// it does, the main checkout shares the repository sandbox rather than owning one.
+		isolation = "repo"
+		e.Warnings = append(e.Warnings, "worktree.manage = detect: no linked worktree yet, sharing the repository sandbox")
+	}
+	s, err := scope.ResolveTagged(isolation, cfg.OnMissingID, g, id, tag)
 	if err != nil {
 		return e, &Error{Reason: err.Error(), Cause: "SCOPE_UNRESOLVED", Scope: scope.Scope{Root: g.Toplevel},
 			Fix: "set isolation = \"worktree\" in boxer.toml, or pass --session/--agent"}
@@ -531,6 +540,46 @@ func (e *Env) Restart() error {
 	}
 	_, err := e.Ensure(false, false)
 	return err
+}
+
+// Executable is the boxer binary UpDetached spawns; tests point it at a script.
+var Executable = os.Executable
+
+// UpDetached starts `boxer up` for this Env in its own session and returns without waiting, so a
+// hook (harness SessionStart, git post-checkout) can warm the scope without blocking its caller.
+// Ensure's per-scope lock makes the detached create and a concurrent first `run` produce one VM.
+func (e *Env) UpDetached() error {
+	exe, err := Executable()
+	if err != nil {
+		return err
+	}
+	args := []string{"up"}
+	if e.Harness != "" {
+		args = append(args, "--harness", e.Harness)
+	}
+	cmd := exec.Command(exe, append(args, e.IdentityArgs()...)...)
+	cmd.Dir = e.CWD
+	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+// IdentityArgs are the --session and --agent flags another boxer invocation needs to resolve
+// this Env's scope; empty unless the isolation uses those ids.
+func (e *Env) IdentityArgs() []string {
+	var args []string
+	if e.Cfg.Isolation == "session" || e.Cfg.Isolation == "subagent" {
+		if e.ID.SessionID != "" {
+			args = append(args, "--session", e.ID.SessionID)
+		}
+		if e.ID.AgentID != "" {
+			args = append(args, "--agent", e.ID.AgentID)
+		}
+	}
+	return args
 }
 
 // Down stops and deletes the scope's VM. Absence is not an error.

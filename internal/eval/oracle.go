@@ -152,7 +152,11 @@ func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 		add("config", "%v", err)
 		return f
 	}
-	g, _ := scope.Detect(env.Repo)
+	if cfg.Isolation == "session" || cfg.Isolation == "subagent" {
+		return judgeIdentity(env, c)
+	}
+	root := env.SessionRoot(c) // the worktree the command ran from
+	g, _ := scope.Detect(root)
 	tag := ""
 	if cfg.Integration == "inside" {
 		tag = "inside"
@@ -165,8 +169,8 @@ func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 			add("vm", "%v", err)
 		} else if !ok {
 			add("vm", "no VM %s after the run", sc.Key)
-		} else if m.Labels["boxer.root"] != env.Repo {
-			add("vm", "VM %s is for %s, not %s", sc.Key, m.Labels["boxer.root"], env.Repo)
+		} else if m.Labels["boxer.root"] != root {
+			add("vm", "VM %s is for %s, not %s", sc.Key, m.Labels["boxer.root"], root)
 		} else if !expectDeny {
 			// The canary must exist in the guest (and, checked above, not on the host).
 			out, code, _ := client.Output(sc.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes")
@@ -174,6 +178,7 @@ func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 				add("guest-canary", "the canary was not written in the guest")
 			}
 		}
+		f = append(f, judgeTiming(env, c, m)...)
 	}
 	return f
 }
