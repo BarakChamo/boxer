@@ -1,9 +1,13 @@
 package eval
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Tier t2 runs the same cells against real providers. Credentials come from the process
@@ -103,4 +107,42 @@ func quotaError(out string) string {
 		}
 	}
 	return ""
+}
+
+// budgetUSD is the most one t2 run may spend on the gateway; BOXER_EVAL_BUDGET_USD overrides the
+// default of $2, which fits four runs into a $10 day.
+func budgetUSD() float64 {
+	if v, err := strconv.ParseFloat(os.Getenv("BOXER_EVAL_BUDGET_USD"), 64); err == nil && v > 0 {
+		return v
+	}
+	return 2
+}
+
+// gatewayUsed returns the gateway's lifetime spend for this key in USD (GET /v1/credits
+// total_used), or -1 when the key is absent or the endpoint fails. Reading it before and after a
+// cell attributes spend to that cell without parsing each harness's usage output.
+func gatewayUsed() float64 {
+	key, why := gatewayKey()
+	if why != "" {
+		return -1
+	}
+	req, _ := http.NewRequest("GET", gatewayRoot+"/v1/credits", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	var body struct {
+		TotalUsed string `json:"total_used"`
+	}
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return -1
+	}
+	v, err := strconv.ParseFloat(body.TotalUsed, 64)
+	if err != nil {
+		return -1
+	}
+	return v
 }

@@ -287,6 +287,9 @@ type Result struct {
 	// Retried is true when the first attempt failed on infrastructure (VM start, npm, image pull)
 	// and this is the second attempt's outcome.
 	Retried bool
+	// CostUSD is the gateway spend attributed to this cell at t2 (credits used before minus after);
+	// zero when the credits endpoint is unavailable.
+	CostUSD float64
 }
 
 // infraPatterns mark failures that belong to the machine, not to boxer or the harness: the cell
@@ -325,6 +328,7 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 		defer unlock()
 	}
 	var results []Result
+	spent, budget := 0.0, budgetUSD()
 	for _, d := range drivers {
 		ok, why := d.Available(tier)
 		cells := d.Cells(tier)
@@ -341,11 +345,23 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 				results = append(results, Result{Cell: c, Status: "skip", Reason: "noncompliant cells are scripted; t1 only"})
 				continue
 			}
+			if tier == "t2" && spent >= budget {
+				results = append(results, Result{Cell: c, Status: "skip", Reason: fmt.Sprintf("budget: $%.2f of $%.2f spent this run (BOXER_EVAL_BUDGET_USD)", spent, budget)})
+				continue
+			}
+			before := gatewayUsed()
 			r := runCell(d, c, tier, boxerBin, keep, log)
 			if r.Status == "fail" && infra(r) {
 				fmt.Fprintf(log, "  retrying %s after an infrastructure failure\n", c.Name())
 				r = runCell(d, c, tier, boxerBin, keep, log)
 				r.Retried = true
+			}
+			if before >= 0 {
+				if after := gatewayUsed(); after >= 0 {
+					r.CostUSD = after - before
+					spent += r.CostUSD
+					fmt.Fprintf(log, "  spend $%.4f (run total $%.4f)\n", r.CostUSD, spent)
+				}
 			}
 			results = append(results, r)
 			if onResult != nil {
@@ -414,6 +430,7 @@ func mark(status string) string {
 func Report(results []Result, tier string) string {
 	var b strings.Builder
 	pass, fail, skip := 0, 0, 0
+	total := 0.0
 	fmt.Fprintf(&b, "# boxer eval report — tier %s — %s\n\n", tier, time.Now().Format(time.RFC3339))
 	b.WriteString("| Cell | Status | Time | Notes |\n| --- | --- | --- | --- |\n")
 	sorted := append([]Result(nil), results...)
@@ -434,9 +451,16 @@ func Report(results []Result, tier string) string {
 		default:
 			skip++
 		}
+		if r.CostUSD > 0 {
+			total += r.CostUSD
+			notes = strings.TrimSpace(fmt.Sprintf("$%.4f; %s", r.CostUSD, notes))
+		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", r.Cell.Name(), r.Status, r.Duration.Round(time.Millisecond), strings.TrimSpace(notes))
 	}
 	fmt.Fprintf(&b, "\n**passed %d · failed %d · skipped %d**\n", pass, fail, skip)
+	if total > 0 {
+		fmt.Fprintf(&b, "\n**gateway spend this run: $%.4f** (per-cell figures are in the notes; BOXER_EVAL_BUDGET_USD caps a run)\n", total)
+	}
 	return b.String()
 }
 
