@@ -183,8 +183,11 @@ func install(e *box.Env, name string, h Harness) error {
 	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per host)\n", name)
 	// npm inside the guest sees a slow registry through TSI: long fetch timeouts, and the whole
 	// line retried once, cover the idle timeouts observed in eval runs.
+	// npm exits 0 when an optional platform package fails to download, which leaves a harness
+	// that cannot start; the check catches that before the marker is written and the VM packed.
+	check := h.Bin + " --version >/dev/null 2>&1"
 	line := "export NPM_CONFIG_FETCH_TIMEOUT=600000 NPM_CONFIG_FETCH_RETRIES=5 NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 DEBIAN_FRONTEND=noninteractive; " +
-		"{ " + h.Install + "; } || { " + h.Install + "; }"
+		"{ " + h.Install + " && " + check + "; } || { " + h.Install + " && " + check + "; }"
 	code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr},
 		"sh", "-lc", line+" && mkdir -p /var/lib/boxer && touch "+marker)
 	if err != nil || code != 0 {

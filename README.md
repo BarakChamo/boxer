@@ -116,15 +116,9 @@ in the guest (`Linux`), a host canary was not written, no denials, and the VM ha
 Inside cells run the same through `boxer shell <harness>` and `boxer acp <harness>`. Plan and
 findings: [docs/eval-plan.md](docs/eval-plan.md).
 
-Last run on Apple Silicon, smolvm 1.16.1: smoke 44/44; T1 outside 31/31; T1 inside shell 6/6
-(claude, codex, gemini, opencode, pi, kimi) and ACP 5/5 (claude, codex, gemini, kimi, opencode).
-Images are packed once per host, so the first VM for an image pays the pull and later ones boot in
-under a second. Claude Code live 2/2 — in `rewrite` mode
-the agent typed `uname -a` and the hook put it in the guest; in `tool` mode the agent read the
-injected brief and typed `boxer run -c 'uname -a'` itself; zero denials in either. Codex: project
-hooks fire under `codex exec` (a usage limit stopped the turn). Gemini: extension installs and
-registers context + MCP. Grok: plugin passes `grok plugin validate` and installs. OpenCode and
-Kimi: project install verified. Live turns on those need a login or API key on the machine; the
-eval skips and says which. Set `BOXER_TRACE=/path` to log every hook input and output.
+Last run on Apple Silicon, smolvm 1.16.1 (2026-09-17): smoke 44/44; T1 49 pass, 0 fail, 4 skips
+(orchestrators needing an install or account); T2 Claude Code 7/7 live, others skipped for
+credentials. Inside cells start in 9 to 28 s from per-host harness packs. Full matrix and skip
+reasons: [docs/status.md](docs/status.md).
 
 Requirements: [docs/requirements.md](docs/requirements.md). Plan: [docs/plan.md](docs/plan.md).

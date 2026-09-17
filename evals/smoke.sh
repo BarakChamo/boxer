@@ -93,7 +93,7 @@ cd "$WORK/h"
 pre() { printf '{"hook_event_name":"%s","tool_name":"%s","tool_input":{"command":"%s"},"cwd":"%s","session_id":"s"}' "$1" "$2" "$3" "$PWD"; }
 check "claude rewrite"  '[ "$(pre PreToolUse Bash "npm test" | boxer hook claude-code)" = "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"boxer run -c '"'"'npm test'"'"'\"}}}" ]'
 check "codex rewrite"   'pre PreToolUse Bash "go test" | boxer hook codex | grep -q updatedInput'
-check "grok rewrite"    'pre PreToolUse Bash "go test" | boxer hook grok | grep -q updatedInput'
+check "grok rewrite"    'pre PreToolUse run_terminal_command "go test" | boxer hook grok | grep -q updatedInput'
 check "gemini rewrite"  'pre BeforeTool run_shell_command "go test" | boxer hook gemini-cli | grep -q "\"tool_input\":{\"command\":\"boxer run"'
 check "opencode rewrite" '[ "$(pre tool.execute.before bash "go test" | boxer hook opencode)" = "{\"command\":\"boxer run -c '"'"'go test'"'"'\"}" ]'
 check "dsh allows (shims cover)" '[ -z "$(pre PreToolUse Bash "go test" | boxer hook dsh)" ]'

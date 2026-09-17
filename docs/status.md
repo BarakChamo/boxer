@@ -1,44 +1,76 @@
-# Status: operational slice v0.1
+# Status: operational slice v0.1 (2026-09-17)
 
-The stopping point for this slice is: comprehensive evals run against real harnesses and real
-orchestrators, with every skip explained. This file is rewritten from real runs at the end of
-Phase 4 (see the plan in the session; phases A/B/C below).
+The stopping point for this slice: comprehensive evals run against real harnesses and real
+orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
+model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models). Method:
+[eval-plan.md](eval-plan.md). Release shape: [release.md](release.md). API: [api.md](api.md).
 
-## Proven (fill from `docs/eval-t1.md`, `docs/eval-t2.md`)
+## Proven
+
+Unit tests green; smoke 44/44; T1 **49 pass, 0 fail, 4 skip** (the skips are orchestrators that
+need an install or account, see below). Every cell is a fresh repository and a fresh VM.
 
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | | | | | |
-| Codex | | | | | |
-| Gemini CLI | | | | | |
-| OpenCode | | | | | |
-| pi | | | | | |
-| Kimi | | | | | |
-| Grok | | | | | |
-| DSH | | | | | |
+| Claude Code | pass | pass | pass 17 s | pass 25 s | **7/7 pass** (Keychain login) |
+| Codex | pass | pass | pass 9 s | pass 15 s | skip: ChatGPT quota until 2026-09-20 |
+| Gemini CLI | pass | pass | pass 10 s | pass 13 s | skip: `GEMINI_API_KEY` |
+| OpenCode | pass | pass | pass 14 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY` |
+| pi | pass | pass | pass 28 s | no ACP server | skip: same |
+| Kimi | block-only hooks; shims | pass | pass 9 s | pass 13 s | skip: `MOONSHOT_API_KEY` |
+| Grok | pass (user and project hooks) | t2 only (tools behind `search_tool`) | pass 12 s | pass 18 s | skip: `XAI_API_KEY` |
+| DSH | block-only hooks; shims | bundle only | not in table | none | not installed |
+
+Inside timings are for a host that already holds the harness pack; the first `boxer shell <h>`
+per host pays the install once (10 s to 11 min depending on npm) and packs the result.
 
 | Orchestrator | Path | Result |
 | --- | --- | --- |
-| OpenHands | adapter | |
-| Paperclip | project layer / ACP | |
-| Multica | project layer | |
-| T3 Code | ACP (`boxer acp`) and project layer | |
-| herdr | checklist | |
-| Conductor (local) | checklist | |
+| OpenHands | `BoxerWorkspace` adapter, real SDK | T1 pass in Stream C's run; skips here (no venv on this checkout); live needs `ANTHROPIC_API_KEY` |
+| Paperclip | project layer over `claude-agent-acp` | spike 7 answered (env passes through); driver skips: `paperclipai` not installed |
+| T3 Code | ACP (`boxer acp`) and project layer | spike 8 answered (WS sequence known); driver skips: `t3` not installed |
+| Multica | project layer | spike 9 answered; driver skips: no account (`multica setup`) |
+| herdr | checklist | no driver by design (pane-driven) |
+| Conductor (local) | checklist | no driver (setup-script lane) |
+| ACP real client | `@agentclientprotocol/sdk` example client against `boxer acp claude` | pass: initialize, session, prompt, `Terminal` tool, `Linux` |
+
+## Shipped in this slice
+
+- `pkg/boxer` facade (experimental), `--json` on `ls`, `status`, `down`, `gc`, `doctor`.
+- goreleaser, `install.sh`, npm wrapper `boxer-cli`, CI and release workflows, plugin version
+  stamping with a `doctor` mismatch warning.
+- Image packs once per host, harness packs once per host per harness (keyed on image, harness
+  and install line), pruned by `gc`; install verified with `<bin> --version` before packing.
+- Nested-sandbox rows for Codex; audit clean for Gemini, OpenCode, pi, Grok, Kimi.
+- Login-travel warning for Claude; Codex `auth.json` travels; Gemini uses Keychain on macOS.
+- Eval runner: infra-failure retry, kept failures, SIGINT report, host lock; T2 tier with
+  credential detection; Grok driver; OpenHands and orchestrator checklist drivers.
 
 ## Known limits
 
-- One host drives one smolvm at a time; evals take `~/.local/state/boxer/eval.lock`.
-- First `boxer shell <harness>` per host pays the harness install (until per-harness base packs).
-- Claude Code's macOS Keychain login does not enter the VM; use `claude setup-token`.
-- Harness-native sandboxes are turned off inside the VM by the harness table.
+- One host drives one smolvm at a time (`~/.local/state/boxer/eval.lock`).
+- First harness install per host depends on npm through smolvm's TSI networking; observed 10 s
+  to 11 min and one stall over 13 min. The install is retried once and verified.
+- Claude Code's Keychain login does not enter the VM (`claude setup-token`); Gemini likewise.
+- Grok plugin hooks do not run headless (1.0.34); user or project hooks do.
+- Packs are 130 to 365 MB each under the state directory.
+- OpenCode's `session.created` is not awaited, so a very short first turn can finish before the
+  VM exists; harmless in real use.
 
-## Baseline before this slice (2026-09-17)
+## To run the rest
 
-Unit tests green; smoke 44/44; T1 31/31 outside and 11/11 inside, each cell green, with one
-OpenCode start-up flake and inside cells costing 30 s to 11 min from npm installs.
+```sh
+# evals/.env (gitignored), then: make eval-t2
+GEMINI_API_KEY=… XAI_API_KEY=… MOONSHOT_API_KEY=… AI_GATEWAY_API_KEY=… ANTHROPIC_API_KEY=…
+CLAUDE_CODE_OAUTH_TOKEN=…        # from `claude setup-token`, for inside and ACP Claude live
+npm i -g paperclipai t3          # orchestrator drivers
+multica setup                    # account
+python3 -m venv .venv-openhands && .venv-openhands/bin/pip install openhands-sdk openhands-tools
+```
 
 ## What comes next
 
-Git-hook install, `worktree.manage`, devcontainer loader, `Backend` interface, Agent Plugins
-bundle collapse, MCP lifecycle signals, boxes dashboard, Homebrew tap, plugin marketplace repos.
+Git-hook install (`boxer install git`), `worktree.manage` and `warm_on_session_start`,
+devcontainer.json loader, `Backend` interface (Firecracker, Docker Sandboxes), Agent Plugins
+bundle collapse, MCP lifecycle signals, a running-boxes dashboard on the JSON API, Homebrew tap,
+plugin marketplace repos, Conductor cloud once smolvm exists there.
