@@ -5,6 +5,7 @@ package eval
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -226,15 +227,18 @@ intercept = [%s]
 	if c.Inside != "" {
 		// The harness runs in the guest: node image, more memory, and the fake model's host address
 		// admitted through the allowlist. `mode` is meaningless here.
+		network := fmt.Sprintf("mode = \"allowlist\"\nallow_hosts = [%q, \"mirror.gcr.io\", \"storage.googleapis.com\"]", HostIP())
+		if c.Tier == "t2" {
+			network = "mode = \"on\"" // the guest harness talks to its real provider
+		}
 		toml = fmt.Sprintf(`integration = "inside"
 memory = "2G"
 cpus = 2
 require_worktree = "off"
 isolation = %q
 [network]
-mode = "allowlist"
-allow_hosts = [%q, "mirror.gcr.io", "storage.googleapis.com"]
-`, c.Isolation, HostIP())
+%s
+`, c.Isolation, network)
 	}
 	return os.WriteFile(filepath.Join(e.Repo, "boxer.toml"), []byte(toml), 0o644)
 }
@@ -371,11 +375,16 @@ func runCell(d Driver, c Cell, tier, boxerBin string, keep bool, log io.Writer) 
 	}()
 	defer d.Cleanup(env, c)
 	defer env.boxer(env.Repo, "down") // never leave a VM behind, whatever happened
-	if err := d.Prepare(env, c); err != nil {
+	var skip SkipError
+	if err := d.Prepare(env, c); errors.As(err, &skip) {
+		return Result{Cell: c, Status: "skip", Reason: skip.Reason}
+	} else if err != nil {
 		return Result{Cell: c, Status: "fail", Findings: []Finding{{"prepare", err.Error()}}}
 	}
 	tr, err := d.Run(env, c, env.Prompt())
-	if err != nil {
+	if errors.As(err, &skip) {
+		return Result{Cell: c, Status: "skip", Reason: skip.Reason, Raw: tr.Raw}
+	} else if err != nil {
 		return Result{Cell: c, Status: "fail", Findings: []Finding{{"run", err.Error()}}, Raw: tr.Raw}
 	}
 	findings := Judge(env, c, tr)

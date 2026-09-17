@@ -9,7 +9,12 @@ func Drivers() []Driver {
 		OpenCode{},
 		Pi{},
 		Kimi{},
+		Grok{},
 		Inside{},
 		InsideACP{},
+		OpenHands{},
+		Paperclip,
+		T3,
+		Multica,
 	}
 }

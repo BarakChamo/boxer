@@ -18,7 +18,7 @@ type Finding struct {
 }
 
 var (
-	reEvent   = regexp.MustCompile(`"hook_event_name":"([A-Za-z._]+)"`)
+	reEvent   = regexp.MustCompile(`"hook_?[eE]vent_?[nN]ame":"([A-Za-z._]+)"`) // Grok spells it hookEventName
 	reCommand = regexp.MustCompile(`<- .*?"command":"((?:[^"\\]|\\.)*)"`)
 )
 
@@ -92,7 +92,9 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 
 	// 3. Denials and path. Inside mode has neither: the harness's own shell ran in the guest.
 	expectDeny := c.Mode == "tool" && !c.Compliant
-	if c.Inside != "" {
+	if c.Inside != "" || c.Entry == "sdk" {
+		// The harness's own shell ran in the guest (inside), or the orchestrator called `boxer run`
+		// itself (sdk): no hook path to check.
 		return append(f, judgeVM(env, c, false)...)
 	}
 	if expectDeny && t.denies == 0 && shellToolOffered(env) {

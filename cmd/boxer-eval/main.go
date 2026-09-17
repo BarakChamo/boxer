@@ -28,6 +28,7 @@ func main() {
 	list := flag.Bool("list", false, "list cells and exit")
 	lockRun := flag.Bool("lock-run", false, "take the host smolvm lock, then run the command after -- (used by evals/smoke.sh)")
 	flag.Parse()
+	loadDotEnv()
 
 	if *lockRun {
 		unlock, err := eval.HostLock(os.Stderr)
@@ -49,6 +50,9 @@ func main() {
 		return
 	}
 
+	if *tier == "t2" && os.Getenv("BOXER_EVAL_LOCKED") == "" {
+		fmt.Fprintln(os.Stderr, "tier t2: credentials come from evals/.env when present; missing ones are reported as skips")
+	}
 	boxerBin, err := exec.LookPath("boxer")
 	if err != nil {
 		if p, e := filepath.Abs("bin/boxer"); e == nil {
@@ -119,5 +123,33 @@ func main() {
 		if r.Status == "fail" {
 			os.Exit(1)
 		}
+	}
+}
+
+// loadDotEnv reads KEY=value lines from evals/.env (gitignored; looked up from the working directory
+// and from the binary's repository root) into the environment without overriding what is already
+// set. Values are never printed.
+func loadDotEnv() {
+	candidates := []string{filepath.Join("evals", ".env")}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "..", "evals", ".env"))
+	}
+	for _, p := range candidates {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k, v, ok := strings.Cut(line, "=")
+			if !ok || os.Getenv(k) != "" {
+				continue
+			}
+			os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+		}
+		return
 	}
 }

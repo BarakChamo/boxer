@@ -35,8 +35,8 @@ This document separates what was checked from what was assumed. Every requiremen
 | Codex plugin manifest `.codex-plugin/plugin.json` with `hooks` key; `PLUGIN_ROOT`/`PLUGIN_DATA` env | Verified against hooks reference |
 | Claude Code `WorktreeCreate`/`WorktreeRemove` hooks **replace** built-in worktree creation when configured | Verified against hooks reference; boxer therefore does not register them |
 | Claude Code plugin manifest: `agents` must not be a directory string (validator rejects it); `agents/` is auto-discovered; `--plugin-dir` loads hooks and MCP in `-p` mode; MCP tools appear as `mcp__plugin_boxer_boxer__boxer_run` | Verified by `claude plugin validate` and a headless run |
-| Live eval, Claude Code, rewrite mode: agent typed `uname -a`, hook rewrote it, result `Linux sb-…`, zero denials | Verified by `evals/harness.sh` |
-| Live eval, Claude Code, tool mode: agent read the injected brief and ran `boxer run -c 'uname -a'` unprompted, zero denials | Verified by `evals/harness.sh` |
+| Live eval, Claude Code, rewrite mode: agent typed `uname -a`, hook rewrote it, result `Linux sb-…`, zero denials | Verified by `boxer-eval --tier t2` (was `evals/harness.sh`) |
+| Live eval, Claude Code, tool mode: agent read the injected brief and ran `boxer run -c 'uname -a'` unprompted, zero denials | Verified by `boxer-eval --tier t2` (was `evals/harness.sh`) |
 | T3 Code spawns provider CLIs via ACP with `CLAUDE_CONFIG_DIR` set to a T3-owned directory; Paperclip stages managed `CLAUDE_CONFIG_DIR`/`CODEX_HOME`; user-level plugins are therefore not loaded under either | Verified in source (`ClaudeHome.ts`, `claude-local/src/server/acp.ts`) |
 | Codex 0.154: hooks on by default; project hooks need trust or `--dangerously-bypass-hook-trust`; `codex exec` has no `--full-auto`, sandbox off via `--dangerously-bypass-approvals-and-sandbox`; `.codex/hooks.json` SessionStart/SessionEnd fired live | Verified by running it (usage limit stopped the turn) |
 | OpenHands SDK `LocalWorkspace.execute_command(command, cwd, timeout) -> CommandResult` | Verified against source |
@@ -556,7 +556,7 @@ How each harness's bundle format carries those four:
   a change to the instruction text or the hook binary reaches every harness in one release.
 - **R-PKG-7.** `boxer install <harness>` writes the same four components into the repository's
   own harness configuration (`.claude/settings.json` + `.mcp.json`, `.codex/hooks.json`,
-  `.gemini/settings.json`, `.opencode/plugins/`, `.grok/settings.json`), merging with what is there
+  `.gemini/settings.json`, `.opencode/plugins/`, `.grok/hooks/boxer.json`), merging with what is there
   and changing nothing on a second run. This is the layer orchestrators load when they give the
   harness a private config directory (see `docs/orchestrators.md`).
 - **R-PKG-8.** Two installed layers must not fight: an already-wrapped command is allowed as is,

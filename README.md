@@ -73,7 +73,7 @@ server (pi, Grok) have `shell` only.
 
 ```sh
 boxer install all      # .claude/settings.json + .mcp.json, .codex/hooks.json, .gemini/settings.json,
-                       # .opencode/plugins/boxer.ts + opencode.json, .grok/settings.json — merged, idempotent
+                       # .opencode/plugins/boxer.ts + opencode.json, .grok/hooks/boxer.json — merged, idempotent
 ```
 
 This project layer is what orchestrators load: T3 Code and Paperclip launch harnesses with their
@@ -101,7 +101,7 @@ components — instruction, lifecycle hooks, run tool, gap closer:
 go test ./...          # unit: config, scope, decide, hook dialects, mcp, shims, bundles, inside (fake smolvm)
 evals/smoke.sh         # real smolvm: every config path, every hook dialect, mcp, shims, gc   (44 checks)
 boxer-eval --tier t1   # real harness + scripted model + real smolvm: 31 outside cells, 11 inside cells
-evals/harness.sh       # live: headless session per installed harness; asserts guest execution, zero denials
+cmd/boxer-eval/        # eval matrix: --tier t1 (fake model) or --tier t2 (live credentials from evals/.env)
 ```
 
 The T1 tier (`cmd/boxer-eval`) starts a fake model server that always answers a shell tool call

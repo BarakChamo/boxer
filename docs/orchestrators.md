@@ -17,7 +17,7 @@ that an orchestrator launches with its own configuration directory:
 | OpenHands | Does not spawn a harness CLI at all; its own agent executes actions against a `Workspace` | Not applicable |
 
 The **project layer** is what every launcher reads: `.claude/settings.json`, `.mcp.json`,
-`.codex/hooks.json`, `.gemini/settings.json`, `.opencode/plugins/`, `.grok/settings.json`.
+`.codex/hooks.json`, `.gemini/settings.json`, `.opencode/plugins/`, `.grok/hooks/boxer.json`.
 
 ```sh
 boxer install all        # writes hooks, run tool, and instruction into this repository
