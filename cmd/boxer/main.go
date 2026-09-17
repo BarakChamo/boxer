@@ -45,6 +45,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer package <harness>|all      render the plugin bundle for a harness
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
                                    (the layer orchestrators like T3 Code and Paperclip also load)
+  boxer install git                post-checkout hook: boxer up --detach in every new worktree (not in all)
   boxer install <harness> --user   write ~/.claude/settings.json or ~/.codex/config.toml hooks
                                    (the files Paperclip seeds its managed harness homes from)
   boxer shell <harness> [-e K=V] [-- args]   run the harness itself inside the sandbox (integration = inside)
@@ -865,6 +866,18 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if pos[0] == "git" {
+		r, err := install.Git(repo)
+		if err != nil {
+			fmt.Fprintln(stderr, "boxer install git:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "git:\n  wrote %s\n", r.Written[0])
+		for _, n := range r.Notes {
+			fmt.Fprintf(stdout, "  note: %s\n", n)
+		}
+		return 0
 	}
 	names := pos
 	if pos[0] == "all" {
