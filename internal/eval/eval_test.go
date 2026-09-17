@@ -1,6 +1,9 @@
 package eval
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestInfra(t *testing.T) {
 	cases := []struct {
@@ -19,5 +22,18 @@ func TestInfra(t *testing.T) {
 		if got := infra(c.r); got != c.want {
 			t.Errorf("infra(%v) = %v, want %v", c.r.Findings, got, c.want)
 		}
+	}
+}
+
+func TestHostLockNestedIsNoop(t *testing.T) {
+	t.Setenv("BOXER_EVAL_LOCKED", "1")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	unlock, err := HostLock(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if _, err := os.Stat(LockPath()); err == nil {
+		t.Fatal("nested HostLock must not touch the lock file")
 	}
 }

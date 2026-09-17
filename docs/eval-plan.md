@@ -111,10 +111,17 @@ repository and VM:
 | paperclip, t3code, multica | skip | checklist drivers; each names its install or account |
 
 Tier T2 (`docs/eval-t2.md`, run at the end of this pass with no `evals/.env` present): Claude Code
-runs live through the Keychain login; Codex reports its ChatGPT quota as a skip with the provider's
-text; every other harness skips naming the variable it needs (`GEMINI_API_KEY`, `AI_GATEWAY_API_KEY`
+**7/7 live** through the Keychain login (rewrite plugin/project/both/repo, tool plugin/project,
+off), 7 to 11 s per cell; the live model in tool mode used `boxer_run` unprompted and was never
+denied. Noncompliant cells skip at t2: only the scripted model can be careless. Codex reports its
+ChatGPT quota as a skip carrying the provider's text; every other harness skips naming the variable
+it needs (`GEMINI_API_KEY`, `AI_GATEWAY_API_KEY`
 or `OPENAI_API_KEY`, `MOONSHOT_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` for OpenHands,
-`CLAUDE_CODE_OAUTH_TOKEN` for inside Claude). A skip is never a pass.
+`CLAUDE_CODE_OAUTH_TOKEN` for inside Claude). Inside T2: not run. The only inside cell with a
+credential was `inside-codex` (its `~/.codex/auth.json` copied into the guest home); its guest
+`npm install` of codex-acp stalled for over 13 minutes with no output and was killed, so inside T2
+is recorded as "not run: install stall", not as a failure of the integration. Every other inside
+cell would have skipped for a missing key. A skip is never a pass.
 
 Runner changes this pass: a failure that names infrastructure (`cause: START_FAILED`,
 `CREATE_FAILED`, npm `EIDLETIMEOUT`/`ECONNRESET`, an image pull, a harness timeout, an ACP agent

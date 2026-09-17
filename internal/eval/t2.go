@@ -69,11 +69,8 @@ func claudeLoggedIn() bool {
 func quotaError(out string) string {
 	for _, needle := range []string{"usage limit", "usage_limit", "quota", "rate limit", "insufficient_quota", "credit balance"} {
 		if i := strings.Index(strings.ToLower(out), needle); i >= 0 {
-			start := i - 80
-			if start < 0 {
-				start = 0
-			}
-			end := i + 120
+			start := i
+			end := i + 160
 			if end > len(out) {
 				end = len(out)
 			}

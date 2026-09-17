@@ -336,6 +336,11 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 				results = append(results, Result{Cell: c, Status: "skip", Reason: why})
 				continue
 			}
+			if tier == "t2" && !c.Compliant {
+				// A live model reads the brief and complies; only the scripted model can be careless.
+				results = append(results, Result{Cell: c, Status: "skip", Reason: "noncompliant cells are scripted; t1 only"})
+				continue
+			}
 			r := runCell(d, c, tier, boxerBin, keep, log)
 			if r.Status == "fail" && infra(r) {
 				fmt.Fprintf(log, "  retrying %s after an infrastructure failure\n", c.Name())
@@ -438,6 +443,9 @@ func Report(results []Result, tier string) string {
 // HostLock serialises real-smolvm users on this machine: two concurrent machine creates stall
 // each other's image pulls. `evals/smoke.sh` takes the same file with flock(1).
 func HostLock(log io.Writer) (func(), error) {
+	if os.Getenv("BOXER_EVAL_LOCKED") != "" {
+		return func() {}, nil // an ancestor --lock-run already holds it; taking it again would deadlock
+	}
 	path := LockPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
