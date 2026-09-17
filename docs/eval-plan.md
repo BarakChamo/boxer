@@ -139,6 +139,70 @@ signals, the scope key follows the cwd of each command (main checkout, then the 
 the agent moves), no host leak in any timing, reclaim by the first available layer. `doctor`'s
 signal report for the harness must match what the trace shows fired.
 
+### Inside mode cells, second pass (2026-09-17, harness packs)
+
+After the first successful install of a harness boxer packs that VM (`smolvm pack create
+--from-vm`) and every later VM for the same harness is created from the pack (R-GUEST-4). One cell
+at a time, real smolvm 1.16.1, fake model, node image already packed:
+
+| Cell | First VM for the harness on this host (install + pack) | Next worktree, same harness |
+| --- | --- | --- |
+| inside-kimi | 24.4 s | 5.3 s |
+| inside-gemini | 17.0 s | |
+| inside-opencode | 39.3 s | |
+| inside-grok (new) | 30.8 s | |
+| inside-pi | 36.3 s (10.7 min in the first pass) | |
+| acp-grok (new) | | 6.0 s (from the inside-grok pack) |
+| boxer acp claude, SDK example client | 62 s (install 45 s) | |
+| inside-claude | (2.7 to 11 min in the first pass) | 7.2 s |
+| acp-claude | | 7.5 s |
+| inside-codex | 37.5 s (apt libssl3 + npm) | |
+| acp-codex | | 4.8 s |
+
+The pack itself costs about 7 s (stop, `pack create --from-vm` at 4.6 s, start) and is 130 to 365 MB
+per harness under `BOXER_PACKS` or `~/.local/state/boxer/packs`; `boxer gc` prunes packs no
+machine references after `idle_timeout`; with no machine up, `gc --dry-run` under a 1 s
+`idle_timeout` listed all nine packs on this host. Every inside cell now finishes in under 40 s
+once the node image is packed; the whole inside matrix (7 shell + 6 ACP cells) is under 5 min.
+
+### ACP with a real client
+
+Client: the ACP TypeScript SDK's own example client (`@agentclientprotocol/sdk@1.4.0`,
+`dist/examples/client.js`, which spawns the agent and drives `initialize`, `session/new`,
+`session/prompt` through the SDK's zod-validated connection). The only edits: the spawn line reads
+the agent command from `AGENT_CMD` instead of the bundled example agent, and the prompt from
+`PROMPT`. No `acp` CLI or `example-client` package exists on npm, and Zed is not installed here, so
+this is the closest off-the-shelf headless client. Agent: `bin/boxer acp claude -e
+CLAUDE_CONFIG_DIR=<repo>/.boxer-eval/claude -e ANTHROPIC_BASE_URL=<fakellm> -e ANTHROPIC_API_KEY=<pre-approved
+fake key> ...`, the same environment the eval cell uses, in a fresh worktree with
+`integration = "inside"`. Transcript, trimmed of npm output:
+
+```
+fake model at http://192.168.1.4:58244
+boxer: Claude Code's macOS Keychain login does not enter the VM; run `claude setup-token` ...
+boxer: installing claude in the sandbox (once per host)
+boxer: caching mirror.gcr.io/library/node:24-bookworm-slim with claude installed (once per host)
+Connected to agent (protocol v1)
+[session/create] sessionId=4928d089-... phase=sdk-initialize durationMs=194 totalMs=203
+Created session: 4928d089-c3ff-4896-8e32-d99b642d53dc
+User: Run uname -a and reply with only the first word of its output.
+Terminal (pending)
+Tool call `toolu_fake_0` updated: completed
+Linux
+Agent completed with: end_turn
+real 1m2.348s
+```
+
+The fake model log shows two calls (the `uname -a` tool call, then the answer). claude-agent-acp
+executed `Terminal` without a `session/request_permission` round trip and made no `fs/*` request,
+so the SDK validated every message boxer relayed and nothing in the minimal eval client needed
+changing. The first attempt failed inside `smolvm machine exec` during the npm install
+(`WARN failed to reset socket write timeout ... Error: io operation failed: connection closed`,
+after 5 s); the retry passed. That exec drop is a smolvm flake boxer surfaces as
+`HARNESS_INSTALL_FAILED` with the rerun command; it is not retried automatically. The login hint
+above fired because the first version checked only the host environment; it now also sees
+credentials passed with `-e`.
+
 ### Inside mode cells
 
 `integration = "inside"` adds, per harness, a cell that runs the harness inside the VM against the

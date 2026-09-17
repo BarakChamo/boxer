@@ -25,6 +25,10 @@ type Harness struct {
 	ConfigVar string
 	ConfigDir string
 	Env       []string // host variables passed through when set (API keys, tokens, base URLs)
+	// Creds are the Env entries that carry a login. When none is set and the harness's file login
+	// does not travel with its config mount, LoginHint is printed once before the run.
+	Creds     []string
+	LoginHint string
 	Hosts     []string // model API hosts the network allowlist must admit
 	// The VM is the sandbox. GuestEnv and Args turn off the harness's own nested sandbox, which
 	// cannot start inside the guest (Codex's bwrap fails on the mounted worktree) or, for Claude,
@@ -35,14 +39,16 @@ type Harness struct {
 }
 
 // Harnesses is the table. Verified 2026-09-17 against installed CLIs: ACP commands exist for
-// Gemini (--acp), Kimi (acp), OpenCode (acp); Claude and Codex through their ACP adapter packages;
-// Grok and pi have none.
+// Gemini (--acp), Kimi (acp), OpenCode (acp), Grok (agent stdio); Claude and Codex through their
+// ACP adapter packages; pi has none.
 var Harnesses = map[string]Harness{
 	"claude": {Bin: "claude", Install: "npm i -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp",
 		ACP: []string{"claude-agent-acp"}, ConfigVar: "CLAUDE_CONFIG_DIR", ConfigDir: "~/.claude",
-		Env:      []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_MODEL"},
-		Hosts:    []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com"},
-		GuestEnv: []string{"IS_SANDBOX=1"}},
+		Env:       []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_MODEL"},
+		Hosts:     []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com"},
+		GuestEnv:  []string{"IS_SANDBOX=1"},
+		Creds:     []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"},
+		LoginHint: "Claude Code's macOS Keychain login does not enter the VM; run `claude setup-token` on the host and export CLAUDE_CODE_OAUTH_TOKEN"},
 	"codex": {Bin: "codex", Install: "apt-get update -qq && apt-get install -y -qq --no-install-recommends libssl3 && npm i -g @openai/codex @agentclientprotocol/codex-acp",
 		ACP: []string{"codex-acp"}, ConfigVar: "CODEX_HOME", ConfigDir: "~/.codex",
 		Env:      []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"},
@@ -65,7 +71,7 @@ var Harnesses = map[string]Harness{
 		Env:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "PI_SKIP_VERSION_CHECK", "PI_TELEMETRY"},
 		Hosts: []string{"api.anthropic.com", "api.openai.com"}},
 	"grok": {Bin: "grok", Install: "npm i -g @xai-official/grok",
-		ConfigVar: "GROK_HOME", ConfigDir: "~/.grok",
+		ACP: []string{"grok", "agent", "stdio"}, ConfigVar: "GROK_HOME", ConfigDir: "~/.grok",
 		Env:   []string{"XAI_API_KEY", "GROK_MODELS_BASE_URL"},
 		Hosts: []string{"api.x.ai"}},
 }
@@ -147,12 +153,16 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if acp && h.ACP == nil {
 		return 2, fmt.Errorf("%s has no ACP server; use `boxer shell %s`", name, name)
 	}
+	if hint := loginHint(h, o.Env); hint != "" {
+		fmt.Fprintln(e.Stderr, "boxer: "+hint)
+	}
 	if _, err := e.Ensure(true, false); err != nil {
 		return 1, err
 	}
 	if err := install(e, name, h); err != nil {
 		return 1, err
 	}
+	e.PackHarness()
 	env := guestEnv(h, o.Env)
 	argv := append(append([]string{h.Bin}, h.Args...), args...)
 	if acp {
@@ -162,13 +172,14 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 		Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr}, argv...)
 }
 
-// install runs the harness's install line once per VM, recorded by a marker file.
+// install runs the harness's install line once per VM, recorded by a marker file. The marker
+// travels in the harness pack, so VMs created from it skip this.
 func install(e *box.Env, name string, h Harness) error {
 	marker := "/var/lib/boxer/harness-" + name
 	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker); code == 0 {
 		return nil
 	}
-	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per worktree)\n", name)
+	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per host)\n", name)
 	// npm inside the guest sees a slow registry through TSI: long fetch timeouts, and the whole
 	// line retried once, cover the idle timeouts observed in eval runs.
 	line := "export NPM_CONFIG_FETCH_TIMEOUT=600000 NPM_CONFIG_FETCH_RETRIES=5 NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 DEBIAN_FRONTEND=noninteractive; " +
@@ -180,6 +191,22 @@ func install(e *box.Env, name string, h Harness) error {
 			Fix: "check network.allow_hosts includes registry.npmjs.org, then: boxer shell " + name}
 	}
 	return nil
+}
+
+// loginHint returns the harness's LoginHint when it has one and none of its Creds is set on the
+// host or passed with -e.
+func loginHint(h Harness, extra []string) string {
+	for _, k := range h.Creds {
+		if os.Getenv(k) != "" {
+			return ""
+		}
+		for _, kv := range extra {
+			if strings.HasPrefix(kv, k+"=") && len(kv) > len(k)+1 {
+				return ""
+			}
+		}
+	}
+	return h.LoginHint
 }
 
 // guestEnv builds the guest environment: host HOME so mounted config paths resolve, the harness's

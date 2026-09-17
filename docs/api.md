@@ -61,7 +61,8 @@ Every boxer-owned machine on the host, sorted by scope. Exit 0.
 
 ### `boxer gc [--dry-run] --json`
 
-One row per machine gc decided about, in the `ls` shape plus `reason` and `deleted`. Under
+One row per machine gc decided about, in the `ls` shape plus `reason` and `deleted`. Stale image
+and harness packs appear as rows with `pack` (the file path) instead of machine fields. Under
 `--dry-run` every `deleted` is `false`; a failed delete carries `error` and exits 1.
 
 ```json
