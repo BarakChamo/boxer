@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -142,6 +143,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return printDoctor(r, stdout)
 	}
 	if err != nil {
+		emit(stdout, errorRow(err), *asJSON)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -342,7 +344,7 @@ type doctorReport struct {
 	Git           *doctorGit        `json:"git,omitempty"`
 	ConfigFiles   []string          `json:"config_files"`
 	Settings      []doctorSetting   `json:"settings"`
-	Scope         *scope.Scope      `json:"scope,omitempty"`
+	Scope         *scopeJSON        `json:"scope,omitempty"`
 	Image         string            `json:"image,omitempty"`
 	ImageReason   string            `json:"image_reason,omitempty"`
 	ImageWarning  string            `json:"image_warning,omitempty"`
@@ -354,6 +356,35 @@ type doctorReport struct {
 	Error         string            `json:"error,omitempty"`
 	resolved      bool              // Env exists (config could be loaded)
 	configPrinted bool
+}
+
+// scopeJSON is scope.Scope with the field names the JSON API promises.
+type scopeJSON struct {
+	Key       string `json:"key"`
+	Isolation string `json:"isolation"`
+	Worktree  string `json:"worktree"`
+	Degraded  bool   `json:"degraded"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+func scopeRow(s scope.Scope) *scopeJSON {
+	return &scopeJSON{Key: s.Key, Isolation: s.Isolation, Worktree: s.Root, Degraded: s.Degraded, Reason: s.Reason}
+}
+
+// errorJSON is the agent-readable refusal (box.Error) as --json commands print it on stdout.
+type errorJSON struct {
+	Reason string     `json:"reason"`
+	Cause  string     `json:"cause,omitempty"`
+	Fix    string     `json:"fix,omitempty"`
+	Scope  *scopeJSON `json:"scope,omitempty"`
+}
+
+func errorRow(err error) map[string]errorJSON {
+	var be *box.Error
+	if errors.As(err, &be) {
+		return map[string]errorJSON{"error": {Reason: be.Reason, Cause: be.Cause, Fix: be.Fix, Scope: scopeRow(be.Scope)}}
+	}
+	return map[string]errorJSON{"error": {Reason: err.Error()}}
 }
 
 type doctorGit struct {
@@ -418,8 +449,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	if resolveErr != nil {
 		return r
 	}
-	s := e.Scope
-	r.Scope = &s
+	r.Scope = scopeRow(e.Scope)
 	r.Image, r.ImageReason = e.Image()
 	if e.Cfg.Network.Mode == "off" {
 		r.ImageWarning = "network.mode = off — the image can only be used if smolvm already has it cached"
@@ -498,7 +528,7 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		fmt.Fprintln(w, r.Error)
 		return 1
 	}
-	fmt.Fprintf(w, "scope:     %s (%s) root %s\n", r.Scope.Key, r.Scope.Isolation, r.Scope.Root)
+	fmt.Fprintf(w, "scope:     %s (%s) root %s\n", r.Scope.Key, r.Scope.Isolation, r.Scope.Worktree)
 	fmt.Fprintf(w, "image:     %s (%s)\n", r.Image, r.ImageReason)
 	if r.ImageWarning != "" {
 		fmt.Fprintln(w, "warning:  ", r.ImageWarning)
