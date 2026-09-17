@@ -80,6 +80,7 @@ func init() {
 	box.InsideHooks.Mounts = Mounts
 	box.InsideHooks.AllowHosts = AllowHosts
 	box.InsideHooks.Image = DefaultImage
+	box.InsideHooks.InstallLine = func(h string) string { return Harnesses[h].Install }
 }
 
 // Names lists the harnesses in stable order.

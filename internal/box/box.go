@@ -126,6 +126,9 @@ var InsideHooks struct {
 	Mounts     func() []string
 	AllowHosts func() []string
 	Image      string
+	// InstallLine returns the harness's install command; it is part of the harness pack key so a
+	// changed install line invalidates old packs.
+	InstallLine func(harness string) string
 }
 
 // Image returns the guest image and the reason it was chosen (R-GUEST-1).
@@ -295,7 +298,13 @@ func PackPath(key string) string {
 	return filepath.Join(PackDir(), hex.EncodeToString(sum[:8])+".smolmachine")
 }
 
-func harnessKey(image, harness string) string { return image + "\x00" + harness }
+func harnessKey(image, harness string) string {
+	key := image + "\x00" + harness
+	if InsideHooks.InstallLine != nil {
+		key += "\x00" + InsideHooks.InstallLine(harness)
+	}
+	return key
+}
 
 // harnessPack returns the pack of image with this harness installed when one exists, so a new
 // inside-mode VM skips the install (R-GUEST-4).
