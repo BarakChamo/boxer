@@ -704,15 +704,22 @@ correctness, and none is removed from the product.
   produce one VM (per-scope lock; `Ensure` is a no-op on a running VM).
 - **R-SIG-2.** `doctor` reports, per harness, which signals are live and therefore the effective
   isolation and provisioning timing the user actually gets. The brief states the same.
+  **Verified** for the signal table (`doctor` `signals:` block and `--json` `signals`, derived
+  from the dialect table); the brief does not yet state it.
 - **R-SIG-3.** Isolation is a ceiling: effective isolation = min(configured, signals present).
   `subagent` needs `SubagentStart`; `session` needs a session id from a hook, else the MCP server
-  instance; else `worktree`. Degradation is reported, never silent.
+  instance; else `worktree`. Degradation is reported, never silent. **Verified** on real smolvm
+  for Claude Code: `session` and `subagent` cells, the rewrite carrying `--session`/`--agent`
+  so `boxer run` resolves the hook's scope; the MCP fallback for session identity is not built.
 - **R-SIG-4.** Reclaim is layered: `SessionEnd` where available → MCP EOF → `gc` (worktree gone,
   idle). `destroy_on` defaults to empty because reuse across sessions is the speed feature.
-- **R-SIG-5.** boxer never creates or deletes worktrees unless `worktree.manage = true`. Off: boxer
-  reacts to worktrees others create, at the first signal, and warms the cwd scope at session start
-  (`warm_on_session_start`, default on). On: boxer creates the worktree at the earliest session
-  signal, only when cwd is the main checkout and no orchestrator owns worktrees.
+- **R-SIG-5.** boxer never creates or deletes worktrees. `worktree.manage` is `off` (default:
+  boxer reacts to worktrees others create, at the first signal) or `detect` (a session in the
+  main checkout shares the repository VM, with a warning, until it moves into a linked
+  worktree). `warm_on_session_start` (default off in v0.2, measured before it becomes the
+  default) provisions the cwd scope in a detached `boxer up` at session start. Creating the
+  worktree at the earliest session signal (`manage = create`) is deferred. **Verified** on real
+  smolvm: the `warm` timing cell (hook returns in 9 ms, VM present before the first tool call).
 - **R-SIG-6.** Block-only hook families (Kimi, DSH) keep their `SessionStart`/`SessionEnd` hooks:
   precision is a signal even where rewrite is not available. Rewrite remains opt-in
   (`mode = "rewrite"`) where verified.
@@ -739,11 +746,14 @@ correctness, and none is removed from the product.
 (verified). A committed hook provisions before any harness opens the worktree, for every
 orchestrator that creates worktrees.
 
-- **R-GIT-1.** `boxer install git` writes `.githooks/post-checkout` calling `boxer up --detach` and
-  prints the `core.hooksPath` line; opt-in.
+- **R-GIT-1.** `boxer install git` writes a `post-checkout` hook into the repository's hooks
+  directory (`core.hooksPath` honoured; an existing hook file is merged behind markers) calling
+  `boxer up --detach`; opt-in, never part of `install all`. **Verified** by a test against a real
+  repository: `git worktree add` runs the hook with flag `1` in the new worktree.
 - **R-GIT-2.** Provisioning is idempotent and serialised by a per-scope lock, so a git hook, a
   harness hook, and a first `run` arriving together create one VM (tested with four concurrent
-  callers).
+  callers). **Verified** (`TestConcurrentEnsureCreatesOnce`; the `warm` timing cell has the
+  detached `up` and the first `run` racing on real smolvm).
 - **R-GIT-3.** No git hook fires on `worktree remove`; `gc` reaps by worktree absence and idle time.
 
 ### Environment specification

@@ -39,6 +39,7 @@ where it came from.
 
 ```toml
 isolation   = "worktree"        # repo | worktree | session | subagent
+warm_on_session_start = false   # true: SessionStart starts the VM in a detached `boxer up` and never blocks the session
 mode        = "rewrite"         # rewrite | tool | off
 enforcement = "both"            # hook | shim | both | audit
 intercept   = ["npm", "bun", "node", "python", "go", "make"]
@@ -48,9 +49,15 @@ setup       = ["bun install"]   # once per VM, inside the guest
 [network]
 mode        = "allowlist"       # registry hosts for the image are always allowed
 allow_hosts = ["registry.npmjs.org"]
+[worktree]
+manage      = "off"             # detect: a session in the main checkout shares the repository VM until it enters a worktree
 [harness.gemini-cli]
 mode        = "tool"
 ```
+
+`boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
+`boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
+agent opens it. Opt-in; `boxer install all` leaves git configuration alone.
 
 ## Two placements
 
