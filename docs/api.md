@@ -202,7 +202,7 @@ is the binary version. Two tools:
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `boxer_run` | `{command: string, cwd?: string}` | stdout and stderr, then `[exit N]`; `isError` when the exit is non-zero or boxer refused |
+| `boxer_run` | `{command: string, cwd?: string}` | stdout and stderr, then `[exit N]`; `isError` when the exit is non-zero or boxer refused. Under `isolation = "session"` or `"subagent"` the MCP path has no session id (MCP carries none), so it resolves the worktree scope; hooks carry the ids and rewrite to `boxer run --session … --agent …` |
 | `boxer_status` | `{cwd?: string}` | one line: scope, isolation, state, image, worktree and mount |
 
 Both resolve the scope from `cwd` (default: the server's working directory) with the same rules
