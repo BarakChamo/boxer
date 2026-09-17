@@ -63,8 +63,8 @@ func (d OpenHands) Available(tier string) (bool, string) {
 		return false, "adapters/openhands/eval_run.py not found beside the binary"
 	}
 	if tier == "t2" {
-		if why := needOne("ANTHROPIC_API_KEY"); why != "" {
-			return false, why + " (OpenHands uses LiteLLM; a Claude Code login does not apply)"
+		if _, why := gatewayKey(); why != "" {
+			return false, why
 		}
 	}
 	return true, ""
@@ -79,7 +79,7 @@ func (OpenHands) Prepare(env *Env, c Cell) error { return nil }
 func (d OpenHands) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	args := []string{repoFile("adapters/openhands/eval_run.py"), "--repo", env.Repo, "--command", env.Command()}
 	if env.Tier == "t2" {
-		args = append(args, "--live", "--prompt", prompt)
+		args = append(args, "--live", "--prompt", prompt, "--model", "openai/"+LiveModel("openhands"), "--base-url", gatewayOpenAI)
 	}
 	cmd := exec.Command(d.python(), args...)
 	cmd.Dir = env.Repo

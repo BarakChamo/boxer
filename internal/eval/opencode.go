@@ -23,7 +23,7 @@ func (OpenCode) Available(tier string) (bool, string) {
 		return false, "opencode not installed"
 	}
 	if tier == "t2" {
-		if _, why := gateway(); why != "" {
+		if _, why := gateway("opencode"); why != "" {
 			return false, why
 		}
 	}
@@ -52,7 +52,7 @@ func (OpenCode) Prepare(env *Env, c Cell) error {
 	p := openAICompatible{BaseURL: env.LLMURL + "/v1", Model: "fake-model"}
 	key := "fake"
 	if env.Tier == "t2" {
-		p, _ = gateway()
+		p, _ = gateway("opencode")
 		key = os.Getenv(p.KeyVar)
 	}
 	cfg["provider"] = map[string]any{"eval": map[string]any{
@@ -68,7 +68,7 @@ func (OpenCode) Prepare(env *Env, c Cell) error {
 func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	model := "eval/fake-model"
 	if env.Tier == "t2" {
-		p, _ := gateway()
+		p, _ := gateway("opencode")
 		model = "eval/" + p.Model
 	}
 	cmd := exec.Command("opencode", "run", "--print-logs", "-m", model, prompt)

@@ -65,6 +65,8 @@ evals/                end-to-end checks against installed harnesses
 | 15 | `integration = "inside"`: `boxer shell`, `boxer acp`, harness install table, config-dir mounts, harness shims, `BOXER_INSIDE` | unit tests (`inside`, `shim`, `config`); inside T1 cells | done |
 | 16 | Inside T1 cells: shell for claude, codex, gemini, opencode, pi, kimi; ACP for claude, codex, gemini, kimi, opencode | `boxer-eval --harness inside`, `--harness inside-acp` | done: shell 6/6, ACP 5/5 (each cell green individually on 2026-09-17; fixes on the way: libssl3 for codex-acp, npm retries, pack cache, nested-sandbox settings in the table) |
 
+| 17 | Live tier on one credential: every harness but Gemini routed through the Vercel AI Gateway on its cheapest tool-calling model; Claude Code runs in a private `CLAUDE_CONFIG_DIR` with the gateway key, so the developer's own Claude Code session and login are never touched | `make eval-t2` with `AI_GATEWAY_API_KEY` in `evals/.env` | wired 2026-09-17; awaiting the key |
+
 The evaluation programme across nine harnesses and orchestrators is planned separately in
 [eval-plan.md](eval-plan.md).
 

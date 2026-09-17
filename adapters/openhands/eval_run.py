@@ -1,7 +1,7 @@
 """Eval runner for BoxerWorkspace against the real OpenHands SDK.
 
 Without --live: calls BoxerWorkspace.execute_command directly (no model), prints the command's
-stdout as the answer. With --live: runs a Conversation with an Anthropic model (ANTHROPIC_API_KEY)
+stdout as the answer. With --live: runs a Conversation through the Vercel AI Gateway (AI_GATEWAY_API_KEY)
 and the SDK's terminal tool, which executes through the same workspace. The last stdout line is
 one JSON object: {"answer": str, "tools": [str], "skip": str}.
 """
@@ -27,7 +27,8 @@ def main() -> int:
     ap.add_argument("--command", required=True)
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--prompt", default="")
-    ap.add_argument("--model", default=os.environ.get("OPENHANDS_EVAL_MODEL", "anthropic/claude-sonnet-4-5"))
+    ap.add_argument("--model", default=os.environ.get("OPENHANDS_EVAL_MODEL", "openai/openai/gpt-5-mini"))
+    ap.add_argument("--base-url", default=os.environ.get("OPENHANDS_EVAL_BASE_URL", "https://ai-gateway.vercel.sh/coding-agent/v1"))
     args = ap.parse_args()
 
     workspace = BoxerWorkspace(working_dir=args.repo)
@@ -38,9 +39,9 @@ def main() -> int:
         report(answer=result.stdout, tools=["execute_command"])
         return 0
 
-    key = os.environ.get("ANTHROPIC_API_KEY")
+    key = os.environ.get("AI_GATEWAY_API_KEY")
     if not key:
-        report(skip="ANTHROPIC_API_KEY is not set")
+        report(skip="AI_GATEWAY_API_KEY is not set")
         return 0
     try:
         from openhands.sdk import LLM, Agent, Conversation, Tool
@@ -62,7 +63,8 @@ def main() -> int:
                 if text:
                     final.append(text)
 
-    llm = LLM(model=args.model, api_key=key, usage_id="boxer-eval")
+    # LiteLLM: the "openai/" prefix picks the OpenAI protocol; the rest is the gateway model id.
+    llm = LLM(model=args.model, api_key=key, base_url=args.base_url, usage_id="boxer-eval")
     agent = Agent(llm=llm, tools=[Tool(name=TerminalTool.name)])
     conversation = Conversation(agent=agent, workspace=workspace, callbacks=[on_event], visualizer=None)
     conversation.send_message(args.prompt)

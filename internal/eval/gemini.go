@@ -24,7 +24,7 @@ func (Gemini) Available(tier string) (bool, string) {
 	}
 	if tier == "t2" {
 		if why := needOne("GEMINI_API_KEY", "GOOGLE_API_KEY"); why != "" {
-			return false, why
+			return false, why + " (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve)"
 		}
 	}
 	return true, ""

@@ -22,7 +22,7 @@ func (Pi) Available(tier string) (bool, string) {
 		return false, "pi not installed"
 	}
 	if tier == "t2" {
-		if _, why := gateway(); why != "" {
+		if _, why := gateway("pi"); why != "" {
 			return false, why
 		}
 	}
@@ -51,7 +51,7 @@ func (d Pi) Prepare(env *Env, c Cell) error {
 	// OpenAI) over chat completions at t2.
 	models := fmt.Sprintf(`{"providers":{"eval":{"baseUrl":%q,"api":"anthropic-messages","apiKey":"fake","models":[{"id":"fake-model","name":"fake","contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, env.LLMURL)
 	if env.Tier == "t2" {
-		p, _ := gateway()
+		p, _ := gateway("pi")
 		models = fmt.Sprintf(`{"providers":{"eval":{"baseUrl":%q,"api":"openai-completions","apiKey":%q,"models":[{"id":%q,"name":%q,"contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, p.BaseURL, os.Getenv(p.KeyVar), p.Model, p.Model)
 	}
 	if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "models.json"), []byte(models+"\n"), 0o644); err != nil {
@@ -74,7 +74,7 @@ func (d Pi) smolvmWrapper(env *Env) string { return filepath.Join(env.Work, "smo
 func (d Pi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	model := "fake-model"
 	if env.Tier == "t2" {
-		p, _ := gateway()
+		p, _ := gateway("pi")
 		model = p.Model
 	}
 	args := []string{"--provider", "eval", "--model", model, "-p", "--no-session", "-e", ".pi/extensions/boxer.ts", prompt}

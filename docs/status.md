@@ -13,12 +13,12 @@ need an install or account, see below). Every cell is a fresh repository and a f
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | pass | pass | pass 17 s | pass 25 s | **7/7 pass** (Keychain login) |
-| Codex | pass | pass | pass 9 s | pass 15 s | skip: ChatGPT quota until 2026-09-20 |
-| Gemini CLI | pass | pass | pass 10 s | pass 13 s | skip: `GEMINI_API_KEY` |
-| OpenCode | pass | pass | pass 14 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY` |
+| Codex | pass | pass | pass 9 s | pass 15 s | skip: `AI_GATEWAY_API_KEY` (no ChatGPT login needed any more) |
+| Gemini CLI | pass | pass | pass 10 s | pass 13 s | skip: `GEMINI_API_KEY` (only harness the gateway cannot serve) |
+| OpenCode | pass | pass | pass 14 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` |
 | pi | pass | pass | pass 28 s | no ACP server | skip: same |
-| Kimi | block-only hooks; shims | pass | pass 9 s | pass 13 s | skip: `MOONSHOT_API_KEY` |
-| Grok | pass (user and project hooks) | t2 only (tools behind `search_tool`) | pass 12 s | pass 18 s | skip: `XAI_API_KEY` |
+| Kimi | block-only hooks; shims | pass | pass 9 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` |
+| Grok | pass (user and project hooks) | t2 only (tools behind `search_tool`) | pass 12 s | pass 18 s | skip: `AI_GATEWAY_API_KEY` |
 | DSH | block-only hooks; shims | bundle only | not in table | none | not installed |
 
 Inside timings are for a host that already holds the harness pack; the first `boxer shell <h>`
@@ -26,7 +26,7 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 
 | Orchestrator | Path | Result |
 | --- | --- | --- |
-| OpenHands | `BoxerWorkspace` adapter, real SDK | T1 pass in Stream C's run; skips here (no venv on this checkout); live needs `ANTHROPIC_API_KEY` |
+| OpenHands | `BoxerWorkspace` adapter, real SDK | T1 pass in Stream C's run; skips here (no venv on this checkout); live needs `AI_GATEWAY_API_KEY` |
 | Paperclip | project layer over `claude-agent-acp` | spike 7 answered (env passes through); driver skips: `paperclipai` not installed |
 | T3 Code | ACP (`boxer acp`) and project layer | spike 8 answered (WS sequence known); driver skips: `t3` not installed |
 | Multica | project layer | spike 9 answered; driver skips: no account (`multica setup`) |
@@ -61,8 +61,9 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 
 ```sh
 # evals/.env (gitignored), then: make eval-t2
-GEMINI_API_KEY=… XAI_API_KEY=… MOONSHOT_API_KEY=… AI_GATEWAY_API_KEY=… ANTHROPIC_API_KEY=…
-CLAUDE_CODE_OAUTH_TOKEN=…        # from `claude setup-token`, for inside and ACP Claude live
+AI_GATEWAY_API_KEY=…             # one key: every harness runs live through the Vercel AI Gateway
+GEMINI_API_KEY=…                 # optional: Gemini CLI only (the gateway has no Gemini-protocol endpoint)
+BOXER_EVAL_MODEL=…               # optional: one gateway model id for every harness (default: cheapest per family)
 npm i -g paperclipai t3          # orchestrator drivers
 multica setup                    # account
 python3 -m venv .venv-openhands && .venv-openhands/bin/pip install openhands-sdk openhands-tools

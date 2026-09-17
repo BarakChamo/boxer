@@ -23,7 +23,7 @@ func (Kimi) Available(tier string) (bool, string) {
 		return false, "kimi not installed"
 	}
 	if tier == "t2" {
-		if why := needOne("MOONSHOT_API_KEY"); why != "" {
+		if _, why := gatewayKey(); why != "" {
 			return false, why
 		}
 	}
@@ -51,7 +51,8 @@ func (d Kimi) Prepare(env *Env, c Cell) error {
 	}
 	cfg := kimiConfig("anthropic", env.LLMURL, "fake", "fake-model")
 	if env.Tier == "t2" {
-		cfg = kimiConfig("kimi", moonshotBaseURL, os.Getenv("MOONSHOT_API_KEY"), moonshotModel)
+		key, _ := gatewayKey()
+		cfg = kimiConfig("anthropic", gatewayRoot, key, LiveModel("kimi"))
 	}
 	// boxer install kimi prints the [[hooks]] snippet; append it to the private config.
 	out, err := env.boxer(env.Repo, "install", "kimi")

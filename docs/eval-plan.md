@@ -115,9 +115,8 @@ Tier T2 (`docs/eval-t2.md`, run at the end of this pass with no `evals/.env` pre
 off), 7 to 11 s per cell; the live model in tool mode used `boxer_run` unprompted and was never
 denied. Noncompliant cells skip at t2: only the scripted model can be careless. Codex reports its
 ChatGPT quota as a skip carrying the provider's text; every other harness skips naming the variable
-it needs (`GEMINI_API_KEY`, `AI_GATEWAY_API_KEY`
-or `OPENAI_API_KEY`, `MOONSHOT_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` for OpenHands,
-`CLAUDE_CODE_OAUTH_TOKEN` for inside Claude). Inside T2: not run. The only inside cell with a
+it needed at the time (since replaced by one `AI_GATEWAY_API_KEY` for every harness but Gemini;
+see §8). Inside T2: not run. The only inside cell with a
 credential was `inside-codex` (its `~/.codex/auth.json` copied into the guest home); its guest
 `npm install` of codex-acp stalled for over 13 minutes with no output and was killed, so inside T2
 is recorded as "not run: install stall", not as a failure of the integration. Every other inside
@@ -300,14 +299,9 @@ runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.
 
 | For | Provide |
 | --- | --- |
-| Codex | ChatGPT quota reset (2026-09-20) or `OPENAI_API_KEY` |
-| Gemini | run `gemini` once, Google login, or `GEMINI_API_KEY` |
-| OpenCode | `opencode auth login` (Anthropic Pro/Max works), or `ANTHROPIC_API_KEY` |
-| Grok | `XAI_API_KEY` in `evals/.env` (a BYOK model needs no sign-in) |
-| Kimi | `MOONSHOT_API_KEY` in `evals/.env` (Kimi provider type `kimi`, `api.moonshot.ai/v1`, model `kimi-k2.5`; unverified until a key exists) |
-| pi, OpenCode | `AI_GATEWAY_API_KEY` (Vercel AI Gateway, model `anthropic/claude-sonnet-4.5`) or `OPENAI_API_KEY` in `evals/.env` |
-| Inside Claude | `CLAUDE_CODE_OAUTH_TOKEN` in `evals/.env`: the Keychain login does not travel into the guest |
-| OpenHands T2 | `ANTHROPIC_API_KEY` (LiteLLM; a Claude Code login does not apply) |
+| Every harness but Gemini | `AI_GATEWAY_API_KEY` in `evals/.env`. Endpoints per Vercel's coding-agent docs (2026-09-17): Claude Code `ANTHROPIC_BASE_URL=https://ai-gateway.vercel.sh/claude-code` with the gateway key as `ANTHROPIC_API_KEY` in a private `CLAUDE_CONFIG_DIR` (approved-key list keeps it headless); Codex `[model_providers.vercel] base_url=…/codex/v1 env_key=AI_GATEWAY_API_KEY wire_api="responses"`; Kimi provider type `anthropic` at the gateway root; pi and OpenCode a Chat Completions provider at `…/coding-agent/v1`; Grok `[model.live] base_url=…/coding-agent/v1 api_backend="chat_completions" env_key=AI_GATEWAY_API_KEY`; OpenHands LiteLLM `openai/<gateway model>` with `base_url=…/coding-agent/v1`. Models: `anthropic/claude-haiku-4.5` (Claude, OpenCode, pi), `openai/gpt-5-mini` (Codex, OpenHands), `moonshotai/kimi-k2.5`, `spacexai/grok-4.1-fast-non-reasoning`; `BOXER_EVAL_MODEL` overrides |
+| Gemini | `GEMINI_API_KEY`: Gemini CLI speaks only the Gemini API, which the gateway does not serve |
+| Inside cells | same key, passed into the guest with `-e`; `ai-gateway.vercel.sh` is in the default allowlist |
 | Multica | already installed; confirm the desktop app is signed in so the daemon registers |
 | Conductor | already installed; one workspace created by hand for the local checks |
 | Cloud Conductor | not planned: smolvm is not in their cloud workspaces |

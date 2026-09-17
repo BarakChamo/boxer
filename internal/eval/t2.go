@@ -3,7 +3,6 @@ package eval
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -34,35 +33,61 @@ func needOne(vars ...string) string {
 	return strings.Join(vars, " or ") + " is not set"
 }
 
-// openAICompatible is the provider OpenCode and pi use live: the Vercel AI Gateway when its key is
-// present, else OpenAI directly.
+// One credential runs every live cell: AI_GATEWAY_API_KEY for the Vercel AI Gateway, which
+// speaks Anthropic Messages (Claude Code, Kimi, pi), OpenAI Responses (Codex) and OpenAI Chat
+// Completions (OpenCode, Grok, OpenHands). Gemini CLI speaks only the Gemini API, which the
+// gateway does not serve, so it stays on GEMINI_API_KEY. Documented per agent at
+// vercel.com/docs/ai-gateway/coding-agents (read 2026-09-17).
+const (
+	gatewayKeyVar = "AI_GATEWAY_API_KEY"
+	gatewayRoot   = "https://ai-gateway.vercel.sh"                 // Anthropic Messages: SDKs append /v1/messages
+	gatewayOpenAI = "https://ai-gateway.vercel.sh/coding-agent/v1" // Chat Completions surface for coding agents
+	gatewayClaude = "https://ai-gateway.vercel.sh/claude-code"     // Claude Code's own endpoint (no /v1)
+	gatewayCodex  = "https://ai-gateway.vercel.sh/codex/v1"        // Codex's own endpoint (Responses)
+)
+
+// liveModels are the cheapest tool-calling models per harness family (gateway prices per million
+// tokens on 2026-09-17: haiku 4.5 $1/$5, gpt-5-mini $0.25/$2, kimi-k2.5 $0.6/$3, grok-4.1-fast
+// $0.2/$0.5). BOXER_EVAL_MODEL overrides all of them with one gateway model id.
+var liveModels = map[string]string{
+	"claude":    "anthropic/claude-haiku-4.5",
+	"codex":     "openai/gpt-5-mini",
+	"opencode":  "anthropic/claude-haiku-4.5",
+	"pi":        "anthropic/claude-haiku-4.5",
+	"kimi":      "moonshotai/kimi-k2.5",
+	"grok":      "spacexai/grok-4.1-fast-non-reasoning",
+	"openhands": "openai/gpt-5-mini",
+}
+
+// LiveModel is the gateway model id a harness runs at t2.
+func LiveModel(h string) string {
+	if m := os.Getenv("BOXER_EVAL_MODEL"); m != "" {
+		return m
+	}
+	return liveModels[h]
+}
+
+// gatewayKey returns the key, or the skip reason when it is absent.
+func gatewayKey() (string, string) {
+	k := os.Getenv(gatewayKeyVar)
+	if k == "" {
+		return "", gatewayKeyVar + " is not set"
+	}
+	return k, ""
+}
+
+// openAICompatible is a Chat Completions provider block for one harness at t2.
 type openAICompatible struct {
 	BaseURL string
 	KeyVar  string
-	Model   string // as the provider names it
+	Model   string
 }
 
-func gateway() (openAICompatible, string) {
-	if os.Getenv("AI_GATEWAY_API_KEY") != "" {
-		return openAICompatible{"https://ai-gateway.vercel.sh/v1", "AI_GATEWAY_API_KEY", "anthropic/claude-sonnet-4.5"}, ""
+func gateway(h string) (openAICompatible, string) {
+	if _, why := gatewayKey(); why != "" {
+		return openAICompatible{}, why
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		return openAICompatible{"https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-4.1"}, ""
-	}
-	return openAICompatible{}, "AI_GATEWAY_API_KEY or OPENAI_API_KEY is not set"
-}
-
-// moonshot is Kimi's own platform, reached with MOONSHOT_API_KEY through Kimi's native provider type.
-const moonshotBaseURL = "https://api.moonshot.ai/v1"
-const moonshotModel = "kimi-k2.5"
-
-// claudeLoggedIn reports whether Claude Code has a login on this machine (macOS Keychain item) or
-// an API key in the environment.
-func claudeLoggedIn() bool {
-	if _, ok := anySet("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"); ok {
-		return true
-	}
-	return exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials").Run() == nil
+	return openAICompatible{BaseURL: gatewayOpenAI, KeyVar: gatewayKeyVar, Model: LiveModel(h)}, ""
 }
 
 // quotaError recognises a live turn stopped by the provider rather than by boxer.

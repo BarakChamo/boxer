@@ -96,35 +96,26 @@ func (d Inside) Prepare(env *Env, c Cell) error {
 // environment. A harness whose credential is absent skips and names it.
 func (d Inside) prepareLive(env *Env, h, dir string) error {
 	files := map[string]string{}
+	key, why := gatewayKey()
+	if why != "" && h != "gemini" {
+		return SkipError{"inside " + h + ": " + why}
+	}
 	switch h {
 	case "claude":
-		if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
-			return SkipError{"inside claude needs CLAUDE_CODE_OAUTH_TOKEN (the Keychain login does not travel into the guest) or ANTHROPIC_API_KEY"}
-		}
-		files[".claude.json"] = `{"hasCompletedOnboarding":true,"theme":"dark","numStartups":3}`
+		files[".claude.json"] = fmt.Sprintf(`{"customApiKeyResponses":{"approved":[%q],"rejected":[]},"hasCompletedOnboarding":true,"theme":"dark","numStartups":3}`, key[len(key)-20:])
 	case "codex":
-		home, _ := os.UserHomeDir()
-		b, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
-		if err != nil {
-			return SkipError{"inside codex needs ~/.codex/auth.json (codex login) to copy into the guest home"}
-		}
-		files["auth.json"] = string(b) // the eval repository is deleted with the cell
-		files["config.toml"] = "approval_policy = \"never\"\n"
+		files["config.toml"] = "approval_policy = \"never\"\n" + codexConfig(env)
+	case "grok":
+		files["config.toml"] = "[cli]\nauto_update = false\n[features]\ntelemetry = \"off\"\n" + grokModel(env)
 	case "gemini":
 		if why := needOne("GEMINI_API_KEY", "GOOGLE_API_KEY"); why != "" {
 			return SkipError{"inside gemini: " + why}
 		}
 		files[".gemini/settings.json"] = `{"security":{"auth":{"selectedType":"gemini-api-key"}},"general":{"disableAutoUpdate":true,"disableUpdateNag":true},"privacy":{"usageStatisticsEnabled":false}}`
 	case "kimi":
-		if why := needOne("MOONSHOT_API_KEY"); why != "" {
-			return SkipError{"inside kimi: " + why}
-		}
-		files["config.toml"] = kimiConfig("kimi", moonshotBaseURL, os.Getenv("MOONSHOT_API_KEY"), moonshotModel)
+		files["config.toml"] = kimiConfig("anthropic", gatewayRoot, key, LiveModel("kimi"))
 	case "opencode", "pi":
-		p, why := gateway()
-		if why != "" {
-			return SkipError{"inside " + h + ": " + why}
-		}
+		p, _ := gateway(h)
 		if h == "opencode" {
 			oc := fmt.Sprintf(`{"$schema":"https://opencode.ai/config.json","model":"eval/%s","permission":{"bash":"allow","edit":"allow","external_directory":"allow"},"provider":{"eval":{"npm":"@ai-sdk/openai-compatible","name":"eval","options":{"baseURL":%q,"apiKey":%q},"models":{%q:{"name":%q,"tool_call":true}}}}}`, p.Model, p.BaseURL, os.Getenv(p.KeyVar), p.Model, p.Model)
 			return os.WriteFile(filepath.Join(env.Repo, "opencode.json"), []byte(oc+"\n"), 0o644)
@@ -148,15 +139,14 @@ func (d Inside) guestEnvFor(env *Env, h string) []string {
 	dir := d.cfgDir(env, h)
 	url := env.LLMURLGuest
 	if env.Tier == "t2" {
+		key, _ := gatewayKey()
 		switch h {
 		case "claude":
-			e := []string{"CLAUDE_CONFIG_DIR=" + dir, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
-			for _, k := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"} {
-				if v := os.Getenv(k); v != "" {
-					e = append(e, k+"="+v)
-				}
-			}
-			return e
+			return []string{"CLAUDE_CONFIG_DIR=" + dir, "ANTHROPIC_BASE_URL=" + gatewayClaude, "ANTHROPIC_API_KEY=" + key, "ANTHROPIC_MODEL=" + LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
+		case "codex":
+			return []string{"CODEX_HOME=" + dir, gatewayKeyVar + "=" + key}
+		case "grok":
+			return []string{"GROK_HOME=" + dir, "GROK_DISABLE_AUTOUPDATER=1", gatewayKeyVar + "=" + key}
 		case "gemini":
 			k, _ := anySet("GEMINI_API_KEY", "GOOGLE_API_KEY")
 			return []string{"GEMINI_CLI_HOME=" + dir, "GEMINI_API_KEY=" + os.Getenv(k), "GEMINI_CLI_TRUST_WORKSPACE=true"}
@@ -202,12 +192,13 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		args = []string{"-p", prompt, "-m", "fake-model", "--permission-mode", "bypassPermissions", "--no-auto-update"}
 	}
 	if env.Tier == "t2" {
-		p, _ := gateway()
 		switch h {
 		case "opencode":
-			args = []string{"run", "-m", "eval/" + p.Model, prompt}
+			args = []string{"run", "-m", "eval/" + LiveModel("opencode"), prompt}
 		case "pi":
-			args = []string{"-p", "--no-session", "--provider", "eval", "--model", p.Model, prompt}
+			args = []string{"-p", "--no-session", "--provider", "eval", "--model", LiveModel("pi"), prompt}
+		case "grok":
+			args = []string{"-p", prompt, "-m", "live", "--permission-mode", "bypassPermissions", "--no-auto-update"}
 		}
 	}
 	cmdArgs := []string{"shell", h}

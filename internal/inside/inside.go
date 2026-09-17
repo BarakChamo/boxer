@@ -112,7 +112,7 @@ func Mounts() []string {
 
 // AllowHosts returns the model API hosts of every harness plus the npm registry.
 func AllowHosts() []string {
-	hosts := []string{"registry.npmjs.org", "deb.debian.org"}
+	hosts := []string{"registry.npmjs.org", "deb.debian.org", "ai-gateway.vercel.sh"}
 	for _, name := range Names() {
 		hosts = append(hosts, Harnesses[name].Hosts...)
 	}

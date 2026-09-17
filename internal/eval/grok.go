@@ -28,8 +28,10 @@ func (Grok) Available(tier string) (bool, string) {
 	if _, err := exec.LookPath("grok"); err != nil {
 		return false, "grok not installed"
 	}
-	if tier == "t2" && os.Getenv("XAI_API_KEY") == "" {
-		return false, "XAI_API_KEY is not set (grok is not signed in on this machine)"
+	if tier == "t2" {
+		if _, why := gatewayKey(); why != "" {
+			return false, why
+		}
 	}
 	return true, ""
 }
@@ -65,9 +67,7 @@ func (d Grok) Prepare(env *Env, c Cell) error {
 		}
 	}
 	cfg := "[features]\ntelemetry = false\n[mcp_servers.boxer]\ncommand = \"boxer\"\nargs = [\"mcp\", \"--harness\", \"grok\"]\n"
-	if env.Tier == "t1" {
-		cfg += fmt.Sprintf("[models]\ndefault = \"fake\"\n[model.fake]\nmodel = \"fake-model\"\nname = \"fake\"\nbase_url = \"%s/v1\"\napi_backend = \"chat_completions\"\nenv_key = \"FAKE_LLM_KEY\"\ncontext_window = 128000\n", env.LLMURL)
-	}
+	cfg += grokModel(env)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
 		return err
 	}
@@ -161,4 +161,13 @@ func parseGrokStream(s string) Transcript {
 		tr.Answer = f[0]
 	}
 	return tr
+}
+
+// grokModel is the BYOK model block: the fake model at t1, the gateway at t2. Both run `grok -p`
+// with no sign-in.
+func grokModel(env *Env) string {
+	if env.Tier == "t2" {
+		return fmt.Sprintf("[models]\ndefault = \"live\"\n[model.live]\nmodel = %q\nname = \"live\"\nbase_url = %q\napi_backend = \"chat_completions\"\nenv_key = %q\ncontext_window = 128000\n", LiveModel("grok"), gatewayOpenAI, gatewayKeyVar)
+	}
+	return fmt.Sprintf("[models]\ndefault = \"fake\"\n[model.fake]\nmodel = \"fake-model\"\nname = \"fake\"\nbase_url = \"%s/v1\"\napi_backend = \"chat_completions\"\nenv_key = \"FAKE_LLM_KEY\"\ncontext_window = 128000\n", env.LLMURL)
 }

@@ -26,8 +26,8 @@ func (Codex) Available(tier string) (bool, string) {
 		return false, "codex not installed"
 	}
 	if tier == "t2" {
-		if out, err := exec.Command("codex", "login", "status").CombinedOutput(); err != nil || !strings.Contains(string(out), "Logged in") {
-			return false, "codex not logged in"
+		if _, why := gatewayKey(); why != "" {
+			return false, why
 		}
 	}
 	return true, ""
@@ -54,24 +54,12 @@ func (Codex) home(env *Env) string { return filepath.Join(env.Work, "codex-home"
 
 func (d Codex) Prepare(env *Env, c Cell) error {
 	home := d.home(env)
-	if env.Tier == "t1" {
-		if err := os.MkdirAll(home, 0o755); err != nil {
-			return err
-		}
-		cfg := fmt.Sprintf(`model = "fake-model"
-model_provider = "fake"
-[model_providers.fake]
-name = "fake"
-base_url = "%s/v1"
-wire_api = "responses"
-requires_openai_auth = false
-[mcp_servers.boxer]
-command = "boxer"
-args = ["mcp", "--harness", "codex"]
-`, env.LLMURL)
-		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return err
+	}
+	cfg := codexConfig(env) + "[mcp_servers.boxer]\ncommand = \"boxer\"\nargs = [\"mcp\", \"--harness\", \"codex\"]\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
+		return err
 	}
 	if c.Entry == "user" || c.Entry == "both" {
 		cmd := exec.Command(env.Boxer, "install", "codex", "--user")
@@ -94,10 +82,7 @@ func (d Codex) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	args := []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "--json", "-o", last, prompt}
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = env.Repo
-	cmd.Env = env.BaseEnv()
-	if env.Tier == "t1" {
-		cmd.Env = append(cmd.Env, "CODEX_HOME="+d.home(env))
-	}
+	cmd.Env = append(env.BaseEnv(), "CODEX_HOME="+d.home(env)) // private home at both tiers: no login, no user config
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -176,4 +161,13 @@ func appendOnce(list []string, s string) []string {
 		}
 	}
 	return append(list, s)
+}
+
+// codexConfig is the model provider block: the fake model at t1, the gateway's Codex endpoint
+// at t2 (Responses wire, key from the environment, no ChatGPT login or quota involved).
+func codexConfig(env *Env) string {
+	if env.Tier == "t2" {
+		return fmt.Sprintf("model = %q\nmodel_provider = \"vercel\"\n[model_providers.vercel]\nname = \"Vercel AI Gateway\"\nbase_url = %q\nenv_key = %q\nwire_api = \"responses\"\n", LiveModel("codex"), gatewayCodex, gatewayKeyVar)
+	}
+	return fmt.Sprintf("model = \"fake-model\"\nmodel_provider = \"fake\"\n[model_providers.fake]\nname = \"fake\"\nbase_url = \"%s/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n", env.LLMURL)
 }

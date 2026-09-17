@@ -22,8 +22,10 @@ func (Claude) Available(tier string) (bool, string) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return false, "claude not installed"
 	}
-	if tier == "t2" && !claudeLoggedIn() {
-		return false, "claude has no login (Keychain) and ANTHROPIC_API_KEY is not set"
+	if tier == "t2" {
+		if _, why := gatewayKey(); why != "" {
+			return false, why
+		}
 	}
 	return true, ""
 }
@@ -54,20 +56,20 @@ const fakeKey = "sk-ant-fake-0123456789abcdefghij"
 func (Claude) home(env *Env) string { return filepath.Join(env.Work, "claude-home") }
 
 func (d Claude) Prepare(env *Env, c Cell) error {
-	if env.Tier == "t1" {
-		// A fresh config dir with the dummy key pre-approved, so no login and no prompt.
-		home := d.home(env)
-		if err := os.MkdirAll(home, 0o755); err != nil {
-			return err
-		}
-		cfg := map[string]any{
-			"customApiKeyResponses":  map[string]any{"approved": []string{fakeKey[len(fakeKey)-20:]}, "rejected": []string{}},
-			"hasCompletedOnboarding": true, "theme": "dark", "numStartups": 3,
-		}
-		b, _ := json.Marshal(cfg)
-		if err := os.WriteFile(filepath.Join(home, ".claude.json"), b, 0o644); err != nil {
-			return err
-		}
+	// A fresh config dir with the key pre-approved, so no login and no prompt; the user's own
+	// Keychain login is never touched. t1 approves the dummy key, t2 the gateway key.
+	home := d.home(env)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return err
+	}
+	key := d.apiKey(env)
+	cfg := map[string]any{
+		"customApiKeyResponses":  map[string]any{"approved": []string{key[len(key)-20:]}, "rejected": []string{}},
+		"hasCompletedOnboarding": true, "theme": "dark", "numStartups": 3,
+	}
+	b, _ := json.Marshal(cfg)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), b, 0o600); err != nil {
+		return err
 	}
 	switch c.Entry {
 	case "project", "both":
@@ -95,10 +97,7 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = env.Repo
-	cmd.Env = env.BaseEnv()
-	if env.Tier == "t1" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+env.LLMURL, "ANTHROPIC_API_KEY="+fakeKey, "CLAUDE_CONFIG_DIR="+d.home(env))
-	}
+	cmd.Env = append(env.BaseEnv(), d.modelEnv(env)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	done := make(chan error, 1)
@@ -151,4 +150,25 @@ func parseClaudeStream(s string) Transcript {
 		}
 	}
 	return tr
+}
+
+// apiKey is what the eval's Claude Code authenticates with: the dummy key at t1, the gateway key
+// at t2 (the gateway accepts its key as x-api-key, so ANTHROPIC_API_KEY works and the approval
+// list keeps the run non-interactive).
+func (d Claude) apiKey(env *Env) string {
+	if env.Tier == "t2" {
+		k, _ := gatewayKey()
+		return k
+	}
+	return fakeKey
+}
+
+// modelEnv points the eval's Claude Code at the fake model (t1) or the gateway (t2), always in
+// its private config dir so the user's own Claude Code and login are untouched.
+func (d Claude) modelEnv(env *Env) []string {
+	e := []string{"CLAUDE_CONFIG_DIR=" + d.home(env), "ANTHROPIC_API_KEY=" + d.apiKey(env)}
+	if env.Tier == "t2" {
+		return append(e, "ANTHROPIC_BASE_URL="+gatewayClaude, "ANTHROPIC_MODEL="+LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+	}
+	return append(e, "ANTHROPIC_BASE_URL="+env.LLMURL)
 }
