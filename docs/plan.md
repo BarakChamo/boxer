@@ -67,6 +67,22 @@ evals/                end-to-end checks against installed harnesses
 
 | 17 | Live tier on one credential: every harness but Gemini routed through the Vercel AI Gateway on its cheapest tool-calling model; Claude Code runs in a private `CLAUDE_CONFIG_DIR` with the gateway key, so the developer's own Claude Code session and login are never touched | `make eval-t2` with `AI_GATEWAY_API_KEY` in `.env` or `evals/.env` | wired 2026-09-17; awaiting the key |
 
+### Third pass: slice v0.2 (planned 2026-09-17, eight hours)
+
+Sequential first hour, then three streams in worktrees, merge and full runs at the end. One
+smolvm user at a time (host lock); live spend capped per run, $4 total for the day.
+
+| Hour | Stream | Deliverable | Proof |
+| --- | --- | --- | --- |
+| 0–1 | main | Land the full GLM T2 run: triage fails into boxer bug / oracle gap / model adherence, fix the first two, commit `eval-t2.md`, refresh `status.md` | report committed, spend recorded |
+| 1–6 | A worktree-timing | `warm_on_session_start` + `worktree.manage`; `boxer install git` (post-checkout warm-up, R-GIT); `doctor` signal report; `session`/`subagent` isolation cells and the timing matrix (worktree created before / at / mid-session / never) | unit tests; T1 cells per timing row |
+| 1–6 | B adherence | Adherence tier: brief-following (uses `boxer_run` unprompted), denial recovery (switches after one deny), three-step task (install, test, read) all in the guest; runs on GLM and Haiku 4.5 control; bake-off on qwen3.7-flash and deepseek-v4-flash; per-model spend in the report | `boxer-eval --tier adherence`, two-model agreement rule |
+| 1–6 | C packaging | Agent Plugins collapse (one spec-shaped package + thin per-client hooks), schema-conformance cell, MCP lifecycle signals for hookless harnesses, plugin version already stamped; pacing knob between live cells; install retry on dropped exec | `boxer package` output validates against the spec; T1 green |
+| 6–8 | main | Merge; smoke + T1 + T2 (GLM) + adherence (GLM, Haiku); orchestrator drivers if installs were approved (`paperclipai`, `t3`, OpenHands venv); tag `v0.1.1`; `status.md` rewritten from the runs | all reports committed |
+
+Deferred past this slice: environment spec loader, `Backend` interface, dashboard, release
+publishing (no remote yet), Multica (account), Conductor cloud.
+
 The evaluation programme across nine harnesses and orchestrators is planned separately in
 [eval-plan.md](eval-plan.md).
 
