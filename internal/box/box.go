@@ -597,7 +597,15 @@ func (e *Env) Instructions() string {
 }
 
 // Instructions renders the agent brief for a configuration.
-func Instructions(cfg config.Config) string {
+func Instructions(cfg config.Config) string { return InstructionsFor(cfg, "") }
+
+// InstructionsFor renders the brief naming the run tool the way the harness shows it; runTool ""
+// means plain boxer_run. Grok, for one, exposes MCP tools only through a dispatcher, and a brief
+// that names an invisible tool made every model try the shell first (eval-adherence.md).
+func InstructionsFor(cfg config.Config, runTool string) string {
+	if runTool == "" {
+		runTool = "the boxer_run tool"
+	}
 	var b strings.Builder
 	b.WriteString("This repository runs commands inside a boxer sandbox: a microVM per ")
 	b.WriteString(cfg.Isolation)
@@ -612,7 +620,9 @@ func Instructions(cfg config.Config) string {
 	case "tool":
 		b.WriteString("Do not run ")
 		b.WriteString(strings.Join(cfg.Intercept, ", "))
-		b.WriteString(" through the shell tool. Use the boxer_run tool, or the shell form `boxer run -c '<command>'`. ")
+		b.WriteString(" through the shell tool. Use ")
+		b.WriteString(runTool)
+		b.WriteString(", or the shell form `boxer run -c '<command>'`. ")
 	case "off":
 		b.WriteString("Sandboxing is currently off; commands run on the host. ")
 	}

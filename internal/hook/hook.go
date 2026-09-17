@@ -31,6 +31,9 @@ type Dialect struct {
 	MCP bool
 	// Events maps this harness's event names to purposes.
 	Events map[string]string
+	// RunToolHint names the MCP run tool the way this harness shows it to the model; "" means the
+	// tool is visible as boxer_run. Grok lists MCP tools only through its dispatcher.
+	RunToolHint string
 }
 
 var claudeEvents = map[string]string{
@@ -46,7 +49,8 @@ var Dialects = map[string]Dialect{
 	"claude-code": {Name: "claude-code", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	"codex":       {Name: "codex", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	// Grok sends Claude-compatible field names but its own tool name (verified 2026-09-17).
-	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents},
+	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents,
+		RunToolHint: "the boxer_run tool: find it with search_tool, then call it with use_tool"},
 	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
 	"dsh":  {Name: "dsh", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
 	"gemini-cli": {Name: "gemini-cli", MCP: true, ShellTool: "run_shell_command", Rewrite: true, Family: "gemini", Events: map[string]string{
@@ -178,7 +182,7 @@ func withIdentity(cmd string, e *box.Env) string {
 }
 
 func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) int {
-	ctx := e.Instructions()
+	ctx := box.InstructionsFor(e.Cfg, d.RunToolHint)
 	for _, w := range e.Warnings {
 		ctx += "\nNote: " + w + "."
 	}

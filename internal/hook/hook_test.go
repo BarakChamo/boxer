@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
@@ -254,5 +255,17 @@ func TestWarmOnSessionStartDoesNotBlock(t *testing.T) {
 			t.Fatal("no detached boxer up")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestGrokBriefNamesTheDispatcher(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Mode = "tool"
+	brief := box.InstructionsFor(cfg, Dialects["grok"].RunToolHint)
+	if !strings.Contains(brief, "search_tool") || !strings.Contains(brief, "use_tool") {
+		t.Fatalf("grok brief must say how to reach the run tool:\n%s", brief)
+	}
+	if plain := box.Instructions(cfg); !strings.Contains(plain, "Use the boxer_run tool") {
+		t.Fatalf("default brief changed:\n%s", plain)
 	}
 }
