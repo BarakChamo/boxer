@@ -72,6 +72,7 @@ python3 -m venv .venv-openhands && .venv-openhands/bin/pip install openhands-sdk
 ## What comes next
 
 Git-hook install (`boxer install git`), `worktree.manage` and `warm_on_session_start`,
-devcontainer.json loader, `Backend` interface (Firecracker, Docker Sandboxes), Agent Plugins
-bundle collapse, MCP lifecycle signals, a running-boxes dashboard on the JSON API, Homebrew tap,
-plugin marketplace repos, Conductor cloud once smolvm exists there.
+devcontainer.json loader, `Backend` interface (Firecracker, Docker Sandboxes), a running-boxes
+dashboard on the JSON API, Homebrew tap, plugin marketplace repos, Conductor cloud once smolvm
+exists there. Landed on the `packaging` branch 2026-09-17: the Agent Plugins package collapse
+(R-LVL-6, R-LVL-6a) and MCP lifecycle signals (R-SIG-0).

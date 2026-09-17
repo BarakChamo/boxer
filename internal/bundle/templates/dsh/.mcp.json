@@ -1,6 +1,0 @@
-{
-  "boxer": {
-    "command": "boxer",
-    "args": ["mcp", "--harness", "dsh"]
-  }
-}

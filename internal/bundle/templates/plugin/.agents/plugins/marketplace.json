@@ -1,0 +1,7 @@
+{
+  "name": "boxer",
+  "description": "Local marketplace wrapper so Codex can install this directory: codex plugin marketplace add <dir>",
+  "plugins": [
+    { "name": "boxer", "source": "./", "description": "Run shell commands in a microVM keyed to the git worktree." }
+  ]
+}

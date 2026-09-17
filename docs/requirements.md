@@ -525,8 +525,9 @@ Events are named in the Claude Code dialect; the adapter maps equivalents.
 
 ### 7.5 Packaging
 
-Every surveyed harness has a first-class extension bundle. boxer ships one bundle per harness, each
-thin, each wrapping the same binary and the same content.
+Every surveyed harness has a first-class extension bundle. boxer ships one Agent Plugins package
+(§7.6, R-LVL-6); each per-harness bundle is a view of it: the subset of that directory the
+harness reads, wrapping the same binary and the same content.
 
 **The bundle is defined by four components, not by any harness's format:**
 
@@ -561,8 +562,10 @@ How each harness's bundle format carries those four:
 - **R-PKG-4.** The gap closer is chosen per harness from what it supports, in this order: remove the
   shell tool, inject `PATH`, rewrite at the hook, deny at the hook. `doctor` reports which one is in
   force and why the stronger ones were unavailable.
-- **R-PKG-5.** Bundles are generated from one source tree by a `boxer package <harness>` command, so
-  a change to the instruction text or the hook binary reaches every harness in one release.
+- **R-PKG-5.** Bundles are generated from one source tree by `boxer package plugin|<harness>|all`,
+  so a change to the instruction text or the hook binary reaches every harness in one release.
+  The instruction body is one template partial rendered into `SKILL.md` and `AGENTS.md`; the MCP
+  server is defined once in `mcp.json`; hooks are one file per client.
 - **R-PKG-7.** `boxer install <harness>` writes the same four components into the repository's
   own harness configuration (`.claude/settings.json` + `.mcp.json`, `.codex/hooks.json`,
   `.gemini/settings.json`, `.opencode/plugins/`, `.grok/hooks/boxer.json`), merging with what is there
@@ -606,18 +609,31 @@ converge (Codex installs only from marketplaces and does not run Claude plugins;
 - **R-LVL-6.** The bundle is an **Agent Plugins 1.0.0** package (agent-plugins.org, published
   2026-08-06; TSC Amazon, Cursor, Microsoft, OpenAI, Vercel; Google core maintainer): `plugin.json`,
   `skills/boxer/SKILL.md`, `mcp.json` with `mcpServers`. The spec defines exactly two portable
-  component types, skills and MCP servers, which is Level 0; hooks are client-specific by the spec's
-  own decision and live in the reverse-domain namespaces it reserves (`com.anthropic.claude-code/`,
-  `com.google.gemini-cli/`, …), which other clients must ignore. Until each loader reads the
-  standard layout, the same directory also carries the native manifests it reads today
-  (`.claude-plugin/plugin.json` + `.mcp.json`, `.codex-plugin`, `.grok-plugin`,
-  `gemini-extension.json`); one directory was verified to validate in Claude and Grok and to install
-  in Gemini. Claude's validator rejects Gemini's `BeforeTool` key in a shared `hooks.json`, so the
-  Gemini group lives in its namespace folder. Codex installs through a local marketplace wrapper
-  (`codex plugin marketplace add`).
+  component types, skills and MCP servers, which is Level 0; the root manifest is closed (`$schema`,
+  `name`, metadata, `extensions`), and hooks are client-specific by the spec's own decision, living
+  in the reverse-domain extension directories it reserves (§8.2), which other clients must ignore.
+  **Verified 2026-09-17** with `boxer package plugin` (`dist/boxer`): the namespaces are
+  `com.anthropic.claude-code/`, `com.openai.codex/`, `ai.x.grok/`, `com.google.gemini-cli/`,
+  `ai.moonshot.kimi-code/`, `com.deepseek.dsh/`, `ai.opencode/`, `works.earendil.pi/` (boxer's
+  choice until each client publishes one). Until each loader reads the standard layout, the same
+  directory carries the native manifests it reads today, each pointing into its namespace
+  (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.grok-plugin/plugin.json`,
+  `gemini-extension.json`, `.agents/plugins/marketplace.json`) and AGENTS.md as the context file.
+  The one directory passed `claude plugin validate` (Claude Code 2.1.251; `mcpServers` may point at
+  the spec's `mcp.json`, an `agents` manifest key is rejected so `agents/` is auto-discovered),
+  `grok plugin validate` (1 skill dir, 1 agent dir), `gemini extensions validate`, and installed in
+  Codex through the bundled local marketplace wrapper (`codex plugin marketplace add dist/boxer &&
+  codex plugin add boxer@boxer` → installed, enabled, version stamped). Two loader limits shape the
+  layout: Claude auto-loads a root `hooks/hooks.json` and rejects Gemini's `BeforeTool` key, and
+  Gemini reads hooks from that fixed path only, so the package has no root `hooks/` and the
+  `gemini-cli` view alone copies its hooks there (Gemini is Level 0 from the full package).
 - **R-LVL-6a.** `plugin.json` and `mcp.json` are validated in `go test` against the published
-  schemas (`agent-plugins.org/schemas/1.0.0/`, vendored), so the bundle is a conforming plugin for
-  every client at once, deterministically.
+  schemas (`agent-plugins.org/schemas/1.0.0/`, vendored unmodified in `internal/bundle/spec/` with
+  their URLs and fetch date), so the bundle is a conforming plugin for every client at once,
+  deterministically. **Exists**: `TestManifestsConformToAgentPluginsSchemas` (draft 2020-12
+  validator with an ECMAScript regex engine, because the spec's `name` pattern uses a lookahead);
+  `TestViewsAreSubsetsOfThePackage` proves every per-harness bundle is byte-identical to the
+  package's files it selects.
 - **R-LVL-7.** Grok's plugin hooks are discovered as zero in `grok -p` even when the plugin loads
   (`hooks: discovery complete total_hooks=0`); Grok is Level 0 until that is understood.
 
@@ -699,6 +715,12 @@ correctness, and none is removed from the product.
 | `SessionEnd` | the harness says it is done | six harnesses | earlier reclaim than EOF |
 | `WorktreeCreate` (Claude) | replaces creation | Claude | only when boxer manages worktrees |
 
+- **R-SIG-0.** The two universal signals are implemented in the MCP server itself, with no adapter
+  (**verified 2026-09-17** with the fake smolvm, `internal/mcp` `TestLifecycleSignals`): `initialize`
+  provisions the server's cwd scope in the background when `create_on` contains `mcp` (default on;
+  the initialize response is not delayed), and stdin EOF records the scope's last use for `gc`.
+  Reclaim on EOF per `destroy_on` is not wired: some clients restart an MCP server mid-session, and
+  `SessionEnd` remains the earlier, safer reclaim where it exists.
 - **R-SIG-1.** Every signal is auto-detected per harness, opt-in in configuration, and idempotent
   at the kernel: a git hook, a harness hook, an MCP start, and a first run firing for one scope
   produce one VM (per-scope lock; `Ensure` is a no-op on a running VM).

@@ -195,4 +195,12 @@ is the binary version. Two tools:
 | `boxer_status` | `{cwd?: string}` | one line: scope, isolation, state, image, worktree and mount |
 
 Both resolve the scope from `cwd` (default: the server's working directory) with the same rules
-as the CLI, so a refusal is the `box.Error` text.
+as the CLI, so a refusal is the `box.Error` text. `cwd` is forgiving about which side of the mount
+it names: a host path inside the worktree becomes the matching guest directory; a path under the
+guest mount (`/workspace/...` when `mount_at` is set; the brief tells the model that path) maps back
+to the host worktree; any other path falls back to the server's own directory and the result
+starts with a `note:` line saying so.
+
+The server is also a session signal for harnesses without hooks: `initialize` provisions the
+server's own scope in the background when `create_on` contains `mcp` (default), and stdin EOF
+records the scope's last use for `gc`.

@@ -1,0 +1,13 @@
+{
+  "name": "boxer",
+  "version": "[[.Version]]",
+  "description": "Runs shell commands in a smolvm microVM keyed to the git worktree.",
+  "contextFileName": "AGENTS.md",
+  "mcpServers": {
+    "boxer": {
+      "command": "boxer",
+      "args": ["mcp", "--harness", "gemini-cli"]
+    }
+  }[[if .ToolMode]],
+  "excludeTools": ["run_shell_command"][[end]]
+}

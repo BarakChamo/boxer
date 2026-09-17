@@ -524,6 +524,15 @@ func LastUsed(key string) time.Time {
 	return st.ModTime()
 }
 
+// Restart stops and starts the scope's VM: the recovery when the exec transport drops mid-command.
+func (e *Env) Restart() error {
+	if err := e.VM.Stop(e.Scope.Key); err != nil {
+		return err
+	}
+	_, err := e.Ensure(false, false)
+	return err
+}
+
 // Down stops and deletes the scope's VM. Absence is not an error.
 func (e *Env) Down() error {
 	_, ok, err := e.Exists()

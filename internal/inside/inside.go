@@ -5,6 +5,7 @@
 package inside
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -177,6 +178,10 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 
 // install runs the harness's install line once per VM, recorded by a marker file. The marker
 // travels in the harness pack, so VMs created from it skip this.
+func transportError(stderr string) bool {
+	return strings.Contains(stderr, "connection closed") || strings.Contains(stderr, "agent response frame")
+}
+
 func install(e *box.Env, name string, h Harness) error {
 	marker := "/var/lib/boxer/harness-" + name
 	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker); code == 0 {
@@ -190,8 +195,20 @@ func install(e *box.Env, name string, h Harness) error {
 	check := h.Bin + " --version >/dev/null 2>&1"
 	line := "export NPM_CONFIG_FETCH_TIMEOUT=600000 NPM_CONFIG_FETCH_RETRIES=5 NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 DEBIAN_FRONTEND=noninteractive; " +
 		"{ " + h.Install + " && " + check + "; } || { " + h.Install + " && " + check + "; }"
-	code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr},
-		"sh", "-lc", line+" && mkdir -p /var/lib/boxer && touch "+marker)
+	run := func() (int, string, error) {
+		var msg bytes.Buffer
+		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: io.MultiWriter(e.Stderr, &msg)},
+			"sh", "-lc", line+" && mkdir -p /var/lib/boxer && touch "+marker)
+		return code, msg.String(), err
+	}
+	code, msg, err := run()
+	// A dropped exec transport is smolvm's, not npm's: restart the VM and run the whole line again.
+	if (err != nil || code != 0) && transportError(msg) {
+		fmt.Fprintln(e.Stderr, "boxer: the sandbox dropped the connection during install; restarting it and retrying once")
+		if rerr := e.Restart(); rerr == nil {
+			code, msg, err = run()
+		}
+	}
 	if err != nil || code != 0 {
 		return &box.Error{Reason: fmt.Sprintf("installing %s failed (exit %d)", name, code), Cause: "HARNESS_INSTALL_FAILED", Scope: e.Scope,
 			Fix: "check network.allow_hosts includes registry.npmjs.org, then: boxer shell " + name}

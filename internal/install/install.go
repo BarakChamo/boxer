@@ -37,31 +37,29 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	}
 	r := &Result{}
 	toolMode := cfg.Mode == "tool"
+	ns, hooksFile, hooks, skill, agents, server := parts(tmp, harness)
 	switch harness {
 	case "claude-code":
-		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".claude", "settings.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
 		}); err != nil {
 			return *r, err
 		}
-		mcp := readJSON(filepath.Join(tmp, ".mcp.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".mcp.json"), func(m map[string]any) {
-			setIn(m, "mcpServers", "boxer", mcp["boxer"])
+			setIn(m, "mcpServers", "boxer", server)
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(filepath.Join(tmp, "skills", "boxer", "SKILL.md"), filepath.Join(root, ".claude", "skills", "boxer", "SKILL.md"))
+		r.copy(skill, filepath.Join(root, ".claude", "skills", "boxer", "SKILL.md"))
 		r.copy(filepath.Join(tmp, "agents", "boxed.md"), filepath.Join(root, ".claude", "agents", "boxed.md"))
 		r.Notes = append(r.Notes, "PATH shims are not part of project settings; run `boxer shim install` where the agent's shell starts.")
 	case "codex":
-		r.copy(filepath.Join(tmp, "hooks", "hooks.json"), filepath.Join(root, ".codex", "hooks.json"))
-		r.copy(filepath.Join(tmp, "skills", "boxer", "SKILL.md"), filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes,
 			"Codex loads project hooks only after they are trusted: run /hooks once, or pass --dangerously-bypass-hook-trust to `codex exec`.",
 			"Add the run tool to .codex/config.toml:\n  [mcp_servers.boxer]\n  command = \"boxer\"\n  args = [\"mcp\", \"--harness\", \"codex\"]")
 	case "gemini-cli":
-		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
 		ext := readJSON(filepath.Join(tmp, "gemini-extension.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".gemini", "settings.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
@@ -79,10 +77,10 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		r.appendSection(filepath.Join(root, "GEMINI.md"), filepath.Join(tmp, "GEMINI.md"))
+		r.appendSection(filepath.Join(root, "GEMINI.md"), agents)
 	case "opencode":
-		r.copy(filepath.Join(tmp, ".opencode", "plugins", "boxer.ts"), filepath.Join(root, ".opencode", "plugins", "boxer.ts"))
-		oc := readJSON(filepath.Join(tmp, "opencode.json"))
+		r.copy(filepath.Join(ns, "plugins", "boxer.ts"), filepath.Join(root, ".opencode", "plugins", "boxer.ts"))
+		oc := readJSON(filepath.Join(ns, "opencode.json"))
 		if err := r.mergeJSON(filepath.Join(root, "opencode.json"), func(m map[string]any) {
 			if _, ok := m["$schema"]; !ok {
 				m["$schema"] = oc["$schema"]
@@ -93,43 +91,38 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		r.appendSection(filepath.Join(root, "AGENTS.md"), filepath.Join(tmp, "AGENTS.md"))
+		r.appendSection(filepath.Join(root, "AGENTS.md"), agents)
 	case "grok":
-		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".grok", "hooks", "boxer.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
 		}); err != nil {
 			return *r, err
 		}
-		mcp := readJSON(filepath.Join(tmp, ".mcp.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".mcp.json"), func(m map[string]any) {
-			setIn(m, "mcpServers", "boxer", mcp["boxer"])
+			setIn(m, "mcpServers", "boxer", server)
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(filepath.Join(tmp, "skills", "boxer", "SKILL.md"), filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes, "Grok Build runs project hooks only after the folder is trusted: launch with --trust once, or set GROK_FOLDER_TRUST=0 for headless runs.")
 	case "pi":
-		r.copy(filepath.Join(tmp, ".pi", "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts"))
-		r.appendSection(filepath.Join(root, "AGENTS.md"), filepath.Join(tmp, "AGENTS.md"))
+		r.copy(filepath.Join(ns, "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts"))
+		r.appendSection(filepath.Join(root, "AGENTS.md"), agents)
 		r.Notes = append(r.Notes, "pi loads project extensions after the project is trusted; for a one-off run use `pi -e .pi/extensions/boxer.ts`.")
 	case "kimi":
-		mcp := readJSON(filepath.Join(tmp, ".kimi-code", "mcp.json"))
 		if err := r.mergeJSON(filepath.Join(root, ".kimi-code", "mcp.json"), func(m map[string]any) {
-			if servers, ok := mcp["mcpServers"].(map[string]any); ok {
-				setIn(m, "mcpServers", "boxer", servers["boxer"])
-			}
+			setIn(m, "mcpServers", "boxer", server)
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(filepath.Join(tmp, ".agents", "skills", "boxer", "SKILL.md"), filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
-		toml, _ := os.ReadFile(filepath.Join(tmp, "hooks.toml"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		toml, _ := os.ReadFile(filepath.Join(ns, "hooks.toml"))
 		r.Notes = append(r.Notes,
 			"Kimi hooks live in the user config only; append this to ~/.kimi-code/config.toml:\n"+strings.TrimSpace(string(toml)),
 			"Kimi cannot rewrite tool input and its Bash tool ignores PATH shims: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in.")
 	case "dsh":
-		r.copy(filepath.Join(tmp, "hooks", "hooks.json"), filepath.Join(root, ".dsh", "hooks.json"))
-		r.copy(filepath.Join(tmp, "skills", "boxer", "SKILL.md"), filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes,
 			"DSH reads .dsh/hooks.json through a hooks plugin (dsh-plugin-hooks); install one.",
 			"DSH cannot rewrite tool input: run `boxer shim install` and prepend the directory to PATH.")
@@ -152,9 +145,9 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		return Result{}, err
 	}
 	r := &Result{}
+	_, _, hooks, _, _, _ := parts(tmp, harness)
 	switch harness {
 	case "claude-code":
-		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
 		if err := r.mergeJSON(filepath.Join(claudeHome(), "settings.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
 		}); err != nil {
@@ -162,7 +155,6 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		}
 		r.Notes = append(r.Notes, "Settings hooks travel with orchestrators that seed a managed config dir from ~/.claude (Paperclip); plugins do not.")
 	case "codex":
-		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
 		block, err := codexHooksTOML(hooks["hooks"])
 		if err != nil {
 			return *r, err
@@ -175,6 +167,23 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		return *r, fmt.Errorf("no user-level install for %q; user-level layers exist for claude-code and codex", harness)
 	}
 	return *r, nil
+}
+
+// parts locates one harness's pieces in its rendered view: the extension directory, its hooks
+// file, the shared skill and AGENTS.md, and the shared MCP server entry with `--harness` added
+// so the [harness.<name>] overrides apply.
+func parts(tmp, harness string) (ns, hooksFile string, hooks map[string]any, skill, agents string, server map[string]any) {
+	ns = filepath.Join(tmp, bundle.Namespace(harness))
+	hooksFile = filepath.Join(ns, "hooks", "hooks.json")
+	hooks = readJSON(hooksFile)
+	skill = filepath.Join(tmp, "skills", "boxer", "SKILL.md")
+	agents = filepath.Join(tmp, "AGENTS.md")
+	servers, _ := readJSON(filepath.Join(tmp, "mcp.json"))["mcpServers"].(map[string]any)
+	server, _ = servers["boxer"].(map[string]any)
+	if server != nil {
+		server["args"] = append(toStrings(server["args"]), "--harness", harness)
+	}
+	return
 }
 
 func claudeHome() string {

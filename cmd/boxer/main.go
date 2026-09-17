@@ -42,7 +42,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
-  boxer package <harness>|all      render the plugin bundle for a harness
+  boxer package plugin|<harness>|all  render the Agent Plugins package (dist/boxer), one client's view, or both
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
                                    (the layer orchestrators like T3 Code and Paperclip also load)
   boxer install <harness> --user   write ~/.claude/settings.json or ~/.codex/config.toml hooks
@@ -804,7 +804,7 @@ func packageCmd(args []string, stdout, stderr io.Writer) int {
 		pos = append(pos, args[i])
 	}
 	if err := fs.Parse(flags); err != nil || len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: boxer package <harness>|all [--out dir]")
+		fmt.Fprintln(stderr, "usage: boxer package plugin|<harness>|all [--out dir]")
 		return 2
 	}
 	target := pos[0]
@@ -815,11 +815,13 @@ func packageCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	names := []string{target}
 	if target == "all" {
-		names = bundle.Harnesses()
+		names = append([]string{bundle.Package}, bundle.Harnesses()...)
 	}
 	for _, h := range names {
-		cfgH := cfg.ForHarness(h)
-		dir := filepath.Join(*out, h)
+		cfgH, dir := cfg, filepath.Join(*out, "boxer") // the whole package, named after the plugin
+		if h != bundle.Package {
+			cfgH, dir = cfg.ForHarness(h), filepath.Join(*out, h)
+		}
 		files, err := bundle.Render(h, cfgH, Version, dir)
 		if err != nil {
 			fmt.Fprintln(stderr, err)

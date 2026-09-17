@@ -329,6 +329,7 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 	}
 	var results []Result
 	spent, budget := 0.0, budgetUSD()
+	pace, _ := time.ParseDuration(os.Getenv("BOXER_EVAL_PACE") + "s")
 	for _, d := range drivers {
 		ok, why := d.Available(tier)
 		cells := d.Cells(tier)
@@ -366,6 +367,12 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 			results = append(results, r)
 			if onResult != nil {
 				onResult(r)
+			}
+			// A provider rate limit is a clock, not a verdict: wait BOXER_EVAL_PACE seconds before
+			// the next live cell so one refusal does not cascade through the run.
+			if r.Status == "skip" && quotaError(r.Raw) != "" && pace > 0 {
+				fmt.Fprintf(log, "  pacing %s after a provider refusal (BOXER_EVAL_PACE)\n", pace)
+				time.Sleep(pace)
 			}
 		}
 	}

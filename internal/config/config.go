@@ -76,7 +76,7 @@ func Defaults() Config {
 		Isolation:             "worktree",
 		OnMissingID:           "degrade",
 		RequireWorktree:       "warn",
-		CreateOn:              []string{"session_start", "run"},
+		CreateOn:              []string{"session_start", "run", "mcp"},
 		DestroyOn:             []string{},
 		IdleTimeout:           "2h",
 		ReuseExisting:         true,
@@ -248,8 +248,8 @@ func (c Config) Validate() error {
 		}
 	}
 	for _, e := range c.CreateOn {
-		if !oneOf(e, []string{"session_start", "subagent_start", "run"}) {
-			return fmt.Errorf("create_on contains %q; allowed: session_start | subagent_start | run", e)
+		if !oneOf(e, []string{"session_start", "subagent_start", "run", "mcp"}) {
+			return fmt.Errorf("create_on contains %q; allowed: session_start | subagent_start | run | mcp", e)
 		}
 	}
 	for _, e := range c.DestroyOn {
