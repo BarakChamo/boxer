@@ -257,12 +257,12 @@ Ordered; each lands with its own proof.
 | 5 | Drivers: Claude Code, Codex, Gemini, OpenCode, Grok, Kimi, pi, DSH (optional) | T1 green for every harness whose spike passes; T2 green where credentials exist |
 | 5a | MCP lifecycle: provision on `initialize`, `instructions`, reclaim on EOF; `install` writes the native shell-disable setting; hook code moves to the optional `boxer-rewrite` extension | T1 Level 0 cells pass on all six harnesses with no hooks installed |
 | 5c | Inside mode: `integration` key, `boxer shell`, `boxer acp`, harness install table, config-dir mounts, harness shims | inside T1 cells per harness; ACP cell |
-| 5b | Collapse the eight bundles into one Agent Plugins directory with namespaced hook folders and native compatibility manifests; Codex local-marketplace wrapper; schema conformance test | `go test`; `claude plugin validate`, `grok plugin validate`, `gemini extensions install`, `codex plugin marketplace add` all accept the one directory |
+| 5b | **Done 2026-09-17.** One Agent Plugins directory (`boxer package plugin`) with namespaced hook folders and native compatibility manifests; per-harness bundles are views of it; Codex local-marketplace wrapper bundled; schema conformance test with vendored schemas | `go test` (conformance, views-are-subsets); `claude plugin validate`, `grok plugin validate`, `gemini extensions validate` pass on the one directory; `codex plugin marketplace add` + `codex plugin add boxer@boxer` installs it. Gemini hooks need its view (fixed `hooks/` path) |
 | 6 | Orchestrator drivers: Paperclip (test-drive), herdr, Multica, OpenHands; T3 WS client; Conductor setup-script assertions + manual checklist | each proves: worktree → VM key, project-layer hooks fire, `gc` after worktree removal, plugin+project double install idempotent |
 | 7 | **CI**: T0 on Linux and macOS on every push; T1 on a macOS arm64 runner with smolvm (*spike 10*: Hypervisor.framework on GitHub-hosted runners; fallback self-hosted Mac mini) on every push; T2 nightly with secrets, skips named | workflows green; report artifact |
 | 8 | Requirements §12 status table generated from the last report, not hand-written | `boxer` repo doc updated by CI |
 
-Existing pieces reused: `evals/smoke.sh` (44 checks; stays as the T1 "boxer alone" lane until the
+Existing pieces reused: `evals/smoke.sh` (46 checks; stays as the T1 "boxer alone" lane until the
 runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.Install/User`.
 
 ## 6. What "always works" means here

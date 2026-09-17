@@ -7,7 +7,7 @@ system; split only when a consumer needs `pkg/boxer` without the CLI's dependenc
 | --- | --- | --- | --- |
 | core | `pkg/boxer` Go facade over `internal/{box,vm,scope,config,inside}`; `boxer … --json`; the MCP server | this module | orchestrators, a running-boxes dashboard, anyone shelling out |
 | cli | the `boxer` binary | GitHub Releases (darwin/arm64, linux/amd64, linux/arm64), `go install`, `install.sh`, npm wrapper that downloads the release binary | developers, orchestrator hosts |
-| plugins | `boxer package all` output | attached to each release as `boxer-plugins-<version>.tar.gz`; `boxer install` writes the project layer from the same templates | harness users |
+| plugins | `boxer package all` output: one Agent Plugins package (`boxer/`) plus one view per client (`claude-code/`, `codex/`, …) | attached to each release as `boxer-plugins-<version>.tar.gz`; `boxer install` writes the project layer from the same templates | harness users |
 | evals | `cmd/boxer-eval`, `cmd/fakellm`, `evals/`, `adapters/openhands` | in repo, never released as binaries | maintainers, CI |
 
 ## Rules
@@ -20,7 +20,7 @@ system; split only when a consumer needs `pkg/boxer` without the CLI's dependenc
 - **JSON is the language-agnostic API.** `ls`, `status`, `doctor`, `down`, `gc --dry-run` take
   `--json`; shapes are in [api.md](api.md). A dashboard needs nothing else.
 - **Version comes from the tag.** `-ldflags -X main.Version=<tag>` (goreleaser); `make build`
-  stamps `git describe`. The same value is rendered into every plugin manifest and SKILL.md.
+  stamps `git describe`. The same value is rendered into `plugin.json`, every native manifest, SKILL.md and AGENTS.md.
 
 ## Cutting a release
 

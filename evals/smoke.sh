@@ -118,10 +118,12 @@ check "bare command via shim runs in guest" '[ "$(PATH="$SH:$PATH" uname -s 2>/d
 
 echo "# package"
 D=$(mktemp -d); boxer package all --out "$D" >/dev/null
-check "eight bundles" '[ "$(ls "$D" | wc -l | tr -d " ")" = "8" ]'
+check "one package plus eight views" '[ -f "$D/boxer/plugin.json" ] && [ -f "$D/boxer/mcp.json" ] && [ "$(ls "$D" | wc -l | tr -d " ")" = "9" ]'
+check "views are subsets of the package" 'for h in claude-code codex grok gemini-cli kimi dsh opencode pi; do [ -f "$D/$h/plugin.json" ] || exit 1; done'
+check "package has no root hooks dir" '[ ! -d "$D/boxer/hooks" ]'
 check "all json valid" 'for f in $(find "$D" -name "*.json"); do python3 -m json.tool "$f" >/dev/null || exit 1; done'
 check "claude bundle has shims" '[ -x "$D/claude-code/bin/npm" ]'
-check "no bundle but claude mentions claude" '! grep -ril claude "$D" | grep -v "/claude-code/" | grep -q .'
+check "no view but claude mentions claude" '! grep -ril claude "$D" | grep -v "/claude-code/\|/boxer/" | grep -q .'
 
 echo "# install (project layer)"
 mkrepo "$WORK/i" "$BASE"

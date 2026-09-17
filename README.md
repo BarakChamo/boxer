@@ -89,23 +89,32 @@ harmless — see [docs/orchestrators.md](docs/orchestrators.md). OpenHands uses
 
 ## Harness bundles
 
-`boxer package <harness>|all --out dist` renders one plugin per harness from the same four
-components — instruction, lifecycle hooks, run tool, gap closer:
+`boxer package plugin --out dist` renders one [Agent Plugins 1.0.0](https://agent-plugins.org)
+package, `dist/boxer`, valid for every client at once: `plugin.json`, `skills/boxer/SKILL.md`,
+`mcp.json` (the `boxer mcp` server), `AGENTS.md`, and one reverse-domain directory per client
+carrying its hooks and README (`com.anthropic.claude-code/`, `com.openai.codex/`, `ai.x.grok/`,
+`com.google.gemini-cli/`, `ai.moonshot.kimi-code/`, `com.deepseek.dsh/`, `ai.opencode/`,
+`works.earendil.pi/`). The same directory carries the native manifests each loader reads today,
+so it installs everywhere now:
 
-| Harness | Bundle | Install |
-| --- | --- | --- |
-| Claude Code | plugin: skill, hooks, `.mcp.json`, `bin/` shims, `boxed` agent without Bash | `claude plugin install dist/claude-code` |
-| Codex CLI | plugin: skill, hooks, MCP | plugin flow, or copy `hooks/hooks.json` to `.codex/` |
-| Gemini CLI | extension: `GEMINI.md`, hooks, MCP, `excludeTools` in tool mode | `gemini extensions install dist/gemini-cli` |
-| Grok Build | plugin: skill, hooks, MCP | `/plugin` |
-| OpenCode | `.opencode/plugins/boxer.ts`, `opencode.json` MCP entry, `AGENTS.md` section | copy into the repo |
-| DSH, Kimi Code | hooks (block-only), skill, MCP; shims required | see each bundle's README |
+```sh
+claude plugin install dist/boxer                                   # or: claude --plugin-dir dist/boxer
+codex plugin marketplace add dist/boxer && codex plugin add boxer@boxer
+grok plugin install dist/boxer
+gemini extensions install dist/gemini-cli                          # Gemini reads hooks from hooks/ only; use its view
+```
+
+`boxer package <harness>` renders that client's view, the subset of the package it reads, with the
+client's `[harness.<name>]` overrides applied; `boxer package all` renders the package and every
+view. Kimi, DSH, OpenCode and pi have no plugin loader: their namespace README lists the files to
+copy, and `boxer install <harness>` writes them into the repository. `plugin.json` and `mcp.json`
+are validated against the spec's schemas in `go test`.
 
 ## Verification
 
 ```sh
-go test ./...          # unit: config, scope, decide, hook dialects, mcp, shims, bundles, inside (fake smolvm)
-evals/smoke.sh         # real smolvm: every config path, every hook dialect, mcp, shims, gc   (44 checks)
+go test ./...          # unit: config, scope, decide, hook dialects, mcp lifecycle, shims, package + schema conformance, inside (fake smolvm)
+evals/smoke.sh         # real smolvm: every config path, every hook dialect, mcp, shims, gc   (46 checks)
 boxer-eval --tier t1   # real harness + scripted model + real smolvm: 31 outside cells, 11 inside cells
 cmd/boxer-eval/        # eval matrix: --tier t1 (fake model) or --tier t2 (live credentials from evals/.env)
 ```
