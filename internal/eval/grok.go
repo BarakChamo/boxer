@@ -130,7 +130,8 @@ func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 func (Grok) Cleanup(env *Env, c Cell) {}
 
 // parseGrokStream reads `--output-format streaming-json`: one event per line, `text` carrying the
-// answer in `data` and `tool_call` naming the tool in `toolName`.
+// answer in `data` and `tool_call` naming the tool in `toolName`. MCP tools go through Grok's
+// `use_tool` dispatcher, so the inner `rawInput.tool_name` is recorded as `use_tool:<name>`.
 func parseGrokStream(s string) Transcript {
 	tr := Transcript{Raw: s}
 	var text strings.Builder
@@ -142,6 +143,9 @@ func parseGrokStream(s string) Transcript {
 			Data     string `json:"data"`
 			ToolName string `json:"toolName"`
 			Title    string `json:"title"`
+			RawInput struct {
+				ToolName string `json:"tool_name"`
+			} `json:"rawInput"`
 		}
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue
@@ -152,6 +156,9 @@ func parseGrokStream(s string) Transcript {
 		case "tool_call":
 			if e.ToolName == "" {
 				e.ToolName = e.Title
+			}
+			if e.ToolName == "use_tool" && e.RawInput.ToolName != "" {
+				e.ToolName += ":" + e.RawInput.ToolName
 			}
 			tr.Tools = append(tr.Tools, e.ToolName)
 		}
