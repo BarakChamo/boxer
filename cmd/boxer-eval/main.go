@@ -3,9 +3,12 @@
 //	boxer-eval --tier t1                      # deterministic: real harness, fake model
 //	boxer-eval --tier t2 --harness claude-code # live: the harness's own login
 //	boxer-eval --tier t1 --cell claude-code/tool --keep
+//	boxer-eval --tier adherence --models zai/glm-5.3-flash,anthropic/claude-haiku-4.5 --jsonl docs/adherence.jsonl
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -20,7 +23,9 @@ import (
 )
 
 func main() {
-	tier := flag.String("tier", "t1", "t1 (fake model) or t2 (live)")
+	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live) or adherence (live; brief, recovery, multistep per harness)")
+	models := flag.String("models", "", "adherence: comma-separated gateway model ids to run every cell on; default BOXER_EVAL_MODEL")
+	jsonl := flag.String("jsonl", "", "adherence: append each result here and render the report from the whole file, so cells can run one at a time")
 	harness := flag.String("harness", "", "comma-separated driver names; default all")
 	cell := flag.String("cell", "", "substring filter on cell names")
 	out := flag.String("out", "", "write the Markdown report here")
@@ -68,6 +73,10 @@ func main() {
 	}
 
 	drivers := eval.Drivers()
+	adherence := *tier == "adherence"
+	if adherence {
+		drivers = eval.AdherenceDrivers(drivers)
+	}
 	if *harness != "" {
 		want := map[string]bool{}
 		for _, h := range strings.Split(*harness, ",") {
@@ -96,12 +105,21 @@ func main() {
 	// may leave a VM behind, so the message says how to reclaim it.
 	var mu sync.Mutex
 	var partial []eval.Result
+	render := func(rs []eval.Result) string {
+		if adherence && *jsonl != "" {
+			return eval.AdherenceReport(readJSONL(*jsonl)) // every result is already appended there
+		}
+		if adherence {
+			return eval.AdherenceReport(rs)
+		}
+		return eval.Report(rs, *tier)
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sig
 		mu.Lock()
-		report := eval.Report(partial, *tier) + "\n_interrupted; the cell in flight is not listed. Run `boxer down --all` to reclaim its VM._\n"
+		report := render(partial) + "\n_interrupted; the cell in flight is not listed. Run `boxer down --all` to reclaim its VM._\n"
 		mu.Unlock()
 		if *out != "" {
 			os.WriteFile(*out, []byte(report), 0o644)
@@ -109,12 +127,30 @@ func main() {
 		fmt.Println(report)
 		os.Exit(130)
 	}()
-	results := eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
-		mu.Lock()
-		partial = append(partial, r)
-		mu.Unlock()
-	})
-	report := eval.Report(results, *tier)
+	var results []eval.Result
+	if adherence {
+		// Adherence cells are t2 cells with another prompt: the drivers see tier t2 and the .env
+		// model override is set per model, so every driver's model plumbing is reused as is.
+		for _, m := range eval.Models(*models) {
+			os.Setenv("BOXER_EVAL_MODEL", m)
+			fmt.Fprintf(os.Stderr, "model %s\n", m)
+			results = append(results, eval.Run(drivers, "t2", boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
+				r.Model = m
+				mu.Lock()
+				partial = append(partial, r)
+				mu.Unlock()
+				appendJSONL(*jsonl, r)
+			})...)
+		}
+		results = partial
+	} else {
+		results = eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
+			mu.Lock()
+			partial = append(partial, r)
+			mu.Unlock()
+		})
+	}
+	report := render(results)
 	if *out != "" {
 		os.WriteFile(*out, []byte(report), 0o644)
 	}
@@ -124,6 +160,44 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// appendJSONL records one result (without its transcript) for a report assembled across runs.
+func appendJSONL(path string, r eval.Result) {
+	if path == "" {
+		return
+	}
+	r.Raw = ""
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jsonl:", err)
+		return
+	}
+	defer f.Close()
+	b, _ := json.Marshal(r)
+	f.Write(append(b, '\n'))
+}
+
+// readJSONL loads earlier results; a missing file is an empty history.
+func readJSONL(path string) []eval.Result {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []eval.Result
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	for sc.Scan() {
+		var r eval.Result
+		if json.Unmarshal(sc.Bytes(), &r) == nil {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // loadDotEnv reads KEY=value lines from evals/.env or .env (both gitignored; looked up from the working directory
