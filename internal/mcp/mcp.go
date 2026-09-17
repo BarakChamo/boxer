@@ -139,19 +139,20 @@ func (s *Server) sessionStart() {
 	if err != nil || !config.Has(e.Cfg.CreateOn, "mcp") {
 		return
 	}
-	s.warm.Add(1)
-	go func() {
-		defer s.warm.Done()
-		if _, err := e.Ensure(true, false); err != nil {
-			fmt.Fprintln(e.Stderr, err)
-		}
-	}()
+	// MCP carries no session or agent id, so under those isolations the server cannot name the
+	// session's VM; warming here would create a second, worktree-keyed one. The hooks own it.
+	if e.Cfg.Isolation == "session" || e.Cfg.Isolation == "subagent" {
+		return
+	}
+	// Detached: a client that exits right after initialize must not abort a half-made VM.
+	if err := e.UpDetached(); err != nil {
+		fmt.Fprintln(e.Stderr, err)
+	}
 }
 
 // sessionEnd waits for a pending warm-up and records the last use of the scope, so gc's idle
 // clock starts at the session's end rather than its last command.
 func (s *Server) sessionEnd() {
-	s.warm.Wait()
 	e, err := s.Resolve("", s.Harness, scope.Identity{})
 	if err != nil || !config.Has(e.Cfg.CreateOn, "mcp") {
 		return

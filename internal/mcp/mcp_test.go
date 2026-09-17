@@ -49,21 +49,41 @@ const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pro
 func TestLifecycleSignals(t *testing.T) {
 	_, log := vmtest.Install(t)
 	dir := repo(t, "create_on = [\"mcp\"]\n")
+	// The warm-up is a detached `boxer up`; a script stands in for the binary and records argv.
+	spawned := filepath.Join(t.TempDir(), "spawned")
+	script := filepath.Join(t.TempDir(), "boxer")
+	os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > "+spawned+"\n"), 0o755)
+	box.Executable = func() (string, error) { return script, nil }
+	t.Cleanup(func() { box.Executable = os.Executable })
 	before := time.Now().Add(-time.Second)
 	serve(t, initialize)
-	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "machine create") || !strings.Contains(string(b), "machine start") {
-		t.Fatalf("initialize must provision the cwd scope:\n%s", b)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if b, err := os.ReadFile(spawned); err == nil {
+			if !strings.HasPrefix(string(b), "up") {
+				t.Fatalf("initialize must spawn boxer up, got %q", b)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("initialize did not spawn a detached boxer up")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	_ = log
 	e, _ := box.Resolve(dir, "test", scope.Identity{})
 	if box.LastUsed(e.Scope.Key).Before(before) {
 		t.Fatal("EOF must touch last-used")
 	}
 
-	_, log = vmtest.Install(t)
-	repo(t, "create_on = [\"run\"]\n")
-	serve(t, initialize)
-	if b, _ := os.ReadFile(log); strings.Contains(string(b), "machine create") {
-		t.Fatalf("create_on without mcp must not provision on initialize:\n%s", b)
+	for _, toml := range []string{"create_on = [\"run\"]\n", "create_on = [\"mcp\"]\nisolation = \"session\"\n"} {
+		os.Remove(spawned)
+		repo(t, toml)
+		serve(t, initialize)
+		time.Sleep(50 * time.Millisecond)
+		if _, err := os.Stat(spawned); err == nil {
+			t.Fatalf("initialize must not provision with %q (no mcp in create_on, or an isolation that needs a session id)", toml)
+		}
 	}
 }
 

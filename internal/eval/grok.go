@@ -74,7 +74,7 @@ func (d Grok) Prepare(env *Env, c Cell) error {
 	dist := filepath.Join(env.Dist, "grok")
 	switch c.Entry {
 	case "user":
-		b, err := os.ReadFile(filepath.Join(dist, "hooks", "hooks.json"))
+		b, err := os.ReadFile(filepath.Join(dist, "ai.x.grok", "hooks", "hooks.json")) // the Grok view of the Agent Plugins package
 		if err != nil {
 			return err
 		}
