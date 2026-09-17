@@ -153,7 +153,7 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if acp && h.ACP == nil {
 		return 2, fmt.Errorf("%s has no ACP server; use `boxer shell %s`", name, name)
 	}
-	if hint := loginHint(h); hint != "" {
+	if hint := loginHint(h, o.Env); hint != "" {
 		fmt.Fprintln(e.Stderr, "boxer: "+hint)
 	}
 	if _, err := e.Ensure(true, false); err != nil {
@@ -193,11 +193,17 @@ func install(e *box.Env, name string, h Harness) error {
 	return nil
 }
 
-// loginHint returns the harness's LoginHint when it has one and none of its Creds is set.
-func loginHint(h Harness) string {
+// loginHint returns the harness's LoginHint when it has one and none of its Creds is set on the
+// host or passed with -e.
+func loginHint(h Harness, extra []string) string {
 	for _, k := range h.Creds {
 		if os.Getenv(k) != "" {
 			return ""
+		}
+		for _, kv := range extra {
+			if strings.HasPrefix(kv, k+"=") && len(kv) > len(k)+1 {
+				return ""
+			}
 		}
 	}
 	return h.LoginHint

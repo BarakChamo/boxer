@@ -72,14 +72,17 @@ func TestLoginHintOnlyWithoutCredentials(t *testing.T) {
 	for _, k := range Harnesses["claude"].Creds {
 		t.Setenv(k, "")
 	}
-	if loginHint(Harnesses["claude"]) == "" {
+	if loginHint(Harnesses["claude"], nil) == "" {
 		t.Fatal("claude without any token must print the setup-token hint")
 	}
+	if loginHint(Harnesses["claude"], []string{"ANTHROPIC_API_KEY=k"}) != "" {
+		t.Fatal("a key passed with -e silences the hint")
+	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
-	if loginHint(Harnesses["claude"]) != "" {
+	if loginHint(Harnesses["claude"], nil) != "" {
 		t.Fatal("a token silences the hint")
 	}
-	if loginHint(Harnesses["codex"]) != "" {
+	if loginHint(Harnesses["codex"], nil) != "" {
 		t.Fatal("codex's auth.json travels with the mount; no hint")
 	}
 }
