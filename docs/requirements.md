@@ -799,6 +799,26 @@ Deferred, and gated on one fact.
 - Replacing devcontainers, or consuming `devcontainer.json`.
 - Windows support in v1, since branching is unavailable there.
 
+## 11.1 Release
+
+The release shape is in [release.md](release.md); these are its rules.
+
+- **R-REL-1.** One semver for the whole repository: the CLI, `pkg/boxer`, the plugins and the MCP
+  server ship from one tag `v0.x.y`. The binary reports it (`boxer version`), every rendered
+  plugin manifest and SKILL.md carries it, and `boxer doctor` warns when a project-layer install
+  was written by a different version.
+- **R-REL-2.** `internal/` stays internal. `pkg/boxer` is the only importable package; it
+  re-exports the few types it needs and contains no logic of its own. It and `boxer acp` are
+  experimental before 1.0.
+- **R-REL-3.** JSON is the language-agnostic API: `ls`, `status`, `doctor`, `down`, `gc` take
+  `--json` and print one object or array with snake_case fields, shapes documented in
+  [api.md](api.md); refusals render as the same `box.Error` fields. Human output does not change
+  when a JSON form is added.
+- **R-REL-4.** A release is the tag: the release workflow builds darwin/arm64, linux/amd64 and
+  linux/arm64 binaries with the version stamped, checksums, and `boxer-plugins-<version>.tar.gz`
+  rendered by a binary carrying the same version. `install.sh` and the npm wrapper install
+  nothing they have not verified against `checksums.txt`. Evals are never released as binaries.
+
 ## 12. Acceptance
 
 The work is done when all of these hold:

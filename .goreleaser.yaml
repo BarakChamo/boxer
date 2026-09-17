@@ -6,7 +6,8 @@ before:
   hooks:
     - go mod tidy
     # Plugins carry the version they were rendered from, so the renderer is built with it stamped.
-    - sh -c 'rm -rf dist/plugins && go run -ldflags "-X main.Version={{ .Version }}" ./cmd/boxer package all --out dist/plugins && tar -czf dist/boxer-plugins-{{ .Version }}.tar.gz -C dist/plugins .'
+    # They land in build/, not dist/: goreleaser requires dist/ to be empty after the hooks run.
+    - sh -c 'rm -rf build && go run -ldflags "-X main.Version={{ .Version }}" ./cmd/boxer package all --out build/plugins && tar -czf build/boxer-plugins-{{ .Version }}.tar.gz -C build/plugins .'
 
 builds:
   - id: boxer
@@ -33,8 +34,11 @@ checksum:
   name_template: checksums.txt
 
 release:
+  github:
+    owner: BarakChamo
+    name: boxer
   extra_files:
-    - glob: dist/boxer-plugins-*.tar.gz
+    - glob: build/boxer-plugins-*.tar.gz
 
 changelog:
   use: git

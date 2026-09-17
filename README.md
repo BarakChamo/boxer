@@ -5,11 +5,17 @@ to the git worktree, and makes every coding harness use it without the agent eve
 mistake first. One Go binary; smolvm is the only state.
 
 ```sh
-go build -o bin/boxer ./cmd/boxer     # or: go install ./cmd/boxer
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh   # release binary into ~/.local/bin
+npm i -g boxer-cli                                     # the same binary, fetched by npm
+go install github.com/BarakChamo/boxer/cmd/boxer@latest   # from source
 curl -sSL https://smolmachines.com/install.sh | bash   # smolvm, if missing
 boxer doctor                          # what would happen here, and why
 boxer run -c 'bun test'               # first call provisions the VM (~20s), then ~50ms per command
 ```
+
+Releases carry darwin/arm64, linux/amd64 and linux/arm64 binaries plus `boxer-plugins-<version>.tar.gz`.
+The JSON output, Go facade (`pkg/boxer`, experimental) and MCP tools are in [docs/api.md](docs/api.md);
+how releases are cut is in [docs/release.md](docs/release.md).
 
 ## How it works
 

@@ -19,8 +19,8 @@ system; split only when a consumer needs `pkg/boxer` without the CLI's dependenc
   few types it needs. It contains no logic of its own.
 - **JSON is the language-agnostic API.** `ls`, `status`, `doctor`, `down`, `gc --dry-run` take
   `--json`; shapes are in [api.md](api.md). A dashboard needs nothing else.
-- **Version comes from the tag.** `-ldflags -X main.version=<tag>`; `make build` stamps
-  `git describe`.
+- **Version comes from the tag.** `-ldflags -X main.Version=<tag>` (goreleaser); `make build`
+  stamps `git describe`. The same value is rendered into every plugin manifest and SKILL.md.
 
 ## Cutting a release
 
@@ -29,4 +29,7 @@ make test && make smoke && make eval-t1     # green, report committed
 git tag v0.x.y && git push --tags           # release workflow builds binaries, plugins, npm tarball
 ```
 
-npm publish is a manual step until the package name is settled.
+The workflow also attaches the npm tarball (`npm/`, package `boxer-cli`, version set from the
+tag); `npm publish` is a manual step until the package name is settled. Locally,
+`goreleaser check` validates the config and `goreleaser release --snapshot --clean` builds without
+publishing. The rules above are R-REL-1 to R-REL-4 in [requirements.md](requirements.md).
