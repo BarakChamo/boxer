@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/scope"
@@ -207,5 +208,51 @@ func TestUnknownHarnessAndBadJSON(t *testing.T) {
 	}
 	if Run("claude-code", strings.NewReader("not json"), &out, &errb, box.Resolve) != 0 {
 		t.Fatal("bad json must not break the session")
+	}
+}
+
+func TestSessionIsolationRewriteCarriesIdentity(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "isolation = \"subagent\"\n")
+	out, _, _ := call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s1", "agent_id": "a1"})
+	u, _ := hso(out)["updatedInput"].(map[string]any)
+	if u["command"] != "boxer run --session s1 --agent a1 -c 'bun test'" {
+		t.Fatalf("identity not threaded: %v", u["command"])
+	}
+	dir = repo(t, "")
+	out, _, _ = call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s1"})
+	u, _ = hso(out)["updatedInput"].(map[string]any)
+	if u["command"] != "boxer run -c 'bun test'" {
+		t.Fatalf("worktree isolation must not add flags: %v", u["command"])
+	}
+}
+
+func TestWarmOnSessionStartDoesNotBlock(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := repo(t, "warm_on_session_start = true\nisolation = \"session\"\n")
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := filepath.Join(t.TempDir(), "boxer")
+	os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > "+marker+"\n"), 0o755)
+	box.Executable = func() (string, error) { return script, nil }
+	t.Cleanup(func() { box.Executable = os.Executable })
+	out, _, code := call(t, "claude-code", map[string]any{"hook_event_name": "SessionStart", "cwd": dir, "session_id": "s1"})
+	if code != 0 || hso(out)["additionalContext"] == nil {
+		t.Fatalf("session start must still brief the agent: %v", out)
+	}
+	if b, _ := os.ReadFile(log); strings.Contains(string(b), "machine create") {
+		t.Fatal("the hook itself must not create the VM when warming in the background")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if b, err := os.ReadFile(marker); err == nil {
+			if strings.TrimSpace(string(b)) != "up --harness claude-code --session s1" {
+				t.Fatalf("detached up args: %q", b)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no detached boxer up")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

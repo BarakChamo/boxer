@@ -31,7 +31,7 @@ var Version = "dev"
 
 const usage = `boxer — run agent commands in a microVM per worktree
 
-  boxer up [--recreate]            create and start the sandbox for this scope
+  boxer up [--recreate|--detach]   create and start the sandbox for this scope (--detach: in the background)
   boxer run -c '<shell>'           run a shell line in the sandbox
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all]               delete this scope's sandbox (or every boxer sandbox)
@@ -127,6 +127,7 @@ func identity(name string, args []string) (*flag.FlagSet, *string, *scope.Identi
 func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs, harness, id := identity(cmd, args)
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
+	detach := fs.Bool("detach", false, "start the sandbox in a background boxer and return at once (up)")
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
@@ -153,6 +154,14 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	case "up":
 		for _, w := range e.Warnings {
 			fmt.Fprintln(stderr, "boxer: warning:", w)
+		}
+		if *detach {
+			if err := e.UpDetached(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "boxer: %s starting in the background\n", e.Scope.Key)
+			return 0
 		}
 		created, err := e.Ensure(true, *recreate)
 		if err != nil {
@@ -437,6 +446,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		{"isolation", e.Cfg.Isolation}, {"mode", e.Cfg.Mode}, {"enforcement", e.Cfg.Enforcement},
 		{"require_worktree", e.Cfg.RequireWorktree}, {"on_sandbox_unavailable", e.Cfg.OnSandboxUnavailable},
 		{"create_on", strings.Join(e.Cfg.CreateOn, ",")}, {"destroy_on", strings.Join(e.Cfg.DestroyOn, ",")},
+		{"warm_on_session_start", fmt.Sprint(e.Cfg.WarmOnSessionStart)}, {"worktree.manage", e.Cfg.Worktree.Manage},
 		{"intercept", strings.Join(e.Cfg.Intercept, ",")}, {"passthrough", strings.Join(e.Cfg.Passthrough, ",")},
 		{"network.mode", e.Cfg.Network.Mode}, {"mount_at", e.Cfg.MountAt}, {"cpus", fmt.Sprint(e.Cfg.CPUs)}, {"memory", e.Cfg.Memory},
 	} {

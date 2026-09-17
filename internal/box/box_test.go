@@ -254,3 +254,55 @@ func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
 		t.Fatalf("fresh packs are not stale: %v", got)
 	}
 }
+
+func TestWorktreeDetectSharesRepoSandbox(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n[worktree]\nmanage = \"detect\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil || e.Scope.Isolation != "repo" || len(e.Warnings) != 1 {
+		t.Fatalf("detect in main checkout: %v %+v %v", err, e.Scope, e.Warnings)
+	}
+	wt := filepath.Join(filepath.Dir(dir), "wt")
+	cmd := exec.Command("git", "-C", dir, "worktree", "add", "-q", wt, "-b", "wt")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	e, err = Resolve(wt, "", scope.Identity{})
+	if err != nil || e.Scope.Isolation != "worktree" || len(e.Warnings) != 0 {
+		t.Fatalf("detect in linked worktree: %v %+v %v", err, e.Scope, e.Warnings)
+	}
+}
+
+func TestUpDetachedSpawnsWithoutWaiting(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n")
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := filepath.Join(t.TempDir(), "boxer")
+	os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.3\necho \"$@\" > "+marker+"\n"), 0o755)
+	Executable = func() (string, error) { return script, nil }
+	t.Cleanup(func() { Executable = os.Executable })
+	e, err := Resolve(dir, "claude-code", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := e.UpDetached(); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatal("UpDetached waited for the child")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if b, err := os.ReadFile(marker); err == nil {
+			if !strings.Contains(string(b), "up --harness claude-code") {
+				t.Fatalf("child args: %q", b)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached child never ran")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

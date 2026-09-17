@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/config"
@@ -95,7 +96,7 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 	if trace := os.Getenv("BOXER_TRACE"); trace != "" {
 		// Append every hook invocation for eval and support; the output is traced by emit.
 		if f, err := os.OpenFile(trace, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			fmt.Fprintf(f, "%s <- %s\n", harness, strings.TrimSpace(string(raw)))
+			fmt.Fprintf(f, "%s %s <- %s\n", stamp(), harness, strings.TrimSpace(string(raw)))
 			f.Close()
 			stdout = io.MultiWriter(stdout, traceWriter{trace, harness})
 		}
@@ -155,12 +156,22 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 			if e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both" {
 				return 0
 			}
-			return deny(d, stdout, "this repository runs commands in a sandbox", dec.Command)
+			return deny(d, stdout, "this repository runs commands in a sandbox", withIdentity(dec.Command, e))
 		}
-		return rewrite(d, stdout, dec.Command, in.ToolInput)
+		return rewrite(d, stdout, withIdentity(dec.Command, e), in.ToolInput)
 	default:
-		return deny(d, stdout, dec.Reason, dec.Fix)
+		return deny(d, stdout, dec.Reason, withIdentity(dec.Fix, e))
 	}
+}
+
+// withIdentity threads the session and agent ids the hook received into the `boxer run` the
+// shell will execute, so that run resolves the same session or subagent scope the hook did.
+func withIdentity(cmd string, e *box.Env) string {
+	flags := e.IdentityArgs()
+	if len(flags) == 0 || !strings.HasPrefix(cmd, "boxer run ") {
+		return cmd
+	}
+	return "boxer run " + strings.Join(flags, " ") + " " + strings.TrimPrefix(cmd, "boxer run ")
 }
 
 func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) int {
@@ -168,7 +179,13 @@ func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) 
 	for _, w := range e.Warnings {
 		ctx += "\nNote: " + w + "."
 	}
-	if config.Has(e.Cfg.CreateOn, purpose) {
+	if purpose == "session_start" && e.Cfg.WarmOnSessionStart {
+		// Provision in a detached `boxer up`; the first run waits on the per-scope lock if it
+		// arrives before the create finishes, and nothing here blocks the session.
+		if err := e.UpDetached(); err != nil {
+			fmt.Fprintf(stderr, "boxer: warm-up did not start: %v\n", err)
+		}
+	} else if config.Has(e.Cfg.CreateOn, purpose) {
 		if _, err := e.Ensure(true, false); err != nil {
 			fmt.Fprintln(stderr, err)
 			ctx += "\nThe sandbox is not available yet; the `boxer:` message above says why."
@@ -240,11 +257,14 @@ type traceWriter struct{ path, harness string }
 
 func (t traceWriter) Write(p []byte) (int, error) {
 	if f, err := os.OpenFile(t.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintf(f, "%s -> %s", t.harness, p)
+		fmt.Fprintf(f, "%s %s -> %s", stamp(), t.harness, p)
 		f.Close()
 	}
 	return len(p), nil
 }
+
+// stamp is the trace line prefix: when a signal fired is what the timing matrix measures.
+func stamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func names() []string {
 	var out []string
