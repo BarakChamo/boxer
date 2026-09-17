@@ -132,9 +132,10 @@ in the guest (`Linux`), a host canary was not written, no denials, and the VM ha
 Inside cells run the same through `boxer shell <harness>` and `boxer acp <harness>`. Plan and
 findings: [docs/eval-plan.md](docs/eval-plan.md).
 
-Last run on Apple Silicon, smolvm 1.16.1 (2026-09-17): smoke 44/44; T1 49 pass, 0 fail, 4 skips
-(orchestrators needing an install or account); T2 Claude Code 7/7 live, others skipped for
-credentials. Inside cells start in 9 to 28 s from per-host harness packs. Full matrix and skip
-reasons: [docs/status.md](docs/status.md).
+Last run on Apple Silicon, smolvm 1.16.1 (2026-09-18): smoke 46/46; T1 55 pass, 0 fail, 4 skips
+(orchestrators needing an install or account); T2 live on `zai/glm-5.3-flash` 31 pass, 1 fail
+(Grok tool mode costs one denial), 16 skips (Gemini needs its own key); adherence tier 16 to 17 of
+18 on four models with no command ever reaching the host. Full matrices and skip reasons:
+[docs/status.md](docs/status.md).
 
 Requirements: [docs/requirements.md](docs/requirements.md). Plan: [docs/plan.md](docs/plan.md).

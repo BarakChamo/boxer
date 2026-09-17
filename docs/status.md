@@ -1,4 +1,4 @@
-# Status: operational slice v0.1 (2026-09-17)
+# Status: operational slice v0.1.1 (2026-09-18)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
@@ -7,18 +7,20 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 
 ## Proven
 
-Unit tests green; smoke 44/44; T1 **49 pass, 0 fail, 4 skip** (the skips are orchestrators that
-need an install or account, see below). Every cell is a fresh repository and a fresh VM.
+Unit tests green; smoke 46/46; T1 **55 pass, 0 fail, 4 skip** (skips are orchestrators that need an install or
+account); T2 live on `zai/glm-5.3-flash` **31 pass, 1 fail, 16 skip** for $0.15 (the fail is the Grok
+tool-mode finding below; skips are Gemini without its own key, scripted-only noncompliant cells,
+and orchestrators). Every cell is a fresh repository and a fresh VM.
 
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | pass | pass | pass 17 s | pass 25 s | **7/7 pass** (Keychain login) |
-| Codex | pass | pass | pass 9 s | pass 15 s | skip: `AI_GATEWAY_API_KEY` (no ChatGPT login needed any more) |
-| Gemini CLI | pass | pass | pass 10 s | pass 13 s | skip: `GEMINI_API_KEY` (only harness the gateway cannot serve) |
-| OpenCode | pass | pass | pass 14 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` |
-| pi | pass | pass | pass 28 s | no ACP server | skip: same |
-| Kimi | block-only hooks; shims | pass | pass 9 s | pass 13 s | skip: `AI_GATEWAY_API_KEY` |
-| Grok | pass (user and project hooks) | t2 only (tools behind `search_tool`) | pass 12 s | pass 18 s | skip: `AI_GATEWAY_API_KEY` |
+| Claude Code | pass | pass | pass 13 s | pass 13 s | 7/7 live; session and subagent isolation and the four worktree timings pass at t1 |
+| Codex | pass | pass | pass 22 s | pass 14 s | 2/2 live (gateway, no ChatGPT login) |
+| Gemini CLI | pass | pass | pass 10 s | pass 13 s | skip: needs `GEMINI_API_KEY` (only harness the gateway cannot serve) |
+| OpenCode | pass | pass | pass 11 s | pass 11 s | 3/3 live |
+| pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
+| Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
+| Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 3/4 live: tool mode costs one denial (below) |
 | DSH | block-only hooks; shims | bundle only | not in table | none | not installed |
 
 Inside timings are for a host that already holds the harness pack; the first `boxer shell <h>`
@@ -55,6 +57,16 @@ default: `deepseek/deepseek-v4-flash` (zero denials outside Grok, $0.0046 per ce
 
 ## Shipped in this slice
 
+Third pass (2026-09-18): `warm_on_session_start` (SessionStart returns in 9 ms, VM ready before the
+first tool call), `worktree.manage`, `boxer install git` (post-checkout warm-up), `doctor` signal
+report, rewrites carry `--session/--agent` under those isolations, Agent Plugins 1.0.0 package
+(`boxer package plugin`, validated in Claude Code, Codex, Gemini, Grok; schema-conformance test),
+MCP lifecycle signals (detached warm-up on `initialize`, last-used on EOF), MCP `cwd` mapping from
+guest paths, install retry on a dropped exec, adherence tier with the two-model rule, gateway spend
+tracking and a per-run budget, provider rate limits reported as skips, concurrent-creator wait
+when two boxers race smolvm, Codex guest gets CA certificates.
+
+First and second pass:
 - `pkg/boxer` facade (experimental), `--json` on `ls`, `status`, `down`, `gc`, `doctor`.
 - goreleaser, `install.sh`, npm wrapper `boxer-cli`, CI and release workflows, plugin version
   stamping with a `doctor` mismatch warning.
@@ -71,7 +83,14 @@ default: `deepseek/deepseek-v4-flash` (zero denials outside Grok, $0.0046 per ce
 - First harness install per host depends on npm through smolvm's TSI networking; observed 10 s
   to 11 min and one stall over 13 min. The install is retried once and verified.
 - Claude Code's Keychain login does not enter the VM (`claude setup-token`); Gemini likewise.
-- Grok plugin hooks do not run headless (1.0.34); user or project hooks do.
+- Grok plugin hooks do not run headless (1.0.34); user or project hooks do. Grok also does not
+  surface session-start context to the model, so tool mode costs one denial on the first shell
+  command; rewrite mode is the right Grok default.
+- Under `session`/`subagent` isolation the MCP run tool resolves the worktree scope (MCP carries
+  no ids); hooks carry them.
+- Codex strips `XDG_STATE_HOME` from its shell, so boxer processes started by its shell and by its
+  MCP server lock different directories; the create race is handled by waiting on smolvm's
+  "already exists" answer.
 - Packs are 130 to 365 MB each under the state directory.
 - OpenCode's `session.created` is not awaited, so a very short first turn can finish before the
   VM exists; harmless in real use.
@@ -90,7 +109,6 @@ python3 -m venv .venv-openhands && .venv-openhands/bin/pip install openhands-sdk
 
 ## What comes next
 
-Git-hook install (`boxer install git`), `worktree.manage` and `warm_on_session_start`,
 devcontainer.json loader, `Backend` interface (Firecracker, Docker Sandboxes), a running-boxes
 dashboard on the JSON API, Homebrew tap, plugin marketplace repos, Conductor cloud once smolvm
 exists there. Landed on the `packaging` branch 2026-09-17: the Agent Plugins package collapse
