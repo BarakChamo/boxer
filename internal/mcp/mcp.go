@@ -1,5 +1,9 @@
 // Package mcp is a minimal stdio MCP server exposing boxer_run and boxer_status (R-PKG-3).
 // It speaks newline-delimited JSON-RPC 2.0 and nothing beyond what those two tools need.
+//
+// The MCP lifecycle is also a session signal every harness emits (R-SIG, "MCP initialize" and
+// "MCP EOF"): initialize warms the server's own scope when create_on lists "mcp", and stdin EOF
+// records the last use, so a harness with no hooks still provisions at session start.
 package mcp
 
 import (
@@ -8,9 +12,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
 )
 
@@ -40,6 +49,8 @@ type Server struct {
 	Harness string
 	Resolve func(cwd, harness string, id scope.Identity) (*box.Env, error)
 	Version string
+
+	warm sync.WaitGroup
 }
 
 var tools = []map[string]any{
@@ -62,8 +73,9 @@ var tools = []map[string]any{
 	},
 }
 
-// Serve runs until r is exhausted.
+// Serve runs until r is exhausted. EOF is the session's end.
 func (s *Server) Serve(r io.Reader, w io.Writer) error {
+	defer s.sessionEnd()
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	enc := json.NewEncoder(w)
@@ -92,6 +104,7 @@ func (s *Server) handle(req request) response {
 	res := response{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
+		s.sessionStart()
 		res.Result = map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -118,9 +131,63 @@ func (s *Server) handle(req request) response {
 	return res
 }
 
+// sessionStart warms the server's own scope in the background when configuration allows; the
+// initialize response is never delayed by it, and Ensure's per-scope lock makes it a no-op when
+// a hook or a first tool call gets there first (R-SIG-1).
+func (s *Server) sessionStart() {
+	e, err := s.Resolve("", s.Harness, scope.Identity{})
+	if err != nil || !config.Has(e.Cfg.CreateOn, "mcp") {
+		return
+	}
+	s.warm.Add(1)
+	go func() {
+		defer s.warm.Done()
+		if _, err := e.Ensure(true, false); err != nil {
+			fmt.Fprintln(e.Stderr, err)
+		}
+	}()
+}
+
+// sessionEnd waits for a pending warm-up and records the last use of the scope, so gc's idle
+// clock starts at the session's end rather than its last command.
+func (s *Server) sessionEnd() {
+	s.warm.Wait()
+	e, err := s.Resolve("", s.Harness, scope.Identity{})
+	if err != nil || !config.Has(e.Cfg.CreateOn, "mcp") {
+		return
+	}
+	p := filepath.Join(box.LastUsedDir(), e.Scope.Key)
+	now := time.Now()
+	if os.Chtimes(p, now, now) != nil {
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, nil, 0o644)
+	}
+}
+
+// resolve maps the tool's cwd to a scope. A live model reads the guest mount path from its brief
+// and passes that back; a path under the mount maps to the host worktree. Any other path with no
+// worktree falls back to the server's own directory, with a note in the result.
+func (s *Server) resolve(cwd string) (*box.Env, string, error) {
+	e, err := s.Resolve(cwd, s.Harness, scope.Identity{})
+	if err == nil || cwd == "" {
+		return e, "", err
+	}
+	base, berr := s.Resolve("", s.Harness, scope.Identity{})
+	if berr != nil {
+		return nil, "", err
+	}
+	if mount := base.MountAt(); cwd == mount || strings.HasPrefix(cwd, mount+"/") {
+		host := filepath.Join(base.Scope.Root, strings.TrimPrefix(cwd, mount))
+		if m, merr := s.Resolve(host, s.Harness, scope.Identity{}); merr == nil {
+			return m, "", nil
+		}
+	}
+	return base, fmt.Sprintf("note: cwd %q is not inside a git worktree; ran in %s\n", cwd, base.CWD), nil
+}
+
 func (s *Server) call(name string, args map[string]any) (string, bool) {
 	cwd, _ := args["cwd"].(string)
-	e, err := s.Resolve(cwd, s.Harness, scope.Identity{})
+	e, note, err := s.resolve(cwd)
 	if err != nil {
 		return err.Error(), true
 	}
@@ -132,9 +199,9 @@ func (s *Server) call(name string, args map[string]any) (string, bool) {
 		}
 		img, why := e.Image()
 		if !ok {
-			return fmt.Sprintf("scope %s (%s): no sandbox yet; image would be %s (%s); mount %s", e.Scope.Key, e.Scope.Isolation, img, why, e.Cfg.MountAt), false
+			return note + fmt.Sprintf("scope %s (%s): no sandbox yet; image would be %s (%s); mount %s", e.Scope.Key, e.Scope.Isolation, img, why, e.Cfg.MountAt), false
 		}
-		return fmt.Sprintf("scope %s (%s): %s, image %s, worktree %s mounted at %s", e.Scope.Key, e.Scope.Isolation, m.State, m.Image, e.Scope.Root, e.Cfg.MountAt), false
+		return note + fmt.Sprintf("scope %s (%s): %s, image %s, worktree %s mounted at %s", e.Scope.Key, e.Scope.Isolation, m.State, m.Image, e.Scope.Root, e.Cfg.MountAt), false
 	case "boxer_run":
 		cmd, _ := args["command"].(string)
 		if strings.TrimSpace(cmd) == "" {
@@ -146,7 +213,7 @@ func (s *Server) call(name string, args map[string]any) (string, bool) {
 		if err != nil {
 			return err.Error(), true
 		}
-		return fmt.Sprintf("%s\n[exit %d]", strings.TrimRight(out.String(), "\n"), code), code != 0
+		return fmt.Sprintf("%s%s\n[exit %d]", note, strings.TrimRight(out.String(), "\n"), code), code != 0
 	default:
 		return "unknown tool " + name, true
 	}
