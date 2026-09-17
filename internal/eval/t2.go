@@ -96,7 +96,7 @@ func gateway(h string) (openAICompatible, string) {
 
 // quotaError recognises a live turn stopped by the provider rather than by boxer.
 func quotaError(out string) string {
-	for _, needle := range []string{"usage limit", "usage_limit", "quota", "rate limit", "insufficient_quota", "credit balance"} {
+	for _, needle := range []string{"usage limit", "usage_limit", "quota", "rate limit", "rate-limited", "rate_limit", "too many requests", "free tier", "insufficient_quota", "credit balance", "no_providers_available"} {
 		if i := strings.Index(strings.ToLower(out), needle); i >= 0 {
 			start := i
 			end := i + 160

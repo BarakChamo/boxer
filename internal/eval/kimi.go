@@ -131,8 +131,8 @@ base_url = %q
 [models.eval]
 provider = "eval"
 model = %q
-max_context_size = 200000
-`, typ, key, baseURL, model)
+max_context_size = 131072
+`, typ, key, baseURL, model) // 131072: Kimi derives max_tokens from this, and gateway flash models cap output there
 }
 
 // prependPath puts dir first on PATH inside an environment slice.

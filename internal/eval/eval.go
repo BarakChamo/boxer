@@ -412,6 +412,12 @@ func runCell(d Driver, c Cell, tier, boxerBin string, keep bool, log io.Writer) 
 	status := "pass"
 	if len(findings) > 0 {
 		status = "fail"
+		// A live turn the provider refused (quota, free-tier rate limit) says nothing about boxer.
+		if tier == "t2" {
+			if q := quotaError(tr.Raw); q != "" {
+				return Result{Cell: c, Status: "skip", Reason: q, Raw: tr.Raw}
+			}
+		}
 	}
 	return Result{Cell: c, Status: status, Findings: findings, Raw: tr.Raw}
 }
