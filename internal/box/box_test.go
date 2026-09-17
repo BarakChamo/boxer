@@ -306,3 +306,23 @@ func TestUpDetachedSpawnsWithoutWaiting(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// Two boxer processes with different lock directories (a harness that strips XDG_STATE_HOME from
+// its shell) both try to create the scope; smolvm rejects the second, which must wait, not fail.
+func TestCreateWaitsForAConcurrentCreator(t *testing.T) {
+	_, _ = vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = &bytes.Buffer{}
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	// The fake now holds this machine; a second create for the same name is what a racing
+	// process sees. create() must return nil once Exists reports the machine.
+	if err := e.create(); err != nil {
+		t.Fatalf("second create should wait for the existing machine, got %v", err)
+	}
+}

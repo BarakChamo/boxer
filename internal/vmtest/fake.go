@@ -31,6 +31,7 @@ case "$1 $2" in
       echo "Error: config operation failed: machine status: machine not found" >&2; exit 1
     fi ;;
   "machine create")
+    if [ -f "$state_file" ] && [ "$(sed -n 1p "$state_file")" = "$4" ]; then echo "Error: config operation failed: create machine: machine '$4' already exists or is being created" >&2; exit 1; fi
     shift 2; name=""; root=""
     while [ $# -gt 0 ]; do
       case "$1" in

@@ -286,10 +286,29 @@ func (e *Env) create() error {
 		Ports:      e.Cfg.Network.Ports,
 	}
 	if err := e.VM.Create(spec); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			// Another boxer (a hook, a detached warm-up, an MCP server) is creating this scope
+			// under a different lock directory (a harness that strips XDG_STATE_HOME from its
+			// shell environment, for one). Wait for it rather than fail the command.
+			return e.awaitCreated()
+		}
 		return &Error{Reason: "sandbox could not be created: " + err.Error(), Cause: "CREATE_FAILED", Scope: e.Scope,
 			Fix: "boxer doctor"}
 	}
 	return nil
+}
+
+// awaitCreated polls for a machine another process is creating for this scope.
+func (e *Env) awaitCreated() error {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok, err := e.Exists(); err == nil && ok {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return &Error{Reason: "another boxer is still creating this sandbox", Cause: "CREATE_FAILED", Scope: e.Scope,
+		Fix: "boxer doctor"}
 }
 
 // PackDir is where the host keeps its .smolmachine packs: one per image, one per image and
