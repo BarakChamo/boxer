@@ -38,7 +38,9 @@ type Harness struct {
 	Args     []string
 }
 
-// Harnesses is the table. Verified 2026-09-17 against installed CLIs: ACP commands exist for
+// Harnesses is the table. The slim node image ships no CA store; harnesses that are Rust or Go
+// binaries (Codex) need ca-certificates for TLS, node-based ones carry their own roots. Verified
+// 2026-09-17 against installed CLIs: ACP commands exist for
 // Gemini (--acp), Kimi (acp), OpenCode (acp), Grok (agent stdio); Claude and Codex through their
 // ACP adapter packages; pi has none.
 var Harnesses = map[string]Harness{
@@ -49,7 +51,7 @@ var Harnesses = map[string]Harness{
 		GuestEnv:  []string{"IS_SANDBOX=1"},
 		Creds:     []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"},
 		LoginHint: "Claude Code's macOS Keychain login does not enter the VM; run `claude setup-token` on the host and export CLAUDE_CODE_OAUTH_TOKEN"},
-	"codex": {Bin: "codex", Install: "apt-get update -qq && apt-get install -y -qq --no-install-recommends libssl3 && npm i -g @openai/codex @agentclientprotocol/codex-acp",
+	"codex": {Bin: "codex", Install: "apt-get update -qq && apt-get install -y -qq --no-install-recommends libssl3 ca-certificates && npm i -g @openai/codex @agentclientprotocol/codex-acp",
 		ACP: []string{"codex-acp"}, ConfigVar: "CODEX_HOME", ConfigDir: "~/.codex",
 		Env:      []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"},
 		Hosts:    []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
