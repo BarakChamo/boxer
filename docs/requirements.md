@@ -428,8 +428,17 @@ warm               = []
   and flaky step (quota, stalled blobs, 20 to 75 s). boxer therefore packs each image once per host
   (`smolvm pack create`, stored under the state directory keyed by the image name) and creates
   machines `--from` the pack: the first VM for an image pays the pull, every later VM boots in
-  under a second. A pack failure falls back to a direct pull and says so. Packs are not pruned yet.
-  `BOXER_PACKS` overrides the pack directory (the eval shares one across its isolated state dirs).
+  under a second. A pack failure falls back to a direct pull and says so. In inside mode the
+  harness install is the next slow step (npm in the guest, 1.5 to 11 min), so after the first
+  successful install boxer packs that VM too (`smolvm pack create --from-vm`, keyed by image and
+  harness; smolvm packs only a stopped VM, so the VM is stopped and restarted around it, about 7 s
+  once per host) and later VMs for the same harness are created from the harness pack with the
+  install marker already inside. Verified on smolvm 1.16.1: the installed binary and marker
+  travel, and the derived machine accepts `--volume`, `--allow-host` and `--label`. Every machine
+  carries a `boxer.pack` label naming its pack and a pack's mtime is its last use, so `boxer gc`
+  deletes packs no machine references once they pass `idle_timeout` (`--dry-run` lists them;
+  `idle_timeout = "never"` keeps them all). `BOXER_PACKS` overrides the pack directory (the eval
+  shares one across its isolated state dirs).
 - **R-CFG-3.** Secrets are references resolved on the host at run time, matching smolvm's model,
   which stores no secret material. Values never appear in the config file or in VM metadata.
 
@@ -632,8 +641,18 @@ integration = "inside"    # harness runs in the VM; nothing to hook, rewrite, or
   so any ACP client (T3 Code, Paperclip, Zed, JetBrains) points its agent command at boxer.
 - **R-INT-3.** Inside mode mounts the worktree at its host path and each harness's config directory
   at its host path, read-write, and sets `HOME` to the host home, so paths, sessions, and logins are
-  the same on both sides. Claude Code's macOS Keychain login does not travel; `CLAUDE_CODE_OAUTH_TOKEN`
-  from `claude setup-token` is passed through.
+  the same on both sides. Which logins travel, checked 2026-09-17 by reading the config
+  directories and CLI sources, not by logging in: Codex's `~/.codex/auth.json` is a plain 0600 file
+  (`auth_mode`, `OPENAI_API_KEY`, `tokens`) and travels with the mount. Claude Code's macOS login is a
+  Keychain item (`Claude Code-credentials`; no `~/.claude/.credentials.json` on the host) and does
+  not travel, so `boxer shell claude` prints one stderr line pointing at `claude setup-token` and
+  `CLAUDE_CODE_OAUTH_TOKEN` when none of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` is set (the hint is a row of the harness table). Gemini CLI's Google
+  login also lives in the Keychain on macOS (`HybridTokenStorage`; it migrates the older
+  `~/.gemini/oauth_creds.json` into the Keychain and deletes it), so it does not travel either;
+  inside the guest the Keychain is absent and Gemini falls back to `~/.gemini/gemini-credentials.json`
+  in the mounted directory, so logging in once inside the VM persists across VMs. `GEMINI_API_KEY`
+  passes through when set.
 - **R-INT-4.** The harness is installed once per VM by a data table (npm package or binary URL),
   recorded by a marker file; the default inside image is `node:24-bookworm-slim` from the Google
   mirror; the network allowlist gains the npm registry, the Debian mirror (Codex's ACP adapter
