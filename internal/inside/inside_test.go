@@ -2,10 +2,47 @@ package inside
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/vmtest"
 )
+
+// R-INT-4: a dropped exec transport during the harness install restarts the VM and retries once.
+func TestInstallRetriesAfterDroppedTransport(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("require_worktree = \"off\"\n"), 0o644)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	e, err := box.Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = os.Stderr
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	vmtest.FailExecOnce(t, "touch /var/lib/boxer/harness-x")
+	if err := install(e, "x", Harness{Bin: "true", Install: "true"}); err != nil {
+		t.Fatalf("install must succeed after one dropped exec: %v", err)
+	}
+	b, _ := os.ReadFile(log)
+	if strings.Count(string(b), "harness-x") != 3 || !strings.Contains(string(b), "machine stop") {
+		t.Fatalf("want marker check, failed install, stop+start, retried install:\n%s", b)
+	}
+}
 
 func TestTableIsConsistent(t *testing.T) {
 	for _, n := range Names() {

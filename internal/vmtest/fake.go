@@ -57,10 +57,15 @@ case "$1 $2" in
     rm -f "$state_file" "$state_file.setup" ;;
   "machine exec")
     shift 2; while [ $# -gt 0 ]; do case "$1" in --) shift; break;; -w|--name|-e) shift;; esac; shift; done
+    if [ -f "$FAKE_STATE.flaky" ]; then
+      # Drop the transport once for the first exec whose argv contains the marker's text.
+      case "$*" in *"$(cat "$FAKE_STATE.flaky")"*) rm -f "$FAKE_STATE.flaky"; echo "Error: connection closed" >&2; exit 1;; esac
+    fi
     if [ "$1" = "sh" ]; then
       case "$*" in
         *"test -f /var/lib/boxer/setup-done"*) [ -f "$FAKE_STATE.setup" ] && exit 0 || exit 1;;
         *"touch /var/lib/boxer/setup-done"*) touch "$FAKE_STATE.setup"; exit 0;;
+        *"touch /var/lib/boxer/harness-"*) exit 0;;
       esac
     fi
     exec "$@" ;;
@@ -68,6 +73,14 @@ case "$1 $2" in
     echo "smolvm 0.0.0-fake" ;;
 esac
 `
+
+// FailExecOnce makes the next exec whose argv contains text fail with smolvm's "connection closed".
+func FailExecOnce(t *testing.T, text string) {
+	t.Helper()
+	if err := os.WriteFile(os.Getenv("FAKE_STATE")+".flaky", []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Install writes the fake, points BOXER_SMOLVM at it, and returns a client plus the log path.
 func Install(t *testing.T) (vm.Client, string) {
