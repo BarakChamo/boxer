@@ -1,0 +1,13 @@
+{
+  "name": "boxer-cli",
+  "version": "0.0.0",
+  "description": "Run coding-agent shell commands in a smolvm microVM keyed to the git worktree. Downloads the matching boxer release binary on install.",
+  "repository": "github:BarakChamo/boxer",
+  "homepage": "https://github.com/BarakChamo/boxer",
+  "bin": { "boxer": "bin/boxer.js" },
+  "scripts": { "postinstall": "node postinstall.js" },
+  "files": ["bin/boxer.js", "postinstall.js"],
+  "os": ["darwin", "linux"],
+  "cpu": ["x64", "arm64"],
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,33 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Render every plugin bundle and validate its JSON
+        run: |
+          go run ./cmd/boxer package all --out /tmp/d
+          python3 - <<'PY'
+          import json, pathlib, sys
+          files = list(pathlib.Path('/tmp/d').rglob('*.json'))
+          for f in files:
+              json.loads(f.read_text())
+          print(f'{len(files)} JSON files valid')
+          sys.exit(0 if files else 1)
+          PY
+      - name: goreleaser config check
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
+        with:
+          version: "~> v2"
+          args: check

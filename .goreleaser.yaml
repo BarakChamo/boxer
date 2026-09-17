@@ -1,0 +1,44 @@
+# goreleaser v2. Tag v0.x.y, push, and the release workflow runs `goreleaser release --clean`.
+version: 2
+project_name: boxer
+
+before:
+  hooks:
+    - go mod tidy
+    # Plugins carry the version they were rendered from, so the renderer is built with it stamped.
+    - sh -c 'rm -rf dist/plugins && go run -ldflags "-X main.Version={{ .Version }}" ./cmd/boxer package all --out dist/plugins && tar -czf dist/boxer-plugins-{{ .Version }}.tar.gz -C dist/plugins .'
+
+builds:
+  - id: boxer
+    main: ./cmd/boxer
+    binary: boxer
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w -X main.Version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "boxer_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  extra_files:
+    - glob: dist/boxer-plugins-*.tar.gz
+
+changelog:
+  use: git
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
