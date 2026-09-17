@@ -47,7 +47,7 @@ when the prompt never mentions boxer? Full matrix, spend and transcript evidence
 | OpenCode | 4/4 | 4/4 | 4/4 | pass |
 | pi | 4/4 | 4/4 | 4/4 | pass |
 | Kimi | 2/4 (Haiku, qwen: one denial) | 4/4 | 4/4 (tool mode) | model adherence |
-| Grok | 0/4 (one denial each) | 4/4 | 4/4 | **harness**: `boxer_run` sits behind `search_tool`; brief must say so |
+| Grok | 0/4 (one denial each) | 4/4 | 4/4 | **harness**: Grok does not surface session-start context; tool mode always costs one denial, use rewrite mode |
 
 Models: GLM 5.3 flash 16/18 ($0.11), Haiku 4.5 16/18 ($0.79), qwen3.7 flash 16/18 ($0.03),
 deepseek v4 flash 17/18 ($0.08). No command ran on the host in any of the 72 cells. Recommended

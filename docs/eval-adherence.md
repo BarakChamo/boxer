@@ -110,3 +110,13 @@ than GLM and 10× less than Haiku. GLM stays a sound default (its one non-Grok f
 tool-argument slip, not a brief violation). qwen is the cheapest by 3× but took denials on three
 Kimi cells; Haiku, the control, buys no adherence for its price. One run per model; rerun before
 changing `.env` if a decision hangs on the one-cell gap between deepseek and GLM.
+
+## Follow-up on the Grok verdict (2026-09-18)
+
+The brief now names the dispatcher for Grok (`RunToolHint` in the hook dialect table: "find it with
+search_tool, then call it with use_tool"). Rerun of `grok/tool/user/worktree/brief` on GLM: still one
+denial. The hook trace shows the `session_start` hook returning `additionalContext` with the brief,
+and the model's first action is still `run_terminal_command`, so Grok 1.0.34 does not surface
+session-start context to the model; the brief reaches it only through the skill, which is read on
+demand. Consequence: in Grok, tool mode always costs one denial on the first shell command, and
+rewrite mode (4/4 models, zero denials) is the right default. Recorded in status.md.
