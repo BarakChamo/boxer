@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "name": "boxer-provision", "command": "boxer hook gemini-cli", "timeout": 120000 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "name": "boxer-reclaim", "command": "boxer hook gemini-cli", "timeout": 60000 }] }
+    ],
+    "BeforeTool": [
+      { "matcher": "run_shell_command", "hooks": [{ "type": "command", "name": "boxer-intercept", "command": "boxer hook gemini-cli", "timeout": 30000 }] }
+    ]
+  }
+}

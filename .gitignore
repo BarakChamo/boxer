@@ -1,0 +1,5 @@
+bin/
+dist/
+.venv-openhands/
+evals/.env
+__pycache__/

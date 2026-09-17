@@ -1,0 +1,104 @@
+package eval
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// Pi drives pi in print mode with the boxer extension loaded via -e. pi has no config-dir
+// variable, so t1 runs it under a private HOME holding models.json; smolvm's own data lives under
+// the real HOME, so that directory is linked into the private one.
+type Pi struct{}
+
+func (Pi) Name() string { return "pi" }
+
+func (Pi) Available(tier string) (bool, string) {
+	if _, err := exec.LookPath("pi"); err != nil {
+		return false, "pi not installed"
+	}
+	if tier == "t2" {
+		return false, "pi live run needs `pi` → /login; not automated"
+	}
+	return true, ""
+}
+
+func (Pi) Cells(tier string) []Cell {
+	h := "pi"
+	mk := func(mode string, compliant bool) Cell {
+		return Cell{Harness: h, Mode: mode, Entry: "project", Isolation: "worktree", Compliant: compliant, Tier: tier}
+	}
+	return []Cell{mk("rewrite", true), mk("tool", true), mk("tool", false), mk("off", true)}
+}
+
+func (Pi) home(env *Env) string { return filepath.Join(env.Work, "pi-home") }
+
+func (d Pi) Prepare(env *Env, c Cell) error {
+	if out, err := env.boxer(env.Repo, "install", "pi"); err != nil {
+		return fmt.Errorf("boxer install pi: %v\n%s", err, out)
+	}
+	home := d.home(env)
+	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+		return err
+	}
+	models := fmt.Sprintf(`{"providers":{"fake":{"baseUrl":%q,"api":"anthropic-messages","apiKey":"fake","models":[{"id":"fake-model","name":"fake","contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, env.LLMURL)
+	if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "models.json"), []byte(models+"\n"), 0o644); err != nil {
+		return err
+	}
+	// boxer and its hooks run inside pi's private HOME, but smolvm's state must stay in the real
+	// one, or it fights the real machine over the same disks. A wrapper restores HOME for smolvm.
+	real, _ := os.UserHomeDir()
+	smolvm, err := exec.LookPath("smolvm")
+	if err != nil {
+		return fmt.Errorf("smolvm not on PATH: %v", err)
+	}
+	wrapper := filepath.Join(env.Work, "smolvm-realhome")
+	script := fmt.Sprintf("#!/bin/sh\nHOME=%q exec %q \"$@\"\n", real, smolvm)
+	return os.WriteFile(wrapper, []byte(script), 0o755)
+}
+
+func (d Pi) smolvmWrapper(env *Env) string { return filepath.Join(env.Work, "smolvm-realhome") }
+
+func (d Pi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
+	args := []string{"-p", "--no-session", "-e", ".pi/extensions/boxer.ts", prompt}
+	if env.Tier == "t1" {
+		args = append([]string{"--provider", "fake", "--model", "fake-model"}, args...)
+	}
+	cmd := exec.Command("pi", args...)
+	cmd.Dir = env.Repo
+	cmd.Env = append(env.BaseEnv(), "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0")
+	if env.Tier == "t1" {
+		cmd.Env = append(cmd.Env, "HOME="+d.home(env), "BOXER_SMOLVM="+d.smolvmWrapper(env))
+	}
+	cmd.Stdin = strings.NewReader("")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		return Transcript{}, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(4 * time.Minute):
+		cmd.Process.Kill()
+		return Transcript{Raw: out.String()}, fmt.Errorf("pi timed out")
+	}
+	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}
+	for _, line := range strings.Split(stripANSI(out.String()), "\n") {
+		l := strings.TrimSpace(line)
+		if l == "" || strings.HasPrefix(l, "boxer") || strings.HasPrefix(l, "scope:") || strings.HasPrefix(l, "worktree:") || strings.HasPrefix(l, "cause:") || strings.HasPrefix(l, "fix:") {
+			continue
+		}
+		if f := strings.Fields(l); len(f) > 0 {
+			tr.Answer = f[0]
+		}
+	}
+	return tr, nil
+}
+
+func (Pi) Cleanup(env *Env, c Cell) {}

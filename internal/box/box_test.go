@@ -1,0 +1,215 @@
+package box
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/vmtest"
+)
+
+func repo(t *testing.T, toml string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	if toml != "" {
+		os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no user config leaks in
+	t.Setenv("XDG_STATE_HOME", t.TempDir())  // locks, last-used and packs stay in the test
+	r, _ := filepath.EvalSymlinks(dir)
+	return r
+}
+
+func TestRunProvisionsLazilyAndPropagatesExit(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := repo(t, "setup = [\"echo installing\"]\nrequire_worktree = \"off\"\n")
+	os.WriteFile(filepath.Join(dir, "bun.lock"), nil, 0o644)
+	sub := filepath.Join(dir, "apps", "api")
+	os.MkdirAll(sub, 0o755)
+
+	e, err := Resolve(sub, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = &bytes.Buffer{}
+	if img, why := e.Image(); img != "oven/bun:1-debian" || !strings.Contains(why, "bun.lock") {
+		t.Fatalf("image detection: %s %s", img, why)
+	}
+	if e.GuestWorkdir() != "/workspace/apps/api" {
+		t.Fatalf("workdir: %s", e.GuestWorkdir())
+	}
+	var out bytes.Buffer
+	code, err := e.Run([]string{"sh", "-c", "echo ran; exit 7"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out})
+	if err != nil || code != 7 || !strings.Contains(out.String(), "ran") {
+		t.Fatalf("run: %d %v %q", code, err, out.String())
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if !strings.Contains(s, "machine create -n "+e.Scope.Key) || !strings.Contains(s, "pack create -I oven/bun:1-debian") || !strings.Contains(s, "--from ") || !strings.Contains(s, "--allow-host registry-1.docker.io") {
+		t.Fatalf("create flags:\n%s", s)
+	}
+	if strings.Count(s, "echo installing") != 1 {
+		t.Fatalf("setup should run once:\n%s", s)
+	}
+	// Second run: VM running, setup marker present, no create.
+	code, err = e.Run([]string{"true"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out})
+	if err != nil || code != 0 {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(log)
+	if strings.Count(string(b), "machine create") != 1 || strings.Count(string(b), "echo installing") != 1 {
+		t.Fatalf("second run must reuse:\n%s", b)
+	}
+	if err := e.Down(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := e.Exists(); ok {
+		t.Fatal("down should delete")
+	}
+}
+
+func TestRunRefusesWhenCreateNotAllowed(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "create_on = [\"session_start\"]\nrequire_worktree = \"off\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code, err := e.Run([]string{"true"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out})
+	be, ok := err.(*Error)
+	if !ok || code != 1 || be.Cause != "NO_SANDBOX" || !strings.Contains(be.Error(), "fix:       boxer up") {
+		t.Fatalf("want NO_SANDBOX error, got %d %v", code, err)
+	}
+	if !strings.HasPrefix(be.Error(), "boxer: ") || !strings.Contains(be.Error(), "scope:     sb-") {
+		t.Fatalf("error contract: %q", be.Error())
+	}
+}
+
+func TestSetupFailureDeletesVM(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "setup = [\"exit 5\"]\nrequire_worktree = \"off\"\n")
+	e, _ := Resolve(dir, "", scope.Identity{})
+	e.Stderr = &bytes.Buffer{}
+	_, err := e.Ensure(true, false)
+	be, ok := err.(*Error)
+	if !ok || be.Cause != "SETUP_FAILED" {
+		t.Fatalf("want SETUP_FAILED, got %v", err)
+	}
+	if _, exists, _ := e.Exists(); exists {
+		t.Fatal("failed setup must delete the VM")
+	}
+}
+
+func TestRequireWorktree(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"require\"\n")
+	_, err := Resolve(dir, "", scope.Identity{})
+	be, ok := err.(*Error)
+	if !ok || be.Cause != "WORKTREE_REQUIRED" {
+		t.Fatalf("want WORKTREE_REQUIRED, got %v", err)
+	}
+	dir = repo(t, "")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil || len(e.Warnings) != 1 {
+		t.Fatalf("warn default: %v %v", err, e.Warnings)
+	}
+}
+
+func TestHarnessOverrideAndInstructions(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n[harness.gemini-cli]\nmode = \"tool\"\n")
+	e, _ := Resolve(dir, "gemini-cli", scope.Identity{})
+	if e.Cfg.Mode != "tool" || !strings.Contains(e.Instructions(), "boxer_run tool") {
+		t.Fatalf("override: %s\n%s", e.Cfg.Mode, e.Instructions())
+	}
+	e, _ = Resolve(dir, "claude-code", scope.Identity{})
+	if e.Cfg.Mode != "rewrite" || !strings.Contains(e.Instructions(), "transparently") {
+		t.Fatal("other harness keeps default")
+	}
+}
+
+func TestGuestWorkdirThroughSymlinkedCwd(t *testing.T) {
+	vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n")
+	os.MkdirAll(filepath.Join(dir, "apps", "web"), 0o755)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Skip(err)
+	}
+	e, err := Resolve(filepath.Join(link, "apps", "web"), "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.GuestWorkdir() != "/workspace/apps/web" {
+		t.Fatalf("workdir through symlink: %s", e.GuestWorkdir())
+	}
+}
+
+func TestConcurrentEnsureCreatesOnce(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e, err := Resolve(dir, "", scope.Identity{})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			e.Stderr = &bytes.Buffer{}
+			if _, err := e.Ensure(true, false); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "machine create"); n != 1 {
+		t.Fatalf("concurrent Ensure must create once, created %d times:\n%s", n, b)
+	}
+}
+
+func TestOutsideRepo(t *testing.T) {
+	vmtest.Install(t)
+	_, err := Resolve(t.TempDir(), "", scope.Identity{})
+	if be, ok := err.(*Error); !ok || be.Cause != "NO_REPOSITORY" {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCreatePacksImageOncePerHost(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\n")
+	for i := 0; i < 2; i++ {
+		e, err := Resolve(dir, "", scope.Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.Stderr = &bytes.Buffer{}
+		if _, err := e.Ensure(true, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if strings.Count(s, "pack create") != 1 || strings.Count(s, "machine create") != 2 || strings.Count(s, "--from ") != 2 {
+		t.Fatalf("want one pack, two creates from it, log:\n%s", s)
+	}
+}

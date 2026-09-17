@@ -1,0 +1,468 @@
+// Package box is boxer's core: resolve where we are, make sure the VM for that scope exists, run
+// things in it, take it down. Every subcommand and every hook goes through here.
+package box
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/vm"
+)
+
+// Error is the agent-readable refusal from requirements §3.6.
+type Error struct {
+	Reason string
+	Cause  string
+	Fix    string
+	Scope  scope.Scope
+}
+
+func (e *Error) Error() string {
+	wt := e.Scope.Root
+	if wt == "" {
+		wt = "none"
+	}
+	fix := e.Fix
+	if fix == "" {
+		fix = "no agent-side fix; ask the operator"
+	}
+	return fmt.Sprintf("boxer: %s\n  scope:     %s (%s)\n  worktree:  %s\n  cause:     %s\n  fix:       %s",
+		e.Reason, e.Scope.Key, e.Scope.Isolation, wt, e.Cause, fix)
+}
+
+// Env is one resolved invocation.
+type Env struct {
+	CWD     string
+	Harness string
+	Cfg     config.Config
+	Git     scope.Git
+	Scope   scope.Scope
+	VM      vm.Client
+	Stderr  io.Writer
+	// Warnings collected during resolution, printed by doctor and by run when relevant.
+	Warnings []string
+}
+
+// Resolve builds an Env for cwd. harness may be empty; id fields may be empty.
+func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
+	if cwd == "" {
+		var err error
+		if cwd, err = os.Getwd(); err != nil {
+			return nil, err
+		}
+	}
+	// git reports symlink-resolved paths; cwd must match or the guest workdir falls back to the root.
+	if r, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = r
+	}
+	g, err := scope.Detect(cwd)
+	if err != nil {
+		return nil, err
+	}
+	repoRoot := ""
+	if g.CommonDir != "" {
+		repoRoot = filepath.Dir(g.CommonDir)
+	}
+	cfg, err := config.Load(g.Toplevel, repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if harness != "" {
+		cfg = cfg.ForHarness(harness)
+	}
+	e := &Env{CWD: cwd, Harness: harness, Cfg: cfg, Git: g, VM: vm.New(), Stderr: os.Stderr}
+	if g.Toplevel == "" {
+		return e, &Error{Reason: "not inside a git repository", Cause: "NO_REPOSITORY", Fix: "cd into a git worktree, or `git init`"}
+	}
+	if !g.Linked {
+		switch cfg.RequireWorktree {
+		case "require":
+			return e, &Error{Reason: "a linked git worktree is required here", Cause: "WORKTREE_REQUIRED", Scope: scope.Scope{Root: g.Toplevel},
+				Fix: "git worktree add ../<name> -b <branch> && cd ../<name>"}
+		case "warn":
+			e.Warnings = append(e.Warnings, "running in the main checkout; a linked worktree isolates this agent's files")
+		}
+	}
+	tag := ""
+	if cfg.Integration == "inside" {
+		tag = "inside"
+	}
+	s, err := scope.ResolveTagged(cfg.Isolation, cfg.OnMissingID, g, id, tag)
+	if err != nil {
+		return e, &Error{Reason: err.Error(), Cause: "SCOPE_UNRESOLVED", Scope: scope.Scope{Root: g.Toplevel},
+			Fix: "set isolation = \"worktree\" in boxer.toml, or pass --session/--agent"}
+	}
+	if s.Degraded {
+		e.Warnings = append(e.Warnings, "isolation degraded: "+s.Reason)
+	}
+	e.Scope = s
+	return e, nil
+}
+
+// Inside reports whether the harness itself runs in the guest (integration = "inside").
+func (e *Env) Inside() bool { return e.Cfg.Integration == "inside" }
+
+// MountAt is the guest path of the worktree: the host path in inside mode, so every path the
+// harness sees is valid on both sides; the configured mount otherwise.
+func (e *Env) MountAt() string {
+	if e.Inside() {
+		return e.Scope.Root
+	}
+	return e.Cfg.MountAt
+}
+
+// InsideHooks are supplied by package inside to avoid an import cycle: extra volumes, hosts, and
+// the default image for inside mode.
+var InsideHooks struct {
+	Mounts     func() []string
+	AllowHosts func() []string
+	Image      string
+}
+
+// Image returns the guest image and the reason it was chosen (R-GUEST-1).
+func (e *Env) Image() (string, string) {
+	if e.Cfg.Smolfile != "" {
+		return "", "smolfile " + e.Cfg.Smolfile
+	}
+	if e.Cfg.Image != "" {
+		return e.Cfg.Image, "image from " + e.Cfg.Sources["image"]
+	}
+	if e.Inside() && InsideHooks.Image != "" {
+		return InsideHooks.Image, "inside mode default (node for the harness)"
+	}
+	for _, d := range detectors {
+		if _, err := os.Stat(filepath.Join(e.Scope.Root, d.file)); err == nil {
+			return d.image, "detected " + d.file
+		}
+	}
+	return "debian:bookworm-slim", "no lockfile found; boxer base"
+}
+
+var detectors = []struct{ file, image string }{
+	{"bun.lock", "oven/bun:1-debian"},
+	{"bun.lockb", "oven/bun:1-debian"},
+	{"pnpm-lock.yaml", "node:24-bookworm"},
+	{"package-lock.json", "node:24-bookworm"},
+	{"yarn.lock", "node:24-bookworm"},
+	{"uv.lock", "python:3.12-bookworm"},
+	{"requirements.txt", "python:3.12-bookworm"},
+	{"pyproject.toml", "python:3.12-bookworm"},
+	{"Cargo.lock", "rust:1-bookworm"},
+	{"go.sum", "golang:1-bookworm"},
+	{"go.mod", "golang:1-bookworm"},
+}
+
+// registryHosts returns the hosts a pull of image needs, since pulls happen in the guest.
+func registryHosts(image string) []string {
+	host := "docker.io"
+	if i := strings.Index(image, "/"); i > 0 && strings.ContainsAny(image[:i], ".:") {
+		host = image[:i]
+	}
+	switch host {
+	case "docker.io", "index.docker.io":
+		return []string{"registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com", "index.docker.io"}
+	case "ghcr.io":
+		return []string{"ghcr.io", "pkg-containers.githubusercontent.com"}
+	case "mirror.gcr.io", "gcr.io":
+		// Google's Docker Hub mirror serves blobs from GCS; it has no anonymous pull quota to hit.
+		return []string{host, "storage.googleapis.com"}
+	case "public.ecr.aws":
+		return []string{host, "d2glxqk2uabbnd.cloudfront.net"}
+	default:
+		return []string{host}
+	}
+}
+
+// Exists reports the VM's current state without changing it.
+func (e *Env) Exists() (vm.Machine, bool, error) {
+	return e.VM.Status(e.Scope.Key)
+}
+
+// Ensure makes the scope's VM exist and run. It creates only when allowed; `run` passes
+// config.Has(CreateOn, "run"), hooks pass their own event. A per-scope file lock serialises
+// concurrent callers (a SessionStart hook and the first tool call arrive together), because two
+// smolvm creates or starts for one machine race into "connection closed".
+func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
+	unlock, err := lockScope(e.Scope.Key)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	m, ok, err := e.Exists()
+	if err != nil {
+		return false, err
+	}
+	if ok && recreate {
+		if err := e.VM.Delete(e.Scope.Key); err != nil {
+			return false, err
+		}
+		ok = false
+	}
+	if !ok {
+		if !allowCreate {
+			return false, &Error{Reason: "no sandbox exists for this scope", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"}
+		}
+		if err := e.create(); err != nil {
+			return false, err
+		}
+		created = true
+	} else if m.Running() {
+		return false, nil
+	}
+	if err := e.VM.Start(e.Scope.Key, e.Cfg.Branch.Enabled); err != nil {
+		return created, &Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"}
+	}
+	if err := e.setup(); err != nil {
+		return created, err
+	}
+	return created, nil
+}
+
+func (e *Env) create() error {
+	image, _ := e.Image()
+	mem, _ := config.MemoryMiB(e.Cfg.Memory)
+	hosts := append([]string{}, e.Cfg.Network.AllowHosts...)
+	if e.Cfg.Network.Mode == "allowlist" && image != "" {
+		hosts = append(hosts, registryHosts(image)...)
+	}
+	labels := map[string]string{
+		vm.LabelPrefix + "scope":       e.Scope.Key,
+		vm.LabelPrefix + "isolation":   e.Scope.Isolation,
+		vm.LabelPrefix + "root":        e.Scope.Root,
+		vm.LabelPrefix + "integration": e.Cfg.Integration,
+	}
+	volumes := []string{e.Scope.Root + ":" + e.MountAt()}
+	if e.Inside() {
+		if InsideHooks.Mounts != nil {
+			volumes = append(volumes, InsideHooks.Mounts()...)
+		}
+		if InsideHooks.AllowHosts != nil && e.Cfg.Network.Mode == "allowlist" {
+			hosts = append(hosts, InsideHooks.AllowHosts()...)
+		}
+	}
+	from := ""
+	if e.Cfg.Smolfile == "" && image != "" {
+		from = e.packed(image)
+	}
+	spec := vm.CreateSpec{
+		Name:       e.Scope.Key,
+		Image:      image,
+		From:       from,
+		Smolfile:   e.Cfg.Smolfile,
+		Volumes:    volumes,
+		Labels:     labels,
+		CPUs:       e.Cfg.CPUs,
+		MemoryMiB:  mem,
+		Network:    e.Cfg.Network.Mode,
+		AllowHosts: hosts,
+		Ports:      e.Cfg.Network.Ports,
+	}
+	if err := e.VM.Create(spec); err != nil {
+		return &Error{Reason: "sandbox could not be created: " + err.Error(), Cause: "CREATE_FAILED", Scope: e.Scope,
+			Fix: "boxer doctor"}
+	}
+	return nil
+}
+
+// packed returns the cached .smolmachine for image, packing it on first use under a per-image
+// lock. smolvm pulls a registry image again for every machine, and that pull is the slow, flaky
+// step (rate limits, stalled blobs); packing moves it to once per image per host. Any failure
+// falls back to a direct pull so a pack problem never blocks a sandbox.
+// ponytail: packs are never pruned; add to `boxer gc` when the cache dir grows to matter.
+func (e *Env) packed(image string) string {
+	dir := os.Getenv("BOXER_PACKS") // the eval shares one pack directory across isolated state dirs
+	if dir == "" {
+		dir = filepath.Join(filepath.Dir(LastUsedDir()), "packs")
+	}
+	sum := sha256.Sum256([]byte(image))
+	stub := filepath.Join(dir, hex.EncodeToString(sum[:8]))
+	side := stub + ".smolmachine"
+	if _, err := os.Stat(side); err == nil {
+		return side
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	unlock, err := lockFile(stub + ".lock")
+	if err != nil {
+		return ""
+	}
+	defer unlock()
+	if _, err := os.Stat(side); err == nil { // packed while we waited
+		return side
+	}
+	fmt.Fprintf(e.Stderr, "boxer: caching %s (once per host)\n", image)
+	if _, err := e.VM.Pack(image, stub); err != nil {
+		fmt.Fprintf(e.Stderr, "boxer: image cache failed, pulling directly: %v\n", err)
+		return ""
+	}
+	return side
+}
+
+const setupMarker = "/var/lib/boxer/setup-done"
+
+// setup runs the configured commands once per VM (R-GUEST-2). Failure deletes the VM.
+func (e *Env) setup() error {
+	if len(e.Cfg.Setup) == 0 {
+		return nil
+	}
+	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker); code == 0 {
+		return nil
+	}
+	for _, cmd := range e.Cfg.Setup {
+		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
+		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
+		if err != nil || code != 0 {
+			_ = e.VM.Delete(e.Scope.Key)
+			return &Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
+				Fix: "fix the `setup` list in boxer.toml, then: boxer up"}
+		}
+	}
+	_, _, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	return err
+}
+
+// GuestWorkdir maps the host cwd into the mount.
+func (e *Env) GuestWorkdir() string {
+	rel, err := filepath.Rel(e.Scope.Root, e.CWD)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return e.MountAt()
+	}
+	return filepath.ToSlash(filepath.Join(e.MountAt(), rel))
+}
+
+// RunOpts controls Run.
+type RunOpts struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+	TTY    bool
+}
+
+// Run executes argv in the guest, provisioning first when policy allows. It returns the exit
+// code to propagate. Errors are *Error and already agent-readable.
+func (e *Env) Run(argv []string, o RunOpts) (int, error) {
+	if _, err := e.Ensure(config.Has(e.Cfg.CreateOn, "run"), false); err != nil {
+		if e.Cfg.OnSandboxUnavailable == "passthrough" {
+			fmt.Fprintf(o.Stderr, "boxer: sandbox unavailable, running on host (on_sandbox_unavailable = passthrough)\n")
+			return -1, err
+		}
+		return 1, err
+	}
+	touchLastUsed(e.Scope.Key)
+	env := []string{}
+	for _, k := range e.Cfg.EnvPassthrough {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return e.VM.Exec(vm.ExecOpts{
+		Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, TTY: o.TTY,
+		Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr,
+	}, argv...)
+}
+
+// lockScope takes an exclusive flock on a per-scope file under the state directory.
+func lockScope(key string) (func(), error) {
+	dir := filepath.Join(filepath.Dir(LastUsedDir()), "locks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	return lockFile(filepath.Join(dir, key))
+}
+
+// lockFile takes an exclusive flock on path, creating it.
+func lockFile(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
+// LastUsedDir holds one zero-byte file per scope whose mtime is the last `run`. smolvm exposes
+// no last-used time, so this is the only host state boxer keeps; losing it only delays gc.
+func LastUsedDir() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return filepath.Join(d, "boxer", "last-used")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "boxer", "last-used")
+}
+
+func touchLastUsed(key string) {
+	dir := LastUsedDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	p := filepath.Join(dir, key)
+	now := time.Now()
+	if err := os.Chtimes(p, now, now); err != nil {
+		_ = os.WriteFile(p, nil, 0o644)
+	}
+}
+
+// LastUsed returns when the scope last ran a command, or zero when unknown.
+func LastUsed(key string) time.Time {
+	st, err := os.Stat(filepath.Join(LastUsedDir(), key))
+	if err != nil {
+		return time.Time{}
+	}
+	return st.ModTime()
+}
+
+// Down stops and deletes the scope's VM. Absence is not an error.
+func (e *Env) Down() error {
+	_, ok, err := e.Exists()
+	if err != nil || !ok {
+		return err
+	}
+	return e.VM.Delete(e.Scope.Key)
+}
+
+// Instructions is the text every harness shows the agent before its first action (R-PKG-2).
+func (e *Env) Instructions() string {
+	return Instructions(e.Cfg)
+}
+
+// Instructions renders the agent brief for a configuration.
+func Instructions(cfg config.Config) string {
+	var b strings.Builder
+	b.WriteString("This repository runs commands inside a boxer sandbox: a microVM per ")
+	b.WriteString(cfg.Isolation)
+	b.WriteString(" with the worktree mounted at ")
+	b.WriteString(cfg.MountAt)
+	b.WriteString(". Files you edit on the host are the same files the sandbox sees.\n")
+	switch cfg.Mode {
+	case "rewrite":
+		b.WriteString("Shell commands that start with ")
+		b.WriteString(strings.Join(cfg.Intercept, ", "))
+		b.WriteString(" are transparently executed in the sandbox; write them normally. ")
+	case "tool":
+		b.WriteString("Do not run ")
+		b.WriteString(strings.Join(cfg.Intercept, ", "))
+		b.WriteString(" through the shell tool. Use the boxer_run tool, or the shell form `boxer run -c '<command>'`. ")
+	case "off":
+		b.WriteString("Sandboxing is currently off; commands run on the host. ")
+	}
+	b.WriteString(strings.Join(cfg.Passthrough, ", "))
+	b.WriteString(" always run on the host.\n")
+	b.WriteString("Any line beginning `boxer:` on stderr is an instruction, not a transient error: its `fix:` line is the exact command to run next.")
+	return b.String()
+}
