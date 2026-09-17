@@ -39,6 +39,11 @@ type Cell struct {
 	Intercept []string
 	// Inside names the harness that runs inside the VM (integration = "inside"); "" for outside.
 	Inside string
+	// Timing is when the worktree appears relative to the session (the timing matrix): "before"
+	// (a linked worktree exists and the session runs in it), "warm" (main checkout,
+	// warm_on_session_start), "mid" (the agent creates a worktree and moves into it), "never"
+	// (main checkout only), or "" for cells outside the matrix.
+	Timing string
 }
 
 // Name is the cell's report id.
@@ -46,6 +51,9 @@ func (c Cell) Name() string {
 	n := fmt.Sprintf("%s/%s/%s/%s", c.Harness, c.Mode, c.Entry, c.Isolation)
 	if !c.Compliant {
 		n += "/noncompliant"
+	}
+	if c.Timing != "" {
+		n += "/timing-" + c.Timing
 	}
 	return n
 }
@@ -135,7 +143,11 @@ func NewEnv(tier, boxerBin string, c Cell, log io.Writer) (*Env, error) {
 			}
 			tools = withoutBoxer(fakellm.DefaultTools)
 		}
-		e.LLM = fakellm.New(fakellm.Scenario{Commands: []string{e.Command()}, Tools: tools})
+		if c.Isolation == "subagent" {
+			// The scripted main agent delegates to a subagent, whose own scripted turn runs the command.
+			tools = append([]string{"Agent", "Task"}, tools...)
+		}
+		e.LLM = fakellm.New(fakellm.Scenario{Commands: e.commands(c), Tools: tools})
 		ln, err := net.Listen("tcp", "0.0.0.0:0") // guests reach it through the host's LAN address
 		if err != nil {
 			return nil, err
@@ -224,6 +236,9 @@ isolation = %q
 mode = %q
 intercept = [%s]
 `, c.Isolation, c.Mode, strings.Join(quoted, ", "))
+	if c.Timing == "warm" {
+		toml += "warm_on_session_start = true\n"
+	}
 	if c.Inside != "" {
 		// The harness runs in the guest: node image, more memory, and the fake model's host address
 		// admitted through the allowlist. `mode` is meaningless here.

@@ -73,8 +73,9 @@ func (t tool) arguments(command string) map[string]any {
 }
 
 // argKey finds the argument that carries the shell line: command, then cmd, then the first one.
+// prompt is a delegation tool's (Claude Code's Agent): the line becomes the subagent's task.
 func (t tool) argKey() string {
-	for _, want := range []string{"command", "cmd", "script", "input"} {
+	for _, want := range []string{"command", "cmd", "script", "input", "prompt"} {
 		for _, a := range t.args {
 			if a == want {
 				return a

@@ -46,7 +46,14 @@ func (Claude) Cells(tier string) []Cell {
 		mk("off", "plugin", "worktree", true),
 	}
 	if tier == "t1" {
-		cells = append(cells, mk("rewrite", "user", "worktree", true))
+		cells = append(cells, mk("rewrite", "user", "worktree", true),
+			mk("rewrite", "plugin", "session", true),
+			mk("rewrite", "plugin", "subagent", true))
+		for _, timing := range []string{"before", "warm", "mid", "never"} {
+			c := mk("rewrite", "plugin", "worktree", true)
+			c.Timing = timing
+			cells = append(cells, c)
+		}
 	}
 	return cells
 }
@@ -70,6 +77,11 @@ func (d Claude) Prepare(env *Env, c Cell) error {
 	b, _ := json.Marshal(cfg)
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), b, 0o600); err != nil {
 		return err
+	}
+	if c.Timing == "before" {
+		if err := env.AddWorktree(); err != nil {
+			return err
+		}
 	}
 	switch c.Entry {
 	case "project", "both":
@@ -97,6 +109,9 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = env.Repo
+	if c.Timing == "before" {
+		cmd.Dir = env.Worktree() // the session opens in the worktree an orchestrator made
+	}
 	cmd.Env = append(env.BaseEnv(), d.modelEnv(env)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -120,7 +135,7 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	return tr, nil
 }
 
-func (Claude) Cleanup(env *Env, c Cell) {}
+func (Claude) Cleanup(env *Env, c Cell) { env.ReapWork() }
 
 // parseClaudeStream extracts the final answer and tool names from stream-json output.
 func parseClaudeStream(s string) Transcript {
