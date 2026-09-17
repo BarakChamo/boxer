@@ -26,6 +26,9 @@ type Dialect struct {
 	Rewrite bool
 	// Family selects the output JSON shape: "claude" (Claude Code, Codex, Grok, Kimi, DSH) or "gemini".
 	Family string
+	// MCP is true when the bundle registers boxer's MCP server, whose initialize and EOF are the
+	// session signals of last resort.
+	MCP bool
 	// Events maps this harness's event names to purposes.
 	Events map[string]string
 }
@@ -40,20 +43,20 @@ var claudeEvents = map[string]string{
 
 // Dialects is every harness the hook binary speaks.
 var Dialects = map[string]Dialect{
-	"claude-code": {Name: "claude-code", ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
-	"codex":       {Name: "codex", ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
+	"claude-code": {Name: "claude-code", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
+	"codex":       {Name: "codex", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	// Grok sends Claude-compatible field names but its own tool name (verified 2026-09-17).
-	"grok": {Name: "grok", ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents},
-	"kimi": {Name: "kimi", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
-	"dsh":  {Name: "dsh", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
-	"gemini-cli": {Name: "gemini-cli", ShellTool: "run_shell_command", Rewrite: true, Family: "gemini", Events: map[string]string{
+	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents},
+	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	"dsh":  {Name: "dsh", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	"gemini-cli": {Name: "gemini-cli", MCP: true, ShellTool: "run_shell_command", Rewrite: true, Family: "gemini", Events: map[string]string{
 		"BeforeTool":   "intercept",
 		"SessionStart": "session_start",
 		"SessionEnd":   "session_end",
 	}},
 	// OpenCode has a TypeScript plugin API, not stdin hooks; the rendered plugin forwards to this
 	// dialect so the decision still lives in one binary.
-	"opencode": {Name: "opencode", ShellTool: "bash", Rewrite: true, Family: "opencode", Events: map[string]string{
+	"opencode": {Name: "opencode", MCP: true, ShellTool: "bash", Rewrite: true, Family: "opencode", Events: map[string]string{
 		"tool.execute.before": "intercept",
 		"session.created":     "session_start",
 	}},

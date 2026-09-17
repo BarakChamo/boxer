@@ -362,6 +362,7 @@ type doctorReport struct {
 	SandboxError  string            `json:"sandbox_error,omitempty"`
 	Shims         *doctorShims      `json:"shims,omitempty"`
 	Installed     map[string]string `json:"installed_versions,omitempty"`
+	Signals       []hook.Signal     `json:"signals,omitempty"`
 	Warnings      []string          `json:"warnings"`
 	Error         string            `json:"error,omitempty"`
 	resolved      bool              // Env exists (config could be loaded)
@@ -487,6 +488,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		r.Shims = sh
 	}
 	r.Warnings = append(r.Warnings, e.Warnings...)
+	r.Signals = hook.Signals(e.Cfg.Isolation, install.GitInstalled(e.Scope.Root))
 	r.Installed = install.InstalledVersions(e.Scope.Root)
 	for _, p := range sortedKeys(r.Installed) {
 		if v := r.Installed[p]; v != Version {
@@ -559,10 +561,26 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		}
 		fmt.Fprintln(w)
 	}
+	if len(r.Signals) > 0 {
+		fmt.Fprintf(w, "signals:   %-12s %-8s %-8s %-6s %-9s %-8s %-5s %-9s %s\n", "harness", "session", "rewrite", "block", "subagent", "sess_end", "mcp", "git_hook", "isolation")
+		for _, s := range r.Signals {
+			fmt.Fprintf(w, "           %-12s %-8s %-8s %-6s %-9s %-8s %-5s %-9s %s\n", s.Harness, yn(s.SessionStart), yn(s.Rewrite), yn(s.BlockOnly), yn(s.SubagentStart), yn(s.SessionEnd), yn(s.MCP), yn(s.GitHook), s.EffectiveIsolation)
+		}
+		if !r.Signals[0].GitHook {
+			fmt.Fprintln(w, "           git_hook: none; `boxer install git` warms new worktrees as git creates them")
+		}
+	}
 	for _, wn := range r.Warnings {
 		fmt.Fprintln(w, "warning:  ", wn)
 	}
 	return 0
+}
+
+func yn(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "-"
 }
 
 func isShim(path string) bool {
