@@ -33,7 +33,7 @@ func (Inside) Available(tier string) (bool, string) {
 
 func (Inside) Cells(tier string) []Cell {
 	var cells []Cell
-	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode", "pi"} {
+	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok"} {
 		cells = append(cells, Cell{Harness: "inside-" + h, Mode: "inside", Entry: "shell", Isolation: "worktree", Compliant: true, Tier: tier, Inside: h})
 	}
 	return cells
@@ -76,6 +76,9 @@ func (d Inside) Prepare(env *Env, c Cell) error {
 		if err := os.WriteFile(filepath.Join(env.Repo, "opencode.json"), []byte(oc+"\n"), 0o644); err != nil {
 			return err
 		}
+	case "grok":
+		// Grok's own sandbox is off by default (R-INT-4a), so nothing turns it off here.
+		files = map[string]string{"config.toml": fmt.Sprintf("[models]\ndefault = \"fake-model\"\n[cli]\nauto_update = false\n[features]\ntelemetry = \"off\"\n[model.fake-model]\nmodel = \"fake-model\"\nname = \"fake\"\nbase_url = \"%s/v1\"\napi_key = \"fake\"\napi_backend = \"chat_completions\"\ncontext_window = 128000\n", url)}
 	case "pi":
 		files = map[string]string{".pi/agent/models.json": fmt.Sprintf(`{"providers":{"fake":{"baseUrl":%q,"api":"anthropic-messages","apiKey":"fake","models":[{"id":"fake-model","name":"fake","contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, url)}
 	}
@@ -107,6 +110,8 @@ func (d Inside) guestEnvFor(env *Env, h string) []string {
 		return []string{"XDG_DATA_HOME=" + filepath.Join(dir, "data"), "XDG_CONFIG_HOME=" + filepath.Join(dir, "config"), "XDG_CACHE_HOME=" + filepath.Join(dir, "cache")}
 	case "pi":
 		return []string{"HOME=" + dir, "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0"}
+	case "grok":
+		return []string{"GROK_HOME=" + dir, "GROK_DISABLE_AUTOUPDATER=1"}
 	}
 	return nil
 }
@@ -128,6 +133,8 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		args = []string{"run", "-m", "fake/fake-model", prompt}
 	case "pi":
 		args = []string{"-p", "--no-session", "--provider", "fake", "--model", "fake-model", prompt}
+	case "grok":
+		args = []string{"-p", prompt, "-m", "fake-model", "--permission-mode", "bypassPermissions", "--no-auto-update"}
 	}
 	cmdArgs := []string{"shell", h}
 	for _, e := range envs {

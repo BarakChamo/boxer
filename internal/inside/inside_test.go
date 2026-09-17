@@ -67,3 +67,19 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestLoginHintOnlyWithoutCredentials(t *testing.T) {
+	for _, k := range Harnesses["claude"].Creds {
+		t.Setenv(k, "")
+	}
+	if loginHint(Harnesses["claude"]) == "" {
+		t.Fatal("claude without any token must print the setup-token hint")
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	if loginHint(Harnesses["claude"]) != "" {
+		t.Fatal("a token silences the hint")
+	}
+	if loginHint(Harnesses["codex"]) != "" {
+		t.Fatal("codex's auth.json travels with the mount; no hint")
+	}
+}

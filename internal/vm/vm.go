@@ -172,6 +172,16 @@ func (c Client) Pack(image, stub string) (string, error) {
 	return stub + ".smolmachine", nil
 }
 
+// PackFromVM snapshots a stopped machine's root filesystem into stub+".smolmachine": whatever
+// was installed in it boots pre-installed in machines created --from the pack.
+func (c Client) PackFromVM(name, stub string) (string, error) {
+	if _, err := c.output("pack", "create", "--from-vm", name, "-o", stub, "--no-sign"); err != nil {
+		return "", err
+	}
+	os.Remove(stub)
+	return stub + ".smolmachine", nil
+}
+
 // Start boots a defined machine.
 func (c Client) Start(name string, branchable bool) error {
 	args := []string{"machine", "start", "-n", name}

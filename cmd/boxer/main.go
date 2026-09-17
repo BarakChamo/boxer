@@ -34,7 +34,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all]               delete this scope's sandbox (or every boxer sandbox)
   boxer ls                         list boxer sandboxes
-  boxer gc [--dry-run]             delete sandboxes whose worktree is gone
+  boxer gc [--dry-run]             delete sandboxes whose worktree is gone, idle sandboxes and packs
   boxer doctor                     explain the resolved configuration and state
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
@@ -372,6 +372,19 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
+	}
+	for _, p := range box.StalePacks(ms, idle) {
+		if *dry {
+			fmt.Fprintf(stdout, "would delete pack %s (unused for %s)\n", p, cfg.IdleTimeout)
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			fmt.Fprintln(stderr, err)
+			code = 1
+			continue
+		}
+		os.Remove(strings.TrimSuffix(p, ".smolmachine") + ".lock")
+		fmt.Fprintf(stdout, "deleted pack %s (unused for %s)\n", p, cfg.IdleTimeout)
 	}
 	return code
 }

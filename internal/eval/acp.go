@@ -20,7 +20,7 @@ func (InsideACP) Name() string { return "inside-acp" }
 
 func (InsideACP) Cells(tier string) []Cell {
 	var cells []Cell
-	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode"} {
+	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode", "grok"} {
 		cells = append(cells, Cell{Harness: "acp-" + h, Mode: "inside", Entry: "acp", Isolation: "worktree", Compliant: true, Tier: tier, Inside: h})
 	}
 	return cells

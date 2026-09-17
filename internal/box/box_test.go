@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
 
@@ -211,5 +213,44 @@ func TestCreatePacksImageOncePerHost(t *testing.T) {
 	s := string(b)
 	if strings.Count(s, "pack create") != 1 || strings.Count(s, "machine create") != 2 || strings.Count(s, "--from ") != 2 {
 		t.Fatalf("want one pack, two creates from it, log:\n%s", s)
+	}
+}
+
+func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := repo(t, "require_worktree = \"off\"\nintegration = \"inside\"\n")
+	e, err := Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = &bytes.Buffer{}
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	e.PackHarness()
+	image, _ := e.Image()
+	side := PackPath(harnessKey(image, "claude"))
+	if _, err := os.Stat(side); err != nil {
+		t.Fatalf("harness pack not written: %v", err)
+	}
+	e.PackHarness() // already packed: no second stop/pack
+	if _, err := e.Ensure(true, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if strings.Count(s, "pack create --from-vm") != 1 || !strings.Contains(s, "--from "+side) || !strings.Contains(s, "--label boxer.pack="+side) {
+		t.Fatalf("want one from-vm pack, the recreate from it with a boxer.pack label, log:\n%s", s)
+	}
+	stale := StalePacks([]vm.Machine{{Labels: map[string]string{"boxer.pack": side}}}, time.Nanosecond)
+	if len(stale) != 1 || stale[0] == side {
+		t.Fatalf("referenced pack must survive, the image pack is stale: %v", stale)
+	}
+	if got := StalePacks(nil, 0); got != nil {
+		t.Fatalf("idle_timeout never must prune nothing: %v", got)
+	}
+	if got := StalePacks(nil, time.Hour); got != nil {
+		t.Fatalf("fresh packs are not stale: %v", got)
 	}
 }

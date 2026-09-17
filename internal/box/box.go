@@ -251,7 +251,14 @@ func (e *Env) create() error {
 	}
 	from := ""
 	if e.Cfg.Smolfile == "" && image != "" {
-		from = e.packed(image)
+		if from = e.harnessPack(image); from == "" {
+			from = e.packed(image)
+		}
+	}
+	if from != "" {
+		labels[vm.LabelPrefix+"pack"] = from // the exact reference gc needs before pruning a pack
+		now := time.Now()
+		_ = os.Chtimes(from, now, now) // a pack's mtime is its last use
 	}
 	spec := vm.CreateSpec{
 		Name:       e.Scope.Key,
@@ -273,23 +280,104 @@ func (e *Env) create() error {
 	return nil
 }
 
+// PackDir is where the host keeps its .smolmachine packs: one per image, one per image and
+// harness in inside mode. BOXER_PACKS overrides it (the eval shares one across isolated state dirs).
+func PackDir() string {
+	if dir := os.Getenv("BOXER_PACKS"); dir != "" {
+		return dir
+	}
+	return filepath.Join(filepath.Dir(LastUsedDir()), "packs")
+}
+
+// PackPath is the .smolmachine for a cache key (the image, or image and harness).
+func PackPath(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(PackDir(), hex.EncodeToString(sum[:8])+".smolmachine")
+}
+
+func harnessKey(image, harness string) string { return image + "\x00" + harness }
+
+// harnessPack returns the pack of image with this harness installed when one exists, so a new
+// inside-mode VM skips the install (R-GUEST-4).
+func (e *Env) harnessPack(image string) string {
+	if !e.Inside() || e.Harness == "" {
+		return ""
+	}
+	side := PackPath(harnessKey(image, e.Harness))
+	if _, err := os.Stat(side); err != nil {
+		return ""
+	}
+	return side
+}
+
+// PackHarness snapshots the scope's VM, harness installed, into the pack harnessPack looks for.
+// smolvm packs only a stopped VM, so the VM is stopped and restarted around the pack (a few
+// seconds, once per image and harness per host). Failure is reported and never blocks the run.
+func (e *Env) PackHarness() {
+	image, _ := e.Image()
+	if !e.Inside() || e.Harness == "" || image == "" || e.Cfg.Smolfile != "" {
+		return
+	}
+	side := PackPath(harnessKey(image, e.Harness))
+	stub := strings.TrimSuffix(side, ".smolmachine")
+	if _, err := os.Stat(side); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
+		return
+	}
+	unlock, err := lockFile(stub + ".lock")
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if _, err := os.Stat(side); err == nil { // packed while we waited
+		return
+	}
+	fmt.Fprintf(e.Stderr, "boxer: caching %s with %s installed (once per host)\n", image, e.Harness)
+	err = e.VM.Stop(e.Scope.Key)
+	if err == nil {
+		_, err = e.VM.PackFromVM(e.Scope.Key, stub)
+	}
+	if serr := e.VM.Start(e.Scope.Key, e.Cfg.Branch.Enabled); serr != nil && err == nil {
+		err = serr
+	}
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "boxer: harness cache failed: %v\n", err)
+	}
+}
+
+// StalePacks lists packs no machine references (by its boxer.pack label) whose last use is
+// older than idle; idle <= 0 disables pruning, matching idle_timeout = "never".
+func StalePacks(ms []vm.Machine, idle time.Duration) []string {
+	if idle <= 0 {
+		return nil
+	}
+	used := map[string]bool{}
+	for _, m := range ms {
+		used[m.Labels[vm.LabelPrefix+"pack"]] = true
+	}
+	packs, _ := filepath.Glob(filepath.Join(PackDir(), "*.smolmachine"))
+	var out []string
+	for _, p := range packs {
+		if st, err := os.Stat(p); err == nil && !used[p] && time.Since(st.ModTime()) > idle {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // packed returns the cached .smolmachine for image, packing it on first use under a per-image
 // lock. smolvm pulls a registry image again for every machine, and that pull is the slow, flaky
 // step (rate limits, stalled blobs); packing moves it to once per image per host. Any failure
-// falls back to a direct pull so a pack problem never blocks a sandbox.
-// ponytail: packs are never pruned; add to `boxer gc` when the cache dir grows to matter.
+// falls back to a direct pull so a pack problem never blocks a sandbox. `boxer gc` prunes packs.
 func (e *Env) packed(image string) string {
-	dir := os.Getenv("BOXER_PACKS") // the eval shares one pack directory across isolated state dirs
-	if dir == "" {
-		dir = filepath.Join(filepath.Dir(LastUsedDir()), "packs")
-	}
-	sum := sha256.Sum256([]byte(image))
-	stub := filepath.Join(dir, hex.EncodeToString(sum[:8]))
-	side := stub + ".smolmachine"
+	side := PackPath(image)
+	stub := strings.TrimSuffix(side, ".smolmachine")
 	if _, err := os.Stat(side); err == nil {
 		return side
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
 		return ""
 	}
 	unlock, err := lockFile(stub + ".lock")
