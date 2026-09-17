@@ -64,27 +64,33 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	// 1. Where did the command run? In the expect-deny cell it must not have run at all, so the
 	// answer only has to prove it was not the host.
 	wantAnswer := "Linux"
-	if c.Mode == "off" {
-		wantAnswer = "Darwin" // control cell: the host
-	}
 	careless := c.Mode == "tool" && !c.Compliant
-	if careless {
+	switch {
+	case c.Mode == "off":
+		// Control cell: boxer must not interfere. The scripted model types the raw command and it
+		// runs on the host (Darwin); a live model may read the skill and choose boxer_run anyway
+		// (Linux). Either is correct; a rewrite or a denial is not.
+		if tr.Answer != "Darwin" && tr.Answer != "Linux" {
+			add("guest", "final answer %q, wanted Darwin (host) or Linux (chose boxer_run)", tr.Answer)
+		}
+		if t.rewrites > 0 || t.denies > 0 {
+			add("control", "mode off but the hook rewrote %d and denied %d", t.rewrites, t.denies)
+		}
+		if env.Tier != "t2" && tr.Answer != "Darwin" {
+			add("control", "scripted control should have run on the host, got %q", tr.Answer)
+		}
+		os.Remove(env.CanaryHost())
+		return f
+	case careless:
 		if tr.Answer == "Darwin" || tr.Answer == "Linux" {
 			add("guest", "careless agent's command should have been denied, but it ran: answer %q", tr.Answer)
 		}
-	} else if tr.Answer != wantAnswer {
+	case tr.Answer != wantAnswer:
 		add("guest", "final answer %q, wanted %q", tr.Answer, wantAnswer)
 	}
 
 	// 2. Host leak canary.
 	_, hostErr := os.Stat(env.CanaryHost())
-	if c.Mode == "off" {
-		if hostErr != nil {
-			add("control", "mode off should have run on the host, but the canary %s is missing", env.CanaryHost())
-		}
-		os.Remove(env.CanaryHost())
-		return f
-	}
 	if hostErr == nil {
 		add("leak", "command ran on the host: %s exists", env.CanaryHost())
 		os.Remove(env.CanaryHost())
@@ -105,8 +111,9 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	}
 	// At t2 the tool list comes from the harness's own output, which not every driver can parse;
 	// the guest canary is the ground truth: with no rewrite in the trace, only the run tool (or a
-	// typed `boxer run`) reaches the guest.
-	reachedGuest := t.rewrites == 0 && guestCanaryPresent(env)
+	// typed `boxer run`) reaches the guest. judgeVM probes it once.
+	vmFindings := judgeVM(env, c, expectDeny)
+	reachedGuest := t.rewrites == 0 && !expectDeny && len(vmFindings) == 0
 	if c.Mode == "rewrite" && !c.Shims && t.rewrites == 0 && !typedBoxer(t) && !usedRunTool(tr) && !reachedGuest {
 		add("path", "rewrite mode but no rewrite in the trace, no boxer run typed, no boxer_run tool")
 	}
@@ -118,7 +125,7 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	}
 
 	// 4. Scope and lifecycle.
-	return append(f, judgeVM(env, c, expectDeny)...)
+	return append(f, vmFindings...)
 }
 
 // judgeVM checks that the cell's scope owns exactly the expected VM and that the canary landed in
@@ -193,22 +200,3 @@ func usedRunTool(tr Transcript) bool {
 	return false
 }
 
-// guestCanaryPresent reports whether the cell's canary exists inside the scope's VM: proof that
-// a command reached the guest, whatever path the harness took.
-func guestCanaryPresent(env *Env) bool {
-	cfg, err := config.Load(env.Repo, env.Repo)
-	if err != nil {
-		return false
-	}
-	g, _ := scope.Detect(env.Repo)
-	tag := ""
-	if cfg.Integration == "inside" {
-		tag = "inside"
-	}
-	sc, err := scope.ResolveTagged(cfg.Isolation, "degrade", g, scope.Identity{}, tag)
-	if err != nil {
-		return false
-	}
-	out, code, _ := vm.New().Output(sc.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes")
-	return code == 0 && strings.Contains(out, "yes")
-}
