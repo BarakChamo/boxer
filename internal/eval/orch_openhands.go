@@ -27,7 +27,7 @@ func (OpenHands) python() string {
 		return p
 	}
 	for _, root := range repoRoots() {
-		p := filepath.Join(root, ".venv-openhands", "bin", "python")
+		p, _ := filepath.Abs(filepath.Join(root, ".venv-openhands", "bin", "python"))
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

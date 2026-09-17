@@ -12,10 +12,14 @@ import (
 	"time"
 )
 
-// Grok drives Grok Build headless. Hooks load from three places without a prompt: $GROK_HOME/hooks
-// (user), the repository's .grok/hooks with folder trust disabled (project), and $GROK_HOME/plugins
-// (plugin, auto-trusted). t1 uses a private GROK_HOME whose config.toml defines a BYOK model
-// pointed at the fake model over the chat completions wire; no sign-in is needed for a BYOK model.
+// Grok drives Grok Build headless. Hooks load from two places without a prompt: $GROK_HOME/hooks
+// (user) and the repository's .grok/hooks with folder trust disabled (project). A plugin's hooks
+// do not run in a headless session (verified 2026-09-17 on 1.0.34, both through `grok -p` with the
+// plugin under $GROK_HOME/plugins and through `grok agent --plugin-dir` over ACP: the plugin's MCP
+// server came up, its hooks never fired), so the plugin cell is the "both" cell, which proves the
+// plugin's MCP server and the project hooks coexist. t1 uses a private GROK_HOME whose config.toml
+// defines a BYOK model pointed at the fake model over the chat completions wire; a BYOK model
+// needs no sign-in.
 type Grok struct{}
 
 func (Grok) Name() string { return "grok" }
@@ -42,7 +46,7 @@ func (Grok) Cells(tier string) []Cell {
 		mk("off", "user", true),
 	}
 	if tier == "t1" {
-		cells = append(cells, mk("rewrite", "plugin", true), mk("rewrite", "both", true))
+		cells = append(cells, mk("rewrite", "both", true))
 	} else {
 		// Grok reaches MCP tools only through its search_tool/use_tool dispatcher, which the scripted
 		// model cannot drive; a live model can, so the compliant tool cell is t2 only.
@@ -91,9 +95,6 @@ func (d Grok) Prepare(env *Env, c Cell) error {
 }
 
 func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
-	if c.Entry == "plugin" {
-		return d.runACP(env, c, prompt)
-	}
 	// A private leader socket: the default one is the user's own leader under ~/.grok, which
 	// discovers plugins from the real home rather than from GROK_HOME.
 	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "streaming-json", "--max-turns", "6", "--no-subagents", "--leader-socket", filepath.Join(d.home(env), "leader-eval.sock")}
@@ -127,44 +128,6 @@ func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 }
 
 func (Grok) Cleanup(env *Env, c Cell) {}
-
-// runACP drives `grok agent --no-leader --plugin-dir <bundle> stdio` with the eval's ACP client:
-// the documented headless way to load a plugin, since a leader-backed session (`grok -p`) discovers
-// plugins from the real home only.
-func (d Grok) runACP(env *Env, c Cell, prompt string) (Transcript, error) {
-	args := []string{"agent", "--no-leader", "--plugin-dir", filepath.Join(env.Dist, "grok"), "--always-approve", "stdio"}
-	if env.Tier == "t1" {
-		args = append([]string{"-m", "fake"}, args...)
-	}
-	cmd := exec.Command("grok", args...)
-	cmd.Dir = env.Repo
-	cmd.Env = append(env.BaseEnv(), "GROK_HOME="+d.home(env), "GROK_FOLDER_TRUST=0", "FAKE_LLM_KEY=fake")
-	stdin, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	defer cmd.Process.Kill()
-	cl := &acpClient{w: stdin, r: bufio.NewReaderSize(stdout, 1<<20), repo: env.Repo}
-	done := make(chan error, 1)
-	go func() { done <- cl.session(prompt) }()
-	select {
-	case err := <-done:
-		tr := Transcript{Raw: cl.log.String() + "\n--- stderr ---\n" + stderr.String(), Tools: cl.tools}
-		if len(tr.Tools) == 0 {
-			tr.Tools = env.LLMTools()
-		}
-		lines := strings.Split(strings.TrimSpace(cl.text.String()), "\n")
-		if f := strings.Fields(lines[len(lines)-1]); len(f) > 0 {
-			tr.Answer = f[0]
-		}
-		return tr, err
-	case <-time.After(4 * time.Minute):
-		return Transcript{Raw: cl.log.String() + stderr.String()}, fmt.Errorf("grok agent timed out")
-	}
-}
 
 // parseGrokStream reads `--output-format streaming-json`: one event per line, `text` carrying the
 // answer in `data` and `tool_call` naming the tool in `toolName`.

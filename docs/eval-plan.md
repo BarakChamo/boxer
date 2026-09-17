@@ -61,7 +61,7 @@ Not every cell is meaningful; the runner declares the matrix per harness in
 | Codex | `.codex/hooks.json` (needs `--dangerously-bypass-hook-trust`) or user `config.toml` `[hooks]`; `updatedInput` | `codex exec --dangerously-bypass-approvals-and-sandbox -o last.txt` | temp `CODEX_HOME` with `[model_providers.fake] base_url` (*spike 2*: `wire_api` chat vs responses) | ChatGPT (quota until 2026-09-20) or `OPENAI_API_KEY` | hooks fire live; turn blocked |
 | Gemini CLI | extension (`extensions install --consent`) or `.gemini/settings.json`; `BeforeTool` `tool_input`; `excludeTools` in tool mode | `gemini -p --yolo` | `GOOGLE_GEMINI_BASE_URL` (*spike 3*) | Google login or `GEMINI_API_KEY` | installs; no login |
 | OpenCode | `.opencode/plugins/boxer.ts` → `boxer hook opencode`; `tool.execute.before` mutates `args.command` | `opencode run` | `opencode.json` provider with `baseURL` (OpenAI-compatible) | `opencode auth login` | installed; no creds |
-| Grok Build | `.grok-plugin` plugin (validates) or `.grok/settings.json`; `updatedInput` | `grok -p --permission-mode bypassPermissions` | `XAI_BASE_URL` (*spike 4*) | `grok login` or `XAI_API_KEY` | validates + installs; not signed in |
+| Grok Build | `$GROK_HOME/hooks/*.json` (user) or `.grok/hooks/*.json` (project, needs folder trust: `--trust` once or `GROK_FOLDER_TRUST=0` headless); Claude-compatible payload with `tool_name: run_terminal_command`; `updatedInput` replaces the whole input, so the rewrite keeps `description`. Plugin hooks do not run headless (1.0.34); the plugin's MCP server does | `grok -p --permission-mode bypassPermissions --output-format streaming-json --leader-socket <private>` | private `GROK_HOME` with `[model.fake] base_url api_backend = "chat_completions" env_key`; no sign-in needed for a BYOK model | `XAI_API_KEY` | T1 5/5; T2 needs `XAI_API_KEY` |
 | Kimi Code | user `config.toml` `[[hooks]]`, block-only; `.kimi-code/mcp.json`; shims | `kimi -p --auto`, `KIMI_CODE_HOME` for an isolated home | `config.toml` provider `base_url` (*spike 5*) | Kimi login | install verified |
 | **pi** (new) | `.pi/extensions/boxer.ts` or `-e`; `tool_call` with mutable `event.input.command` and `{ block, reason }`; `registerTool` for `boxer_run`; `session_start` for the brief | `pi -p` | `~/.pi/agent/models.json` custom provider (OpenAI/Anthropic API) | `/login` Claude Pro/Max, or key | not integrated; needs dialect + bundle |
 | DSH | hooks plugin reading `.dsh/hooks.json`, block-only; shims | `npx @deepseek-ai/dsh` (*spike 6*: headless flag) | unknown | DeepSeek key | bundle from docs only |
@@ -77,50 +77,78 @@ each (you are logged in), and adds Codex/others when credentials arrive.
 
 | Orchestrator | How it launches the harness | Worktrees | Where boxer attaches | Headless driver for the test | Deterministic? |
 | --- | --- | --- | --- | --- | --- |
-| Paperclip | `claude-agent-acp` with managed `CLAUDE_CONFIG_DIR` seeded from `~/.claude/settings.json`+`CLAUDE.md`; `settingSources: user, project, local` | one per heartbeat | project layer (`boxer install claude-code`) or `--user`; Codex via `--user` inline hooks | `npx paperclipai test-drive --harness claude` (isolated instance, `claude_local`, worktree execution) then `paperclipai issue create` / assign / heartbeat; REST at `localhost:3100` | yes: `ANTHROPIC_BASE_URL` in adapter `env` reaches the ACP process (*spike 7*) |
-| T3 Code | provider CLIs as ACP subprocesses; `CLAUDE_CONFIG_DIR` set to a T3-owned dir (`ClaudeHome.ts`) | per thread ("New worktree") | project layer only | `t3 serve` + a small WS client using `packages/contracts` (`project.create`, `thread.create`, `orchestration.dispatchCommand`) (*spike 8*: no documented prompt CLI) | yes if env reaches the subprocess (*spike 8*) |
+| Paperclip | `claude-agent-acp` with managed `CLAUDE_CONFIG_DIR` seeded from `~/.claude/settings.json`+`CLAUDE.md`; `settingSources: user, project, local` | one per heartbeat | project layer (`boxer install claude-code`) or `--user`; Codex via `--user` inline hooks | `paperclipai test-drive --harness claude --no-browser` (isolated instance, embedded database) then issue, assign, heartbeat over REST; not automated, checklist driver skips naming the install | spike 7 answered from source: adapter `config.env` is forwarded to the ACP process and `ANTHROPIC_BASE_URL` is on the probe allowlist, so T1 is possible; `PATH`/`BOXER_TRACE` are not caller-settable, so judge by VM + guest canary |
+| T3 Code | provider CLIs as ACP subprocesses; `CLAUDE_CONFIG_DIR` set to a T3-owned dir (`ClaudeHome.ts`) | per thread ("New worktree") | project layer only | `t3` (npm `t3`) starts server + web app; WS RPC `project.create` then `thread.turn.start` with `bootstrap.createThread` + `bootstrap.prepareWorktree` (one request creates thread, worktree, first turn); not installed, checklist driver skips | spike 8 answered from source: the Claude driver spawns with `process.env` plus per-instance variables, so env inherits from the `t3` server process; T1 possible |
 | Conductor (installed) | local Mac app runs Claude Code in `~/conductor/workspaces/<repo>/<ws>`; public API/CLI (`conductor workspaces/sessions/messages`) is **cloud workspaces only** | one per workspace | plugin (user layer, if inherited) + project layer | local: `conductor.json` setup/run scripts assert `boxer doctor`/`boxer run` inside the workspace; prompt step manual. Cloud: full API driver, but boxer would need smolvm in the cloud workspace (out of scope) | local: semi-automated; live only |
 | herdr | owns terminals; the harness runs interactively in a pane; no wrapping, no env override | none (uses your cwd; pair with `git worktree add`) | plugin or project layer, unchanged | `brew install herdr`; `herdr pane split`, `pane run w:p "claude"`, `pane send-text`, `agent wait --until done`, `pane read` | yes (same env as a terminal) |
-| Multica (installed) | local daemon spawns the CLI as a subprocess in a git worktree from `.repos/`; private `TMPDIR`; `MULTICA_CLAUDE_ARGS` for extra args | one per task | project layer; plugin via `MULTICA_CLAUDE_ARGS="--plugin-dir …"` | `brew install multica-ai/tap/multica`; `multica daemon start`; `multica issue create --title … --assignee …`; `multica issue runs`, `run-messages` | live only (Multica Cloud account); daemon env for base URL (*spike 9*) |
-| OpenHands | no harness; SDK `Workspace` | none (working_dir) | `adapters/openhands/boxer_workspace.py` | `pip install openhands-sdk`; a 30-line script: `Conversation(agent, workspace=BoxerWorkspace(...))` | yes: LiteLLM `base_url` to the fake server |
+| Multica (installed) | local daemon spawns the CLI as a subprocess in a git worktree from `.repos/`; private `TMPDIR`; `MULTICA_CLAUDE_ARGS` for extra args | one per task | project layer; plugin via `MULTICA_CLAUDE_ARGS="--plugin-dir …"` | `multica setup` (account) then `multica daemon start`, `multica issue create`, `multica issue runs`; checklist driver skips: no server configured on this machine | live only (spike 9: the binary reads `MULTICA_CLAUDE_ARGS`, `MULTICA_CLAUDE_PATH`, `MULTICA_KEEP_ENV_AFTER_TASK`; inheritance unobservable without a server) |
+| OpenHands | no harness; SDK `Workspace` | none (working_dir) | `adapters/openhands/boxer_workspace.py` | `internal/eval/orch_openhands.go` runs `adapters/openhands/eval_run.py` in `.venv-openhands` (or `BOXER_OPENHANDS_PYTHON`): T1 calls `BoxerWorkspace.execute_command` on the real SDK class with no model; T2 runs a `Conversation` with the terminal tool and `ANTHROPIC_API_KEY` | T1 yes (no model needed); T2 needs the key |
 
 Sources: T3 `apps/server/src/provider/Drivers/ClaudeHome.ts`, `packages/contracts`; Paperclip
 `cli/src/commands/test-drive.ts`, `docs/adapters/claude-local.md`, `claude-agent-acp
 src/acp-agent.ts`; Conductor `conductor --help`, `/docs/api`; herdr `/docs/socket-api/`; Multica
 `CLI_AND_DAEMON.md`.
 
-## 4b. Status after the first pass (2026-09-17)
+## 4b. Status after the second pass (2026-09-17)
 
-Tier T1 runs green: **31/31 outside cells** across Claude Code (9), Codex (6), Gemini CLI (5),
-OpenCode (4), pi (4), Kimi (3), and **11/11 inside cells** (shell: claude, codex, gemini, opencode,
-pi, kimi; ACP: claude, codex, gemini, kimi, opencode), all on 2026-09-17. Honest footnotes: one
-outside cell (OpenCode tool/noncompliant) failed once in 4 s with no VM and passed on rerun, so
-OpenCode start-up is a known flake; inside cells cost 30 s to 11 min each because every cell
-installs its harness through npm in a fresh VM (pi 10.7 min, Claude 2.7 to 11 min), and before the
-image pack was shared across cells (`BOXER_PACKS`) two cells stalled on image pulls. Run inside
-cells one at a time. Every spike that mattered is closed and its answer is in a driver:
+Tier T1 runs green for every harness the runner knows: Claude Code (9), Codex (6), Gemini CLI (5),
+OpenCode (4), pi (4), Kimi (3), **Grok (5, new)**, inside shell (6) and inside ACP (5), plus the
+OpenHands SDK cell. Cells run in this pass, one at a time under the host lock, each with a fresh
+repository and VM:
+
+| Cell | Result | Note |
+| --- | --- | --- |
+| grok/off/user/worktree | pass ×3 | BYOK model in a private `GROK_HOME`, no sign-in |
+| grok/rewrite/user/worktree | pass | hooks from `$GROK_HOME/hooks/boxer.json` |
+| grok/rewrite/project/worktree | pass | `.grok/hooks/boxer.json` with `GROK_FOLDER_TRUST=0` |
+| grok/rewrite/both/worktree | pass | plugin under `$GROK_HOME/plugins` (MCP server) plus project hooks: one VM |
+| grok/tool/user/worktree/noncompliant | pass ×3 | hook denies the bare shell call |
+| grok/rewrite/plugin/worktree | fail, cell removed | plugin hooks never fire headless (`grok -p`, and `grok agent --plugin-dir` over ACP): MCP server loads, hooks do not; documented above |
+| grok/tool/user/worktree (compliant) | t2 only | MCP tools sit behind Grok's `search_tool`/`use_tool` dispatcher, which the scripted model cannot drive |
+| opencode/tool/project/worktree/noncompliant | pass ×6 | flake analysed from the traces and fixed (below) |
+| claude-code, codex, gemini-cli, pi `rewrite/project/worktree` | pass | regression for the rewrite change (original tool input preserved) |
+| openhands/rewrite/sdk/worktree | see report | real SDK `LocalWorkspace` subclass, no model |
+| paperclip, t3code, multica | skip | checklist drivers; each names its install or account |
+
+Tier T2 (`docs/eval-t2.md`, run at the end of this pass with no `evals/.env` present): Claude Code
+runs live through the Keychain login; Codex reports its ChatGPT quota as a skip with the provider's
+text; every other harness skips naming the variable it needs (`GEMINI_API_KEY`, `AI_GATEWAY_API_KEY`
+or `OPENAI_API_KEY`, `MOONSHOT_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` for OpenHands,
+`CLAUDE_CODE_OAUTH_TOKEN` for inside Claude). A skip is never a pass.
+
+Runner changes this pass: a failure that names infrastructure (`cause: START_FAILED`,
+`CREATE_FAILED`, npm `EIDLETIMEOUT`/`ECONNRESET`, an image pull, a harness timeout, an ACP agent
+that closed before answering) is retried once and marked `retried` in the report; a failed cell
+always keeps its scratch directory (trace, transcript, `llm.jsonl`), `--keep` keeps passes too;
+SIGINT/SIGTERM write the report for the cells that finished.
+
+**The OpenCode flake.** `opencode run` delivers `session.created` to plugins as a fire-and-forget
+event, while `tool.execute.before` is awaited. In the noncompliant cell the only tool call is
+denied in milliseconds, the model answers, and `opencode run` exits while `boxer hook opencode`
+(session start, `Ensure`) may still be creating the VM from the pack; the oracle then finds no VM.
+The hook process outlives its parent, so the driver now waits for a lingering `boxer hook
+opencode` before judging (`waitForHook`). Six runs after the fix passed (4 to 10 s each). In a
+real session this is harmless: the VM appears a moment later.
+
+Learned this pass, and where it lives now:
 
 | Learned | Where it lives now |
 | --- | --- |
-| Claude needs a pre-approved dummy key in a private `CLAUDE_CONFIG_DIR` | `eval/claude.go` |
-| Codex: `wire_api = "responses"`, `exec_command` with `cmd`, Responses **namespace** tools called as `{name, namespace}`, hook trust needed even for a fresh user home, stdin must be closed | `fakellm`, `eval/codex.go` |
-| Gemini: `GEMINI_CLI_HOME`, `GEMINI_CLI_TRUST_WORKSPACE`, the model router wants schema-shaped JSON, `GOOGLE_GEMINI_BASE_URL` | `fakellm/gemini.go`, `eval/gemini.go` |
-| OpenCode trusts `PWD` over cwd; `external_directory` permission; stdin must be closed | `eval/opencode.go`, `Env.BaseEnv` |
-| pi has no config-dir variable; HOME override needs a smolvm HOME-restoring wrapper | `eval/pi.go` |
-| Kimi ignores `updatedInput` and PATH shims: tool mode only | `eval/kimi.go`, Kimi README |
-| Grok: `run_terminal_command` requires `description`; plugin hooks discovered as zero in `-p` | `fakellm` required-args; open |
-| Docker Hub anonymous quota exhausted by per-cell pulls; `mirror.gcr.io` has none | `Env.mkrepo`, `registryHosts` |
-| Two concurrent provisions raced smolvm; per-scope lock added | `box.Ensure`, concurrency test |
-| smolvm re-pulls the image for every machine; pulls stalled or hit quota in a third of inside cells | `box.packed`: one `smolvm pack create` per image per host, machines created `--from` it |
-| Inside: `codex-acp` (Rust) needs `libssl3`, absent from the slim node image; the `@zed-industries` package is deprecated | `inside.Harnesses["codex"].Install`, `deb.debian.org` allowed |
-| Inside: npm idle timeouts against the registry through TSI | long fetch timeouts, install line retried once |
-| Inside: Kimi prints `To resume this session: kimi -r …` after the answer | `eval/inside.go` parser |
-| Inside: Codex's bwrap sandbox fails on the mounted worktree (`bwrap: Can't mkdir …/.agents: Permission denied`); codex-acp's default agent mode re-enables it | `inside.Harnesses["codex"]` `Args`/`GuestEnv` (R-INT-4a) |
-| Inside: codex-acp streams a `Warning: Model metadata …` chunk before the answer | ACP client reads the last text line |
+| Grok reads project hooks from `.grok/hooks/*.json`, not `.grok/settings.json`; folder trust gates them (`--trust`, or `GROK_FOLDER_TRUST=0` headless) | `install.go` grok writer, `eval/grok.go` |
+| Grok's hook payload carries Claude-compatible keys (`hook_event_name: PreToolUse`) with its own `tool_name: run_terminal_command`; `hookEventName` in camel case too | `hook.go` grok dialect, oracle event regex |
+| `updatedInput` replaces the tool input wholesale and must satisfy the tool schema (`description` required); the rewrite now keeps the original fields | `hook.go rewrite` (all Claude-family dialects) |
+| A BYOK `[model.<id>]` with `env_key` runs `grok -p` with no sign-in; `--leader-socket` isolates the run from the user's leader | `eval/grok.go` |
+| Grok plugin hooks do not run headless (1.0.34); the plugin's `.mcp.json` server does | `eval/grok.go` comment, this section |
+| Grok reaches MCP tools only via `search_tool` then `use_tool` | Grok compliant tool cell is t2 only |
+| OpenCode `session.created` is not awaited; a denied-only turn can exit before provisioning ends | `eval/opencode.go waitForHook` |
+| Paperclip forwards adapter `config.env` to `claude-agent-acp`; probe lane allowlists `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`, auth keys | `docs/orchestrators.md` (spike 7) |
+| T3: `thread.turn.start` bootstraps thread + worktree + first turn; CLI env = `process.env` + instance variables | `docs/orchestrators.md` (spike 8) |
+| Multica needs `multica setup` (account) before the daemon runs; `MULTICA_CLAUDE_ARGS`/`MULTICA_CLAUDE_PATH` exist | `docs/orchestrators.md` (spike 9), `eval/orch.go` |
+| OpenHands SDK 1.49: `openhands-tools` is a separate package; `BoxerWorkspace` can be proven without a model | `adapters/openhands/eval_run.py` |
 
-The matrix is reorganised by integration level (requirements §7.6): Level 0 cells (MCP + skill,
-tool mode) run for every harness; Level 1 cells (hooks, rewrite) only where rewrite is verified;
-Level 2 cells for OpenCode and pi. Kimi and DSH have Level 0 cells only.
+Still true from the first pass: inside cells cost 30 s to 11 min each because every cell installs
+its harness through npm in a fresh VM; run them one at a time; Docker Hub's anonymous quota is
+avoided with `mirror.gcr.io`; the shared image pack (`BOXER_PACKS`) removed the per-cell pulls.
 
 ### Packaging standard
 
@@ -183,12 +211,12 @@ runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.
 | 1 | Does `claude -p` honour `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` when a subscription login exists, or must T1 use an empty `CLAUDE_CONFIG_DIR`? | Claude T1 |
 | 2 | Codex `[model_providers]`: `wire_api = "chat"` or `"responses"` for a fake server; does hook loading work with `--ignore-user-config` off and a temp `CODEX_HOME`? | Codex T1 |
 | 3 | Gemini CLI custom API base env name and whether tool calling works against it | Gemini T1 |
-| 4 | Grok Build `XAI_BASE_URL` or equivalent | Grok T1 |
+| 4 | Grok Build `XAI_BASE_URL` or equivalent. **Answered**: `[model.<id>] base_url` + `api_backend = "chat_completions"` + `env_key` in a private `GROK_HOME` | Grok T1 |
 | 5 | Kimi provider `base_url` with an isolated `KIMI_CODE_HOME`; exact shell `tool_name` for the hook matcher | Kimi T1 + dialect correctness |
 | 6 | DSH headless mode and the hooks plugin's actual event/decision shape | whether DSH gets a T1 lane or stays "bundle only" |
-| 7 | Paperclip `claude_local` adapter `env` passes `ANTHROPIC_BASE_URL` to `claude-agent-acp` | Paperclip T1 vs T2-only |
-| 8 | T3: minimal WS sequence to create a project, thread with worktree, and dispatch a prompt; does the ACP subprocess inherit env for a base URL | T3 T1 vs T2-only |
-| 9 | Multica daemon env inheritance (`ANTHROPIC_BASE_URL`), `MULTICA_CLAUDE_ARGS` accepts `--plugin-dir` | Multica T1 vs T2-only |
+| 7 | Paperclip `claude_local` adapter `env` passes `ANTHROPIC_BASE_URL` to `claude-agent-acp`. **Answered from source**: yes (allowlisted); `PATH`/`BOXER_TRACE` are not | Paperclip T1 possible; not automated |
+| 8 | T3: minimal WS sequence to create a project, thread with worktree, and dispatch a prompt; does the ACP subprocess inherit env for a base URL. **Answered from source**: `project.create` + `thread.turn.start` with `bootstrap`; env inherits from the server process | T3 T1 possible; `t3` not installed |
+| 9 | Multica daemon env inheritance (`ANTHROPIC_BASE_URL`), `MULTICA_CLAUDE_ARGS` accepts `--plugin-dir`. **Partly answered**: the variables exist in the binary; inheritance needs a configured server | Multica T2-only |
 | 10 | smolvm on GitHub-hosted macOS arm64 runners | hosted vs self-hosted T1 |
 
 ## 8. What I need from you
@@ -204,9 +232,10 @@ runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.
 | Codex | ChatGPT quota reset (2026-09-20) or `OPENAI_API_KEY` |
 | Gemini | run `gemini` once, Google login, or `GEMINI_API_KEY` |
 | OpenCode | `opencode auth login` (Anthropic Pro/Max works), or `ANTHROPIC_API_KEY` |
-| Grok | `grok login --device-code`, or `XAI_API_KEY` |
-| Kimi | `kimi` then `/login` |
-| pi | `pi` then `/login` → Anthropic Claude Pro/Max |
+| Grok | `XAI_API_KEY` in `evals/.env` (a BYOK model needs no sign-in) |
+| Kimi | `MOONSHOT_API_KEY` in `evals/.env` (Kimi provider type `kimi`, `api.moonshot.ai/v1`, model `kimi-k2.5`; unverified until a key exists) |
+| pi, OpenCode | `AI_GATEWAY_API_KEY` (Vercel AI Gateway, model `anthropic/claude-sonnet-4.5`) or `OPENAI_API_KEY` in `evals/.env` |
+| Inside Claude | `CLAUDE_CODE_OAUTH_TOKEN` in `evals/.env`: the Keychain login does not travel into the guest |
 | OpenHands T2 | `ANTHROPIC_API_KEY` (LiteLLM; a Claude Code login does not apply) |
 | Multica | already installed; confirm the desktop app is signed in so the daemon registers |
 | Conductor | already installed; one workspace created by hand for the local checks |
