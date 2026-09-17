@@ -53,6 +53,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
                                    bundles/installs: claude-code, codex, gemini-cli, opencode, grok, pi, kimi, dsh
   boxer acp <harness> [-e K=V]               run the harness's ACP server inside the sandbox, stdio piped
   boxer shim install --harness a,b [dir]     PATH shims named after harness binaries → boxer shell
+  boxer shim install --shell [dir]           boxer-bash: a shell that runs in the sandbox (OpenHands shell_path)
   boxer version
 
 Identity flags accepted by up/run/down/status/doctor: --harness NAME --session ID --agent ID
@@ -771,11 +772,12 @@ func insideCmd(kind string, args []string, stdin io.Reader, stdout, stderr io.Wr
 
 func shimCmd(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "install" {
-		fmt.Fprintln(stderr, "usage: boxer shim install [--harness a,b] [dir]")
+		fmt.Fprintln(stderr, "usage: boxer shim install [--harness a,b | --shell] [dir]")
 		return 2
 	}
 	fs := flag.NewFlagSet("shim", flag.ContinueOnError)
 	harnesses := fs.String("harness", "", "comma-separated harness names: write shims named after their binaries that exec `boxer shell`")
+	shell := fs.Bool("shell", false, "write boxer-bash: a bash whose every command runs in the sandbox, for harnesses with a configurable shell path")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
@@ -783,6 +785,15 @@ func shimCmd(args []string, stdout, stderr io.Writer) int {
 	dir := shim.DefaultDir()
 	if fs.NArg() > 0 {
 		dir = fs.Arg(0)
+	}
+	if *shell {
+		path, err := shim.InstallShell(dir)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "boxer: wrote %s\nPoint the harness's shell at it (OpenHands: TerminalTool shell_path).\n", path)
+		return 0
 	}
 	if *harnesses != "" {
 		var bins []string

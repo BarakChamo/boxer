@@ -1,9 +1,11 @@
 """Eval runner for BoxerWorkspace against the real OpenHands SDK.
 
 Without --live: calls BoxerWorkspace.execute_command directly (no model), prints the command's
-stdout as the answer. With --live: runs a Conversation through the Vercel AI Gateway (AI_GATEWAY_API_KEY)
-and the SDK's terminal tool, which executes through the same workspace. The last stdout line is
-one JSON object: {"answer": str, "tools": [str], "skip": str}.
+stdout as the answer. With --live: runs a Conversation through the Vercel AI Gateway
+(AI_GATEWAY_API_KEY) with the SDK's terminal tool whose shell is boxer-bash (--shell), so the
+agent's interactive shell itself runs in the guest. The runner prints one JSON object line
+{"answer": str, "tools": [str], "skip": str}; the SDK may log after it, so readers take the last
+line that parses.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ def main() -> int:
     ap.add_argument("--prompt", default="")
     ap.add_argument("--model", default=os.environ.get("OPENHANDS_EVAL_MODEL", "openai/openai/gpt-5-mini"))
     ap.add_argument("--base-url", default=os.environ.get("OPENHANDS_EVAL_BASE_URL", "https://ai-gateway.vercel.sh/coding-agent/v1"))
+    ap.add_argument("--shell", default="", help="shell for the terminal tool: boxer-bash from `boxer shim install --shell`")
     args = ap.parse_args()
 
     workspace = BoxerWorkspace(working_dir=args.repo)
@@ -65,7 +68,11 @@ def main() -> int:
 
     # LiteLLM: the "openai/" prefix picks the OpenAI protocol; the rest is the gateway model id.
     llm = LLM(model=args.model, api_key=key, base_url=args.base_url, usage_id="boxer-eval")
-    agent = Agent(llm=llm, tools=[Tool(name=TerminalTool.name)])
+    # The terminal tool spawns its own PTY shell; with boxer-bash as that shell every command,
+    # including compound lines, runs in the guest. Without --shell the terminal would run on
+    # the host and BoxerWorkspace.execute_command would never be consulted.
+    params = {"shell_path": args.shell, "terminal_type": "subprocess"} if args.shell else {}
+    agent = Agent(llm=llm, tools=[Tool(name=TerminalTool.name, params=params)])
     conversation = Conversation(agent=agent, workspace=workspace, callbacks=[on_event], visualizer=None)
     conversation.send_message(args.prompt)
     try:

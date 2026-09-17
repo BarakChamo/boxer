@@ -1,19 +1,41 @@
-# boxer workspace for OpenHands
+# boxer for OpenHands
 
-`BoxerWorkspace` is an OpenHands SDK `LocalWorkspace` whose commands run in the boxer sandbox.
+Two pieces, both thin. The one that matters is the shell.
 
-```python
-from boxer_workspace import BoxerWorkspace
-from openhands.sdk import Conversation
+## The terminal's shell is boxer-bash (recommended)
 
-conversation = Conversation(agent=agent, workspace=BoxerWorkspace(working_dir="/path/to/repo"))
+OpenHands' terminal tool spawns its own interactive shell in a PTY; a workspace's
+`execute_command` is not on that path. So give the terminal a shell that lives in the sandbox:
+
+```sh
+boxer shim install --shell            # writes ~/.local/share/boxer/shims/boxer-bash
 ```
 
-- Files: host filesystem, unchanged (`file_upload`, `file_download`, and the agent's file tools).
-- Commands: `boxer run -c <command>` from the requested `cwd`, so the guest working directory
-  follows the host one; exit codes, stdout, stderr, and timeouts propagate.
-- Requirements: `boxer` on `PATH`, smolvm installed, the repository configured (`boxer doctor`).
-  Use with the SDK or `RUNTIME=process`; the Docker and Remote sandboxes already isolate.
+```python
+from openhands.sdk import Agent, Conversation, Tool
+from openhands.tools.terminal import TerminalTool
 
-Test without OpenHands installed: `python3 test_boxer_workspace.py` (stubs the SDK, uses a fake
-`boxer`).
+agent = Agent(llm=llm, tools=[Tool(name=TerminalTool.name,
+    params={"shell_path": "/Users/you/.local/share/boxer/shims/boxer-bash", "terminal_type": "subprocess"})])
+conversation = Conversation(agent=agent, workspace="/path/to/repo")
+```
+
+`boxer-bash` is `exec boxer run -- bash "$@"`: the PTY, the prompt markers OpenHands relies on,
+and every command, compound lines included, run in the guest for the worktree. Files stay on the
+host. Verified live with the SDK 1.49 (`boxer-eval --tier t2 --cell openhands`): the agent ran
+`uname -a` in the guest, nothing touched the host.
+
+The same wrapper works for any harness that lets you name its shell binary; boxer keeps no
+per-harness code for it.
+
+## `BoxerWorkspace`
+
+A `LocalWorkspace` whose `execute_command` runs `boxer run -c <command>`. Useful when your own code
+calls `workspace.execute_command`; it does not affect the agent's terminal tool. Test without
+OpenHands installed: `python3 test_boxer_workspace.py`.
+
+## Requirements
+
+`boxer` on `PATH`, smolvm installed, the repository configured (`boxer doctor`), an image with
+bash (the default `node` image has it; alpine does not). Use with the SDK or `RUNTIME=process`; the
+Docker and Remote sandboxes already isolate execution.

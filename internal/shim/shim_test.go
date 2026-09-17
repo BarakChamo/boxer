@@ -50,3 +50,19 @@ func TestHarnessShimExecsBoxerShell(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 }
+
+func TestShellWrapperExecsBashInTheSandbox(t *testing.T) {
+	shims := t.TempDir()
+	path, err := InstallShell(shims)
+	if err != nil || filepath.Base(path) != "boxer-bash" {
+		t.Fatalf("%v %v", path, err)
+	}
+	bindir := t.TempDir()
+	os.WriteFile(filepath.Join(bindir, "boxer"), []byte("#!/bin/sh\necho \"boxer $*\"\n"), 0o755)
+	cmd := exec.Command(path, "-i")
+	cmd.Env = append(os.Environ(), "PATH="+bindir+":/usr/bin:/bin")
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "boxer run -- bash -i" {
+		t.Fatalf("%q %v", out, err)
+	}
+}

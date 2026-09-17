@@ -803,17 +803,22 @@ labels as the only state.
 
 ## 8. Integration: OpenHands
 
-OpenHands executes agent actions against a `Workspace`; `LocalWorkspace` runs commands with
-`subprocess`. boxer integrates at that seam, not at the Remote Runtime API.
+OpenHands' agent acts through its terminal tool, which spawns an interactive shell in a PTY; a
+`Workspace.execute_command` is not on that path. boxer integrates at the shell, which is the
+universal seam: any harness with a configurable shell binary gets the same treatment with no
+per-harness code.
 
-- **R-OH-1.** `adapters/openhands/boxer_workspace.py` provides `BoxerWorkspace(LocalWorkspace)`
-  whose `execute_command` runs `boxer run -c <command>` from the requested `cwd`, returning a
-  `CommandResult` with exit code, stdout, stderr, and timeout state.
+- **R-OH-1.** `boxer shim install --shell` writes `boxer-bash`, an `exec boxer run -- bash "$@"`
+  wrapper. Given to OpenHands' `TerminalTool` as `shell_path` (with `terminal_type = subprocess`),
+  the agent's whole terminal, prompt markers and compound lines included, runs in the guest.
+  Verified live 2026-09-18 against SDK 1.49 through the gateway.
 - **R-OH-2.** File operations stay on the host; the worktree is the workspace, mounted into the
-  guest as for every other harness.
-- **R-OH-3.** The adapter is for the SDK and the Process sandbox. Docker and Remote sandboxes are
-  not wrapped; nesting boxer inside another isolation layer is a non-goal (§11).
-- **R-OH-4.** The adapter carries a test that runs without OpenHands installed.
+  guest as for every other harness. The guest image must carry bash (the default `node` image does).
+- **R-OH-3.** `adapters/openhands/boxer_workspace.py` (`BoxerWorkspace(LocalWorkspace)`, whose
+  `execute_command` runs `boxer run -c`) remains for code that calls the workspace directly. It is
+  not the agent's path. Docker and Remote sandboxes are not wrapped (§11).
+- **R-OH-4.** The adapter carries a test that runs without OpenHands installed, and the eval's
+  `openhands` cell runs the real SDK at t1 (no model) and t2 (live).
 
 ## 9. Integration: Paperclip
 

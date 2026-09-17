@@ -71,15 +71,26 @@ func (d OpenHands) Available(tier string) (bool, string) {
 }
 
 func (OpenHands) Cells(tier string) []Cell {
-	return []Cell{{Harness: "openhands", Mode: "rewrite", Entry: "sdk", Isolation: "worktree", Compliant: true, Tier: tier}}
+	// bash in the guest: OpenHands' terminal needs it, alpine has none.
+	return []Cell{{Harness: "openhands", Mode: "rewrite", Entry: "sdk", Isolation: "worktree", Compliant: true, Tier: tier, Image: "mirror.gcr.io/library/node:24-bookworm-slim"}}
 }
 
-func (OpenHands) Prepare(env *Env, c Cell) error { return nil }
+// Prepare writes boxer-bash for the terminal tool's shell_path.
+func (d OpenHands) Prepare(env *Env, c Cell) error {
+	out, err := env.boxer(env.Repo, "shim", "install", "--shell", d.shims(env))
+	if err != nil {
+		return fmt.Errorf("boxer shim install --shell: %v\n%s", err, out)
+	}
+	return nil
+}
+
+func (OpenHands) shims(env *Env) string { return filepath.Join(env.Work, "shims") }
 
 func (d OpenHands) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	args := []string{repoFile("adapters/openhands/eval_run.py"), "--repo", env.Repo, "--command", env.Command()}
 	if env.Tier == "t2" {
-		args = append(args, "--live", "--prompt", prompt, "--model", "openai/"+LiveModel("openhands"), "--base-url", gatewayOpenAI)
+		args = append(args, "--live", "--prompt", prompt, "--model", "openai/"+LiveModel("openhands"), "--base-url", gatewayOpenAI,
+			"--shell", filepath.Join(d.shims(env), "boxer-bash"))
 	}
 	cmd := exec.Command(d.python(), args...)
 	cmd.Dir = env.Repo
@@ -98,15 +109,21 @@ func (d OpenHands) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		return Transcript{Raw: out.String()}, fmt.Errorf("openhands timed out")
 	}
 	tr := Transcript{Raw: out.String()}
-	// The runner prints one JSON line last: {"answer": ..., "tools": [...], "skip": ...}.
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	// The runner prints one JSON line {"answer": ..., "tools": [...], "skip": ...}; the SDK's
+	// logger may print after it, so take the last line that parses.
 	var res struct {
 		Answer string   `json:"answer"`
 		Tools  []string `json:"tools"`
 		Skip   string   `json:"skip"`
 	}
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
-		return tr, fmt.Errorf("openhands runner did not report: %v", err)
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	found := false
+	for i := len(lines) - 1; i >= 0 && !found; i-- {
+		l := strings.TrimSpace(lines[i])
+		found = strings.HasPrefix(l, `{"answer"`) && json.Unmarshal([]byte(l), &res) == nil
+	}
+	if !found {
+		return tr, fmt.Errorf("openhands runner did not report a result line")
 	}
 	if res.Skip != "" {
 		return tr, SkipError{res.Skip}

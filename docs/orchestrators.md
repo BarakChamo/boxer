@@ -50,10 +50,14 @@ applies to any harness that confines the process: boxer's isolation is the VM, a
 
 ## OpenHands
 
-OpenHands executes through a `Workspace`. `adapters/openhands/boxer_workspace.py` is a
-`LocalWorkspace` whose `execute_command` runs `boxer run -c <command>`; files stay on the host,
-commands land in the guest. Use it with the SDK directly or with `RUNTIME=process`; the Docker and
-Remote sandboxes already isolate execution and would only nest boxer inside them.
+OpenHands executes through its terminal tool, which spawns its own PTY shell; a workspace's
+`execute_command` is not on the agent's path (the first adapter here got that wrong, and the
+live run proved it: the tool ran on the host and hit a PTY error). The integration is one
+setting: `TerminalTool` `shell_path` = `boxer-bash` from `boxer shim install --shell`, an
+`exec boxer run -- bash` wrapper. The whole interactive shell then runs in the guest, prompt
+markers included. Verified live on 2026-09-18 (`openhands/rewrite/sdk/worktree`, gateway model):
+guest answered `Linux`, host canary absent. `adapters/openhands/BoxerWorkspace` remains for code
+that calls `workspace.execute_command` itself.
 
 ## Paperclip
 

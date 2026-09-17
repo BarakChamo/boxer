@@ -71,3 +71,21 @@ func DefaultDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "boxer", "shims")
 }
+
+// shellTemplate is a bash stand-in: an interactive shell in the guest for the current worktree.
+// Any harness that lets you name its shell binary (OpenHands' terminal tool, for one) runs every
+// command in the sandbox with no other integration. boxer run passes the PTY through.
+const shellTemplate = `#!/bin/sh
+# boxer shell wrapper: the sandbox's bash, for harnesses with a configurable shell path.
+export PATH
+exec boxer run -- bash "$@"
+`
+
+// InstallShell writes dir/boxer-bash and returns its path.
+func InstallShell(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "boxer-bash")
+	return path, os.WriteFile(path, []byte(shellTemplate), 0o755)
+}

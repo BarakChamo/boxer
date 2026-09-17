@@ -91,8 +91,9 @@ boxer install all      # .claude/settings.json + .mcp.json, .codex/hooks.json, .
 
 This project layer is what orchestrators load: T3 Code and Paperclip launch harnesses with their
 own config directories, so a user-level plugin never reaches those sessions. Having both layers is
-harmless — see [docs/orchestrators.md](docs/orchestrators.md). OpenHands uses
-[adapters/openhands](adapters/openhands/) instead.
+harmless — see [docs/orchestrators.md](docs/orchestrators.md). OpenHands needs
+only `boxer shim install --shell` and `shell_path` on its terminal tool, see
+[adapters/openhands](adapters/openhands/).
 
 ## Harness bundles
 

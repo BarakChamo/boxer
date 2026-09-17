@@ -28,7 +28,7 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 
 | Orchestrator | Path | Result |
 | --- | --- | --- |
-| OpenHands | `BoxerWorkspace` adapter, real SDK | T1 pass in Stream C's run; skips here (no venv on this checkout); live needs `AI_GATEWAY_API_KEY` |
+| OpenHands | terminal `shell_path` = `boxer-bash` (`boxer shim install --shell`), real SDK 1.49 | t1 pass; **live pass** through the gateway (agent's terminal ran in the guest); the earlier `BoxerWorkspace`-only design did not sandbox the agent's terminal |
 | Paperclip | project layer over `claude-agent-acp` | spike 7 answered (env passes through); driver skips: `paperclipai` not installed |
 | T3 Code | ACP (`boxer acp`) and project layer | spike 8 answered (WS sequence known); driver skips: `t3` not installed |
 | Multica | project layer | spike 9 answered; driver skips: no account (`multica setup`) |
