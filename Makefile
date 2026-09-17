@@ -1,5 +1,5 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  = -X main.version=$(VERSION)
+LDFLAGS  = -X main.Version=$(VERSION)
 
 .PHONY: build test smoke eval-t1 eval-t2 package tidy
 
