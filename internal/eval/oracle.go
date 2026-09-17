@@ -103,13 +103,17 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	if !expectDeny && t.denies > 0 {
 		add("deny", "%d denial(s): the agent had to be corrected", t.denies)
 	}
-	if c.Mode == "rewrite" && !c.Shims && t.rewrites == 0 && !typedBoxer(t) && !usedRunTool(tr) {
+	// At t2 the tool list comes from the harness's own output, which not every driver can parse;
+	// the guest canary is the ground truth: with no rewrite in the trace, only the run tool (or a
+	// typed `boxer run`) reaches the guest.
+	reachedGuest := t.rewrites == 0 && guestCanaryPresent(env)
+	if c.Mode == "rewrite" && !c.Shims && t.rewrites == 0 && !typedBoxer(t) && !usedRunTool(tr) && !reachedGuest {
 		add("path", "rewrite mode but no rewrite in the trace, no boxer run typed, no boxer_run tool")
 	}
 	if c.Mode == "rewrite" && c.Shims && len(t.events) == 0 {
 		add("path", "shim cell but the hook never fired; the harness did not load the hooks")
 	}
-	if c.Mode == "tool" && c.Compliant && !usedRunTool(tr) && !typedBoxer(t) {
+	if c.Mode == "tool" && c.Compliant && !usedRunTool(tr) && !typedBoxer(t) && !reachedGuest {
 		add("path", "tool mode but neither boxer_run nor `boxer run` was used (tools: %v)", tr.Tools)
 	}
 
@@ -187,4 +191,24 @@ func usedRunTool(tr Transcript) bool {
 		}
 	}
 	return false
+}
+
+// guestCanaryPresent reports whether the cell's canary exists inside the scope's VM: proof that
+// a command reached the guest, whatever path the harness took.
+func guestCanaryPresent(env *Env) bool {
+	cfg, err := config.Load(env.Repo, env.Repo)
+	if err != nil {
+		return false
+	}
+	g, _ := scope.Detect(env.Repo)
+	tag := ""
+	if cfg.Integration == "inside" {
+		tag = "inside"
+	}
+	sc, err := scope.ResolveTagged(cfg.Isolation, "degrade", g, scope.Identity{}, tag)
+	if err != nil {
+		return false
+	}
+	out, code, _ := vm.New().Output(sc.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes")
+	return code == 0 && strings.Contains(out, "yes")
 }
