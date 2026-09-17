@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
@@ -49,8 +48,6 @@ type Server struct {
 	Harness string
 	Resolve func(cwd, harness string, id scope.Identity) (*box.Env, error)
 	Version string
-
-	warm sync.WaitGroup
 }
 
 var tools = []map[string]any{
@@ -150,7 +147,7 @@ func (s *Server) sessionStart() {
 	}
 }
 
-// sessionEnd waits for a pending warm-up and records the last use of the scope, so gc's idle
+// sessionEnd records the last use of the scope, so gc's idle
 // clock starts at the session's end rather than its last command.
 func (s *Server) sessionEnd() {
 	e, err := s.Resolve("", s.Harness, scope.Identity{})

@@ -122,7 +122,7 @@ are validated against the spec's schemas in `go test`.
 ```sh
 go test ./...          # unit: config, scope, decide, hook dialects, mcp lifecycle, shims, package + schema conformance, inside (fake smolvm)
 evals/smoke.sh         # real smolvm: every config path, every hook dialect, mcp, shims, gc   (46 checks)
-boxer-eval --tier t1   # real harness + scripted model + real smolvm: 31 outside cells, 11 inside cells
+boxer-eval --tier t1   # real harness + scripted model + real smolvm; --tier t2 live; --tier adherence live brief-following
 cmd/boxer-eval/        # eval matrix: --tier t1 (fake model) or --tier t2 (live credentials from evals/.env)
 ```
 
