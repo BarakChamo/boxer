@@ -280,10 +280,40 @@ type Result struct {
 	Findings []Finding
 	Duration time.Duration
 	Raw      string
+	// Retried is true when the first attempt failed on infrastructure (VM start, npm, image pull)
+	// and this is the second attempt's outcome.
+	Retried bool
+}
+
+// infraPatterns mark failures that belong to the machine, not to boxer or the harness: the cell
+// is retried once and the report says so.
+var infraPatterns = []string{"cause: START_FAILED", "cause: CREATE_FAILED", "EIDLETIMEOUT", "ECONNRESET", "agent closed: EOF", "timed out", "failed to pull", "error pulling", "pulling image"}
+
+// infra reports whether a failed result looks like an infrastructure failure.
+func infra(r Result) bool {
+	var b strings.Builder
+	for _, f := range r.Findings {
+		b.WriteString(f.Detail)
+	}
+	if b.Len() == 0 {
+		return false
+	}
+	text := b.String()
+	if strings.Contains(text, "agent closed: EOF") && r.Raw != "" && strings.Contains(r.Raw, "agent_message_chunk") {
+		return false // the agent answered and then hung up: not infrastructure
+	}
+	for _, p := range infraPatterns {
+		if strings.Contains(text, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Run executes every cell of every driver at the tier and returns the results in matrix order.
-func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep bool, log io.Writer) []Result {
+// onResult, when set, sees each result as it lands so a partial report can be written on
+// interrupt. A cell that fails on infrastructure (see infraPatterns) is run once more.
+func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep bool, log io.Writer, onResult func(Result)) []Result {
 	unlock, err := HostLock(log)
 	if err != nil {
 		fmt.Fprintf(log, "eval lock: %v\n", err)
@@ -302,48 +332,58 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 				results = append(results, Result{Cell: c, Status: "skip", Reason: why})
 				continue
 			}
-			results = append(results, runCell(d, c, tier, boxerBin, keep, log))
+			r := runCell(d, c, tier, boxerBin, keep, log)
+			if r.Status == "fail" && infra(r) {
+				fmt.Fprintf(log, "  retrying %s after an infrastructure failure\n", c.Name())
+				r = runCell(d, c, tier, boxerBin, keep, log)
+				r.Retried = true
+			}
+			results = append(results, r)
+			if onResult != nil {
+				onResult(r)
+			}
 		}
 	}
 	return results
 }
 
-func runCell(d Driver, c Cell, tier, boxerBin string, keep bool, log io.Writer) Result {
+// runCell runs one cell. The scratch directory (trace, transcript, fake-model log) is kept when
+// the cell fails; keep keeps it for passes too.
+func runCell(d Driver, c Cell, tier, boxerBin string, keep bool, log io.Writer) (r Result) {
 	start := time.Now()
 	fmt.Fprintf(log, "▶ %s\n", c.Name())
 	env, err := NewEnv(tier, boxerBin, c, log)
 	if err != nil {
 		return Result{Cell: c, Status: "fail", Findings: []Finding{{"setup", err.Error()}}, Duration: time.Since(start)}
 	}
-	defer env.Close(keep)
+	defer func() {
+		r.Duration = time.Since(start)
+		kept := keep || r.Status == "fail"
+		if kept {
+			os.WriteFile(filepath.Join(env.Work, "transcript.txt"), []byte(r.Raw), 0o644)
+			r.Reason = strings.TrimSpace(r.Reason + " kept: " + env.Work)
+		}
+		env.Close(kept)
+		fmt.Fprintf(log, "  %s %s (%s)\n", mark(r.Status), c.Name(), r.Duration.Round(time.Millisecond))
+		for _, f := range r.Findings {
+			fmt.Fprintf(log, "    - %s: %s\n", f.Check, f.Detail)
+		}
+	}()
 	defer d.Cleanup(env, c)
 	defer env.boxer(env.Repo, "down") // never leave a VM behind, whatever happened
 	if err := d.Prepare(env, c); err != nil {
-		return Result{Cell: c, Status: "fail", Findings: []Finding{{"prepare", err.Error()}}, Duration: time.Since(start)}
+		return Result{Cell: c, Status: "fail", Findings: []Finding{{"prepare", err.Error()}}}
 	}
 	tr, err := d.Run(env, c, env.Prompt())
-	if keep {
-		os.WriteFile(filepath.Join(env.Work, "transcript.txt"), []byte(tr.Raw), 0o644)
-	}
 	if err != nil {
-		fmt.Fprintf(log, "  FAIL %s: %v\n", c.Name(), err)
-		return Result{Cell: c, Status: "fail", Findings: []Finding{{"run", err.Error()}}, Duration: time.Since(start), Raw: tr.Raw}
+		return Result{Cell: c, Status: "fail", Findings: []Finding{{"run", err.Error()}}, Raw: tr.Raw}
 	}
 	findings := Judge(env, c, tr)
 	status := "pass"
 	if len(findings) > 0 {
 		status = "fail"
 	}
-	r := Result{Cell: c, Status: status, Findings: findings, Duration: time.Since(start), Raw: tr.Raw}
-	if keep {
-		r.Reason = "kept: " + env.Work
-		os.WriteFile(filepath.Join(env.Work, "transcript.txt"), []byte(tr.Raw), 0o644)
-	}
-	fmt.Fprintf(log, "  %s %s (%s)\n", mark(status), c.Name(), r.Duration.Round(time.Millisecond))
-	for _, f := range findings {
-		fmt.Fprintf(log, "    - %s: %s\n", f.Check, f.Detail)
-	}
-	return r
+	return Result{Cell: c, Status: status, Findings: findings, Raw: tr.Raw}
 }
 
 func mark(status string) string {
@@ -366,6 +406,9 @@ func Report(results []Result, tier string) string {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Cell.Name() < sorted[j].Cell.Name() })
 	for _, r := range sorted {
 		notes := r.Reason
+		if r.Retried {
+			notes = strings.TrimSpace("retried once after an infrastructure failure; " + notes)
+		}
 		for _, f := range r.Findings {
 			notes += fmt.Sprintf("%s: %s; ", f.Check, strings.ReplaceAll(f.Detail, "|", "\\|"))
 		}

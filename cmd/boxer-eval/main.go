@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/BarakChamo/boxer/internal/eval"
 )
@@ -21,7 +24,7 @@ func main() {
 	harness := flag.String("harness", "", "comma-separated driver names; default all")
 	cell := flag.String("cell", "", "substring filter on cell names")
 	out := flag.String("out", "", "write the Markdown report here")
-	keep := flag.Bool("keep", false, "keep each cell's scratch directory")
+	keep := flag.Bool("keep", false, "keep every cell's scratch directory (failures are always kept)")
 	list := flag.Bool("list", false, "list cells and exit")
 	lockRun := flag.Bool("lock-run", false, "take the host smolvm lock, then run the command after -- (used by evals/smoke.sh)")
 	flag.Parse()
@@ -85,7 +88,28 @@ func main() {
 		}
 		return
 	}
-	results := eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr)
+	// An interrupt writes the report for the cells that finished, then exits; the cell in flight
+	// may leave a VM behind, so the message says how to reclaim it.
+	var mu sync.Mutex
+	var partial []eval.Result
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		mu.Lock()
+		report := eval.Report(partial, *tier) + "\n_interrupted; the cell in flight is not listed. Run `boxer down --all` to reclaim its VM._\n"
+		mu.Unlock()
+		if *out != "" {
+			os.WriteFile(*out, []byte(report), 0o644)
+		}
+		fmt.Println(report)
+		os.Exit(130)
+	}()
+	results := eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
+		mu.Lock()
+		partial = append(partial, r)
+		mu.Unlock()
+	})
 	report := eval.Report(results, *tier)
 	if *out != "" {
 		os.WriteFile(*out, []byte(report), 0o644)
