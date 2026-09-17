@@ -206,3 +206,29 @@ func TestProbesSucceed(t *testing.T) {
 		t.Fatal(string(body))
 	}
 }
+
+func TestDelegateOnceInForeground(t *testing.T) {
+	s := New(Scenario{Commands: []string{"uname -a"}, Delegate: "Agent"})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	agent := map[string]any{"name": "Agent", "input_schema": map[string]any{"type": "object",
+		"properties": map[string]any{"prompt": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}, "run_in_background": map[string]any{"type": "boolean"}},
+		"required":   []any{"description", "prompt"}}}
+	tools := []map[string]any{agent, {"name": "Bash", "input_schema": map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}}}}
+	msgs := []map[string]any{{"role": "user", "content": "run it"}}
+	_, body := post(t, srv, "/v1/messages", map[string]any{"model": "m", "tools": tools, "messages": msgs})
+	var m map[string]any
+	json.Unmarshal(body, &m)
+	c := m["content"].([]any)[0].(map[string]any)
+	in, _ := c["input"].(map[string]any)
+	if c["name"] != "Agent" || in["prompt"] != "uname -a" || in["run_in_background"] != false || in["description"] == nil {
+		t.Fatalf("delegation call: %s", body)
+	}
+	// The subagent's conversation offers the same tools; it must run the command itself.
+	_, body = post(t, srv, "/v1/messages", map[string]any{"model": "m", "tools": tools, "messages": msgs})
+	json.Unmarshal(body, &m)
+	c = m["content"].([]any)[0].(map[string]any)
+	if c["name"] != "Bash" || c["input"].(map[string]any)["command"] != "uname -a" {
+		t.Fatalf("second conversation must use the shell: %s", body)
+	}
+}

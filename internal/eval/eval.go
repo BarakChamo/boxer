@@ -143,11 +143,11 @@ func NewEnv(tier, boxerBin string, c Cell, log io.Writer) (*Env, error) {
 			}
 			tools = withoutBoxer(fakellm.DefaultTools)
 		}
+		delegate := ""
 		if c.Isolation == "subagent" {
-			// The scripted main agent delegates to a subagent, whose own scripted turn runs the command.
-			tools = append([]string{"Agent", "Task"}, tools...)
+			delegate = "Agent" // the scripted main agent delegates once; the subagent's own turn runs the command
 		}
-		e.LLM = fakellm.New(fakellm.Scenario{Commands: e.commands(c), Tools: tools})
+		e.LLM = fakellm.New(fakellm.Scenario{Commands: e.commands(c), Tools: tools, Delegate: delegate})
 		ln, err := net.Listen("tcp", "0.0.0.0:0") // guests reach it through the host's LAN address
 		if err != nil {
 			return nil, err

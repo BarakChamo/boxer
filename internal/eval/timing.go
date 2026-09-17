@@ -13,9 +13,10 @@ import (
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
-// Worktree is the linked worktree a timing cell creates beside the repository: before the
-// session (Prepare) or by the agent's own shell (mid).
-func (e *Env) Worktree() string { return filepath.Join(e.Work, "wt") }
+// Worktree is the linked worktree a timing cell creates: before the session (Prepare) or by the
+// agent's own shell (mid). It is nested in the repository because Claude Code resets a shell cwd
+// that leaves the project directory, and a nested linked worktree is a worktree like any other.
+func (e *Env) Worktree() string { return filepath.Join(e.Repo, "wt") }
 
 // SessionRoot is the worktree the cell's command runs from.
 func (e *Env) SessionRoot(c Cell) string {
