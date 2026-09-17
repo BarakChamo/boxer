@@ -31,6 +31,11 @@ type trace struct {
 	raw      string
 }
 
+var (
+	reRewrite = regexp.MustCompile(`"command":\s*"boxer run`)
+	reKernel  = regexp.MustCompile(`\b(Linux|Darwin)\b`)
+)
+
 func readTrace(path string) trace {
 	b, _ := os.ReadFile(path)
 	t := trace{raw: string(b)}
@@ -44,7 +49,9 @@ func readTrace(path string) trace {
 				t.inputs = append(t.inputs, strings.ReplaceAll(m[1], `\"`, `"`))
 			}
 		case strings.Contains(line, " -> "):
-			if strings.Contains(line, "boxer run -c") && !strings.Contains(line, "deny") {
+			// A rewrite is a tool-input field set to `boxer run`; the session brief also mentions
+			// `boxer run -c` and must not count.
+			if reRewrite.MatchString(line) && !strings.Contains(line, "deny") {
 				t.rewrites++
 			}
 			if strings.Contains(line, `"permissionDecision":"deny"`) || strings.Contains(line, `"decision":"deny"`) || strings.Contains(line, `{"deny":`) {
@@ -64,6 +71,13 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	// 1. Where did the command run? In the expect-deny cell it must not have run at all, so the
 	// answer only has to prove it was not the host.
 	wantAnswer := "Linux"
+	if env.Tier != "t1" && tr.Answer != "Linux" && tr.Answer != "Darwin" {
+		// A live model phrases the answer ("First word of output: Linux"); the last kernel name in
+		// the transcript is the answer it gave after the tool output.
+		if m := reKernel.FindAllString(tr.Raw, -1); len(m) > 0 {
+			tr.Answer = m[len(m)-1]
+		}
+	}
 	careless := c.Mode == "tool" && !c.Compliant
 	switch {
 	case c.Mode == "off":
@@ -199,4 +213,3 @@ func usedRunTool(tr Transcript) bool {
 	}
 	return false
 }
-
