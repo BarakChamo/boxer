@@ -18,7 +18,7 @@ eval-t1: build    ## real harness CLIs + fake model + real smolvm; report to doc
 	bin/boxer-eval --tier t1 --out docs/eval-t1.md
 
 eval-t2: build    ## live models; credentials from evals/.env (gitignored)
-	set -a; [ -f evals/.env ] && . evals/.env; set +a; bin/boxer-eval --tier t2 --out docs/eval-t2.md
+	set -a; for f in .env evals/.env; do [ -f $f ] && . $f; done; set +a; bin/boxer-eval --tier t2 --out docs/eval-t2.md
 
 package: build    ## render every harness bundle into dist/
 	bin/boxer package all --out dist

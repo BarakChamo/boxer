@@ -126,13 +126,14 @@ func main() {
 	}
 }
 
-// loadDotEnv reads KEY=value lines from evals/.env (gitignored; looked up from the working directory
+// loadDotEnv reads KEY=value lines from evals/.env or .env (both gitignored; looked up from the working directory
 // and from the binary's repository root) into the environment without overriding what is already
 // set. Values are never printed.
 func loadDotEnv() {
-	candidates := []string{filepath.Join("evals", ".env")}
+	candidates := []string{filepath.Join("evals", ".env"), ".env"}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "..", "evals", ".env"))
+		root := filepath.Join(filepath.Dir(exe), "..")
+		candidates = append(candidates, filepath.Join(root, "evals", ".env"), filepath.Join(root, ".env"))
 	}
 	for _, p := range candidates {
 		b, err := os.ReadFile(p)

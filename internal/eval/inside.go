@@ -142,7 +142,11 @@ func (d Inside) guestEnvFor(env *Env, h string) []string {
 		key, _ := gatewayKey()
 		switch h {
 		case "claude":
-			return []string{"CLAUDE_CONFIG_DIR=" + dir, "ANTHROPIC_BASE_URL=" + gatewayClaude, "ANTHROPIC_API_KEY=" + key, "ANTHROPIC_MODEL=" + LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
+			e := []string{"CLAUDE_CONFIG_DIR=" + dir, "ANTHROPIC_BASE_URL=" + gatewayClaude, "ANTHROPIC_API_KEY=" + key, "ANTHROPIC_MODEL=" + LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
+			if !strings.HasPrefix(LiveModel("claude"), "anthropic/") {
+				e = append(e, "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1")
+			}
+			return e
 		case "codex":
 			return []string{"CODEX_HOME=" + dir, gatewayKeyVar + "=" + key}
 		case "grok":

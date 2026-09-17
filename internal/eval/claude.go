@@ -168,7 +168,12 @@ func (d Claude) apiKey(env *Env) string {
 func (d Claude) modelEnv(env *Env) []string {
 	e := []string{"CLAUDE_CONFIG_DIR=" + d.home(env), "ANTHROPIC_API_KEY=" + d.apiKey(env)}
 	if env.Tier == "t2" {
-		return append(e, "ANTHROPIC_BASE_URL="+gatewayClaude, "ANTHROPIC_MODEL="+LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+		e = append(e, "ANTHROPIC_BASE_URL="+gatewayClaude, "ANTHROPIC_MODEL="+LiveModel("claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+		if !strings.HasPrefix(LiveModel("claude"), "anthropic/") {
+			// Anthropic-only beta headers and tool-schema fields; other providers reject them (Vercel docs).
+			e = append(e, "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1")
+		}
+		return e
 	}
 	return append(e, "ANTHROPIC_BASE_URL="+env.LLMURL)
 }

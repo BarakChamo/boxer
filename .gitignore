@@ -4,3 +4,4 @@ build/
 .venv-openhands/
 evals/.env
 __pycache__/
+.env
