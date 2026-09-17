@@ -154,11 +154,16 @@ at a time, real smolvm 1.16.1, fake model, node image already packed:
 | inside-pi | 36.3 s (10.7 min in the first pass) | |
 | acp-grok (new) | | 6.0 s (from the inside-grok pack) |
 | boxer acp claude, SDK example client | 62 s (install 45 s) | |
+| inside-claude | (2.7 to 11 min in the first pass) | 7.2 s |
+| acp-claude | | 7.5 s |
+| inside-codex | 37.5 s (apt libssl3 + npm) | |
+| acp-codex | | 4.8 s |
 
 The pack itself costs about 7 s (stop, `pack create --from-vm` at 4.6 s, start) and is 130 to 365 MB
 per harness under `BOXER_PACKS` or `~/.local/state/boxer/packs`; `boxer gc` prunes packs no
-machine references after `idle_timeout`. Timings for claude and codex are in the rows below once
-their reruns land.
+machine references after `idle_timeout`; with no machine up, `gc --dry-run` under a 1 s
+`idle_timeout` listed all nine packs on this host. Every inside cell now finishes in under 40 s
+once the node image is packed; the whole inside matrix (7 shell + 6 ACP cells) is under 5 min.
 
 ### ACP with a real client
 
