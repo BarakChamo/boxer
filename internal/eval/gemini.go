@@ -23,9 +23,8 @@ func (Gemini) Available(tier string) (bool, string) {
 		return false, "gemini not installed"
 	}
 	if tier == "t2" {
-		home, _ := os.UserHomeDir()
-		if _, err := os.Stat(filepath.Join(home, ".gemini", "oauth_creds.json")); err != nil && os.Getenv("GEMINI_API_KEY") == "" && os.Getenv("GOOGLE_API_KEY") == "" {
-			return false, "gemini has no login or GEMINI_API_KEY"
+		if why := needOne("GEMINI_API_KEY", "GOOGLE_API_KEY"); why != "" {
+			return false, why
 		}
 	}
 	return true, ""
@@ -48,15 +47,14 @@ func (Gemini) Cells(tier string) []Cell {
 func (Gemini) home(env *Env) string { return filepath.Join(env.Work, "gemini-home") }
 
 func (d Gemini) Prepare(env *Env, c Cell) error {
+	// A private home at both tiers: API-key auth selected, no update nags; t2 supplies a real key.
 	home := d.home(env)
-	if env.Tier == "t1" {
-		if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o755); err != nil {
-			return err
-		}
-		settings := `{"security":{"auth":{"selectedType":"gemini-api-key"}},"general":{"disableAutoUpdate":true,"disableUpdateNag":true},"privacy":{"usageStatisticsEnabled":false}}` + "\n"
-		if err := os.WriteFile(filepath.Join(home, ".gemini", "settings.json"), []byte(settings), 0o644); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o755); err != nil {
+		return err
+	}
+	settings := `{"security":{"auth":{"selectedType":"gemini-api-key"}},"general":{"disableAutoUpdate":true,"disableUpdateNag":true},"privacy":{"usageStatisticsEnabled":false}}` + "\n"
+	if err := os.WriteFile(filepath.Join(home, ".gemini", "settings.json"), []byte(settings), 0o644); err != nil {
+		return err
 	}
 	switch c.Entry {
 	case "plugin":
@@ -76,9 +74,11 @@ func (d Gemini) Prepare(env *Env, c Cell) error {
 }
 
 func (d Gemini) envFor(env *Env) []string {
-	e := append(env.BaseEnv(), "GEMINI_CLI_TRUST_WORKSPACE=true")
+	e := append(env.BaseEnv(), "GEMINI_CLI_TRUST_WORKSPACE=true", "GEMINI_CLI_HOME="+d.home(env))
 	if env.Tier == "t1" {
-		e = append(e, "GEMINI_CLI_HOME="+d.home(env), "GEMINI_API_KEY=fake", "GOOGLE_GEMINI_BASE_URL="+env.LLMURL)
+		e = append(e, "GEMINI_API_KEY=fake", "GOOGLE_GEMINI_BASE_URL="+env.LLMURL)
+	} else if k, ok := anySet("GEMINI_API_KEY", "GOOGLE_API_KEY"); ok {
+		e = append(e, "GEMINI_API_KEY="+os.Getenv(k))
 	}
 	return e
 }
@@ -114,9 +114,4 @@ func (d Gemini) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	return tr, nil
 }
 
-func (d Gemini) Cleanup(env *Env, c Cell) {
-	if env.Tier == "t2" && c.Entry == "plugin" {
-		// The extension went into the real ~/.gemini; take it back out.
-		exec.Command("gemini", "extensions", "uninstall", "boxer").Run()
-	}
-}
+func (Gemini) Cleanup(env *Env, c Cell) {}

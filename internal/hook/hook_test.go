@@ -59,9 +59,10 @@ func TestClaudeFamilyRewrite(t *testing.T) {
 	vmtest.Install(t)
 	dir := repo(t, "")
 	for _, h := range []string{"claude-code", "codex", "grok"} {
-		out, _, code := call(t, h, map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s"})
+		tool := Dialects[h].ShellTool
+		out, _, code := call(t, h, map[string]any{"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": map[string]any{"command": "bun test", "description": "tests"}, "cwd": dir, "session_id": "s"})
 		u, _ := hso(out)["updatedInput"].(map[string]any)
-		if code != 0 || hso(out)["permissionDecision"] != "allow" || u["command"] != "boxer run -c 'bun test'" {
+		if code != 0 || hso(out)["permissionDecision"] != "allow" || u["command"] != "boxer run -c 'bun test'" || u["description"] != "tests" {
 			t.Fatalf("%s: %v", h, out)
 		}
 	}

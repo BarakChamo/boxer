@@ -22,10 +22,7 @@ type Inside struct{}
 func (Inside) Name() string { return "inside" }
 
 func (Inside) Available(tier string) (bool, string) {
-	if tier == "t2" {
-		return false, "inside t2 needs each harness's login to travel; run `boxer shell <harness>` by hand"
-	}
-	if HostIP() == "" {
+	if tier == "t1" && HostIP() == "" {
 		return false, "no non-loopback IPv4 address for the guest to reach the fake model"
 	}
 	return true, ""
@@ -58,6 +55,9 @@ func (d Inside) Prepare(env *Env, c Cell) error {
 	dir := d.cfgDir(env, h)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
+	}
+	if env.Tier == "t2" {
+		return d.prepareLive(env, h, dir)
 	}
 	url := env.LLMURLGuest
 	var files map[string]string
@@ -92,11 +92,76 @@ func (d Inside) Prepare(env *Env, c Cell) error {
 	return nil
 }
 
+// prepareLive writes the t2 config for one guest harness: the real provider, keyed from the
+// environment. A harness whose credential is absent skips and names it.
+func (d Inside) prepareLive(env *Env, h, dir string) error {
+	files := map[string]string{}
+	switch h {
+	case "claude":
+		if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
+			return SkipError{"inside claude needs CLAUDE_CODE_OAUTH_TOKEN (the Keychain login does not travel into the guest) or ANTHROPIC_API_KEY"}
+		}
+		files[".claude.json"] = `{"hasCompletedOnboarding":true,"theme":"dark","numStartups":3}`
+	case "codex":
+		home, _ := os.UserHomeDir()
+		b, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
+		if err != nil {
+			return SkipError{"inside codex needs ~/.codex/auth.json (codex login) to copy into the guest home"}
+		}
+		files["auth.json"] = string(b) // the eval repository is deleted with the cell
+		files["config.toml"] = "approval_policy = \"never\"\n"
+	case "gemini":
+		if why := needOne("GEMINI_API_KEY", "GOOGLE_API_KEY"); why != "" {
+			return SkipError{"inside gemini: " + why}
+		}
+		files[".gemini/settings.json"] = `{"security":{"auth":{"selectedType":"gemini-api-key"}},"general":{"disableAutoUpdate":true,"disableUpdateNag":true},"privacy":{"usageStatisticsEnabled":false}}`
+	case "kimi":
+		if why := needOne("MOONSHOT_API_KEY"); why != "" {
+			return SkipError{"inside kimi: " + why}
+		}
+		files["config.toml"] = kimiConfig("kimi", moonshotBaseURL, os.Getenv("MOONSHOT_API_KEY"), moonshotModel)
+	case "opencode", "pi":
+		p, why := gateway()
+		if why != "" {
+			return SkipError{"inside " + h + ": " + why}
+		}
+		if h == "opencode" {
+			oc := fmt.Sprintf(`{"$schema":"https://opencode.ai/config.json","model":"eval/%s","permission":{"bash":"allow","edit":"allow","external_directory":"allow"},"provider":{"eval":{"npm":"@ai-sdk/openai-compatible","name":"eval","options":{"baseURL":%q,"apiKey":%q},"models":{%q:{"name":%q,"tool_call":true}}}}}`, p.Model, p.BaseURL, os.Getenv(p.KeyVar), p.Model, p.Model)
+			return os.WriteFile(filepath.Join(env.Repo, "opencode.json"), []byte(oc+"\n"), 0o644)
+		}
+		files[".pi/agent/models.json"] = fmt.Sprintf(`{"providers":{"eval":{"baseUrl":%q,"api":"openai-completions","apiKey":%q,"models":[{"id":%q,"name":%q,"contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, p.BaseURL, os.Getenv(p.KeyVar), p.Model, p.Model)
+	}
+	for rel, body := range files {
+		path := filepath.Join(dir, rel)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // guestEnvFor is the per-harness environment that points the guest harness at its eval config
-// directory (under the repo, so the path is the same on both sides) and at the fake model.
+// directory (under the repo, so the path is the same on both sides) and at the fake model, or at
+// the real provider at t2.
 func (d Inside) guestEnvFor(env *Env, h string) []string {
 	dir := d.cfgDir(env, h)
 	url := env.LLMURLGuest
+	if env.Tier == "t2" {
+		switch h {
+		case "claude":
+			e := []string{"CLAUDE_CONFIG_DIR=" + dir, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
+			for _, k := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"} {
+				if v := os.Getenv(k); v != "" {
+					e = append(e, k+"="+v)
+				}
+			}
+			return e
+		case "gemini":
+			k, _ := anySet("GEMINI_API_KEY", "GOOGLE_API_KEY")
+			return []string{"GEMINI_CLI_HOME=" + dir, "GEMINI_API_KEY=" + os.Getenv(k), "GEMINI_CLI_TRUST_WORKSPACE=true"}
+		}
+	}
 	switch h {
 	case "claude":
 		return []string{"CLAUDE_CONFIG_DIR=" + dir, "ANTHROPIC_BASE_URL=" + url, "ANTHROPIC_API_KEY=" + fakeKey, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"}
@@ -136,6 +201,15 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	case "grok":
 		args = []string{"-p", prompt, "-m", "fake-model", "--permission-mode", "bypassPermissions", "--no-auto-update"}
 	}
+	if env.Tier == "t2" {
+		p, _ := gateway()
+		switch h {
+		case "opencode":
+			args = []string{"run", "-m", "eval/" + p.Model, prompt}
+		case "pi":
+			args = []string{"-p", "--no-session", "--provider", "eval", "--model", p.Model, prompt}
+		}
+	}
 	cmdArgs := []string{"shell", h}
 	for _, e := range envs {
 		cmdArgs = append(cmdArgs, "-e", e)
@@ -161,6 +235,11 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	raw := out.String()
 	tr := Transcript{Raw: raw, Tools: env.LLMTools()}
+	if env.Tier == "t2" {
+		if q := quotaError(raw); q != "" {
+			return tr, SkipError{q}
+		}
+	}
 	switch h {
 	case "claude":
 		tr.Answer = parseClaudeStream(raw).Answer

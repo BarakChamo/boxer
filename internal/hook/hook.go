@@ -41,9 +41,10 @@ var claudeEvents = map[string]string{
 var Dialects = map[string]Dialect{
 	"claude-code": {Name: "claude-code", ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	"codex":       {Name: "codex", ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
-	"grok":        {Name: "grok", ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
-	"kimi":        {Name: "kimi", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
-	"dsh":         {Name: "dsh", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	// Grok sends Claude-compatible field names but its own tool name (verified 2026-09-17).
+	"grok": {Name: "grok", ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents},
+	"kimi": {Name: "kimi", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	"dsh":  {Name: "dsh", ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
 	"gemini-cli": {Name: "gemini-cli", ShellTool: "run_shell_command", Rewrite: true, Family: "gemini", Events: map[string]string{
 		"BeforeTool":   "intercept",
 		"SessionStart": "session_start",
@@ -156,7 +157,7 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 			}
 			return deny(d, stdout, "this repository runs commands in a sandbox", dec.Command)
 		}
-		return rewrite(d, stdout, dec.Command)
+		return rewrite(d, stdout, dec.Command, in.ToolInput)
 	default:
 		return deny(d, stdout, dec.Reason, dec.Fix)
 	}
@@ -181,16 +182,24 @@ func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) 
 
 // --- output dialects -------------------------------------------------------------------------
 
-func rewrite(d Dialect, w io.Writer, cmd string) int {
+// rewrite replaces the command and keeps every other field of the original input: the rewritten
+// input replaces the tool's input wholesale, and a schema with other required fields (Grok's
+// run_terminal_command needs description) would otherwise reject it.
+func rewrite(d Dialect, w io.Writer, cmd string, original map[string]any) int {
+	input := map[string]any{}
+	for k, v := range original {
+		input[k] = v
+	}
+	input["command"] = cmd
 	switch d.Family {
 	case "opencode":
 		return emit(w, map[string]any{"command": cmd})
 	case "gemini":
 		return emit(w, map[string]any{"hookSpecificOutput": map[string]any{
-			"hookEventName": "BeforeTool", "tool_input": map[string]any{"command": cmd}}})
+			"hookEventName": "BeforeTool", "tool_input": input}})
 	default:
 		return emit(w, map[string]any{"hookSpecificOutput": map[string]any{
-			"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": map[string]any{"command": cmd}}})
+			"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": input}})
 	}
 }
 

@@ -23,7 +23,9 @@ func (Kimi) Available(tier string) (bool, string) {
 		return false, "kimi not installed"
 	}
 	if tier == "t2" {
-		return false, "kimi live run needs a login inside a prepared KIMI_CODE_HOME; not automated"
+		if why := needOne("MOONSHOT_API_KEY"); why != "" {
+			return false, why
+		}
 	}
 	return true, ""
 }
@@ -47,18 +49,10 @@ func (d Kimi) Prepare(env *Env, c Cell) error {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return err
 	}
-	cfg := fmt.Sprintf(`default_model = "fake"
-default_permission_mode = "auto"
-telemetry = false
-[providers.fake]
-type = "anthropic"
-api_key = "fake"
-base_url = %q
-[models.fake]
-provider = "fake"
-model = "fake-model"
-max_context_size = 200000
-`, env.LLMURL)
+	cfg := kimiConfig("anthropic", env.LLMURL, "fake", "fake-model")
+	if env.Tier == "t2" {
+		cfg = kimiConfig("kimi", moonshotBaseURL, os.Getenv("MOONSHOT_API_KEY"), moonshotModel)
+	}
 	// boxer install kimi prints the [[hooks]] snippet; append it to the private config.
 	out, err := env.boxer(env.Repo, "install", "kimi")
 	if err != nil {
@@ -123,6 +117,22 @@ func (d Kimi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 }
 
 func (Kimi) Cleanup(env *Env, c Cell) {}
+
+// kimiConfig is a private KIMI_CODE_HOME config with one provider and one model named "eval".
+func kimiConfig(typ, baseURL, key, model string) string {
+	return fmt.Sprintf(`default_model = "eval"
+default_permission_mode = "auto"
+telemetry = false
+[providers.eval]
+type = %q
+api_key = %q
+base_url = %q
+[models.eval]
+provider = "eval"
+model = %q
+max_context_size = 200000
+`, typ, key, baseURL, model)
+}
 
 // prependPath puts dir first on PATH inside an environment slice.
 func prependPath(env []string, dir string) []string {

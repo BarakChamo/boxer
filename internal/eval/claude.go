@@ -22,6 +22,9 @@ func (Claude) Available(tier string) (bool, string) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return false, "claude not installed"
 	}
+	if tier == "t2" && !claudeLoggedIn() {
+		return false, "claude has no login (Keychain) and ANTHROPIC_API_KEY is not set"
+	}
 	return true, ""
 }
 
@@ -109,7 +112,13 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		cmd.Process.Kill()
 		return Transcript{Raw: out.String()}, fmt.Errorf("claude timed out")
 	}
-	return parseClaudeStream(out.String()), nil
+	tr := parseClaudeStream(out.String())
+	if env.Tier == "t2" && tr.Answer == "" {
+		if q := quotaError(out.String()); q != "" {
+			return tr, SkipError{q}
+		}
+	}
+	return tr, nil
 }
 
 func (Claude) Cleanup(env *Env, c Cell) {}

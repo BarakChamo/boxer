@@ -96,7 +96,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		r.appendSection(filepath.Join(root, "AGENTS.md"), filepath.Join(tmp, "AGENTS.md"))
 	case "grok":
 		hooks := readJSON(filepath.Join(tmp, "hooks", "hooks.json"))
-		if err := r.mergeJSON(filepath.Join(root, ".grok", "settings.json"), func(m map[string]any) {
+		if err := r.mergeJSON(filepath.Join(root, ".grok", "hooks", "boxer.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
 		}); err != nil {
 			return *r, err
@@ -108,7 +108,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 			return *r, err
 		}
 		r.copy(filepath.Join(tmp, "skills", "boxer", "SKILL.md"), filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
-		r.Notes = append(r.Notes, "Grok Build's project settings path (.grok/settings.json) mirrors Claude Code's and is unverified here; `boxer package grok` gives the plugin form.")
+		r.Notes = append(r.Notes, "Grok Build runs project hooks only after the folder is trusted: launch with --trust once, or set GROK_FOLDER_TRUST=0 for headless runs.")
 	case "pi":
 		r.copy(filepath.Join(tmp, ".pi", "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts"))
 		r.appendSection(filepath.Join(root, "AGENTS.md"), filepath.Join(tmp, "AGENTS.md"))

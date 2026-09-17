@@ -121,6 +121,11 @@ func (d Codex) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	if len(tr.Tools) == 0 {
 		tr.Tools = env.LLMTools()
 	}
+	if env.Tier == "t2" && tr.Answer == "" {
+		if q := quotaError(out.String()); q != "" {
+			return tr, SkipError{q}
+		}
+	}
 	return tr, nil
 }
 

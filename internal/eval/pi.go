@@ -22,7 +22,9 @@ func (Pi) Available(tier string) (bool, string) {
 		return false, "pi not installed"
 	}
 	if tier == "t2" {
-		return false, "pi live run needs `pi` → /login; not automated"
+		if _, why := gateway(); why != "" {
+			return false, why
+		}
 	}
 	return true, ""
 }
@@ -45,7 +47,13 @@ func (d Pi) Prepare(env *Env, c Cell) error {
 	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
 		return err
 	}
-	models := fmt.Sprintf(`{"providers":{"fake":{"baseUrl":%q,"api":"anthropic-messages","apiKey":"fake","models":[{"id":"fake-model","name":"fake","contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, env.LLMURL)
+	// One provider named "eval": the fake model over Anthropic Messages at t1; the gateway (or
+	// OpenAI) over chat completions at t2.
+	models := fmt.Sprintf(`{"providers":{"eval":{"baseUrl":%q,"api":"anthropic-messages","apiKey":"fake","models":[{"id":"fake-model","name":"fake","contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, env.LLMURL)
+	if env.Tier == "t2" {
+		p, _ := gateway()
+		models = fmt.Sprintf(`{"providers":{"eval":{"baseUrl":%q,"api":"openai-completions","apiKey":%q,"models":[{"id":%q,"name":%q,"contextWindow":200000,"maxTokens":8192,"input":["text"],"reasoning":false}]}}}`, p.BaseURL, os.Getenv(p.KeyVar), p.Model, p.Model)
+	}
 	if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "models.json"), []byte(models+"\n"), 0o644); err != nil {
 		return err
 	}
@@ -64,16 +72,16 @@ func (d Pi) Prepare(env *Env, c Cell) error {
 func (d Pi) smolvmWrapper(env *Env) string { return filepath.Join(env.Work, "smolvm-realhome") }
 
 func (d Pi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
-	args := []string{"-p", "--no-session", "-e", ".pi/extensions/boxer.ts", prompt}
-	if env.Tier == "t1" {
-		args = append([]string{"--provider", "fake", "--model", "fake-model"}, args...)
+	model := "fake-model"
+	if env.Tier == "t2" {
+		p, _ := gateway()
+		model = p.Model
 	}
+	args := []string{"--provider", "eval", "--model", model, "-p", "--no-session", "-e", ".pi/extensions/boxer.ts", prompt}
 	cmd := exec.Command("pi", args...)
 	cmd.Dir = env.Repo
-	cmd.Env = append(env.BaseEnv(), "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0")
-	if env.Tier == "t1" {
-		cmd.Env = append(cmd.Env, "HOME="+d.home(env), "BOXER_SMOLVM="+d.smolvmWrapper(env))
-	}
+	// pi has no config-dir variable, so both tiers run under the private HOME.
+	cmd.Env = append(env.BaseEnv(), "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0", "HOME="+d.home(env), "BOXER_SMOLVM="+d.smolvmWrapper(env))
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

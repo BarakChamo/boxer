@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/BarakChamo/boxer/internal/eval"
 )
@@ -21,10 +24,11 @@ func main() {
 	harness := flag.String("harness", "", "comma-separated driver names; default all")
 	cell := flag.String("cell", "", "substring filter on cell names")
 	out := flag.String("out", "", "write the Markdown report here")
-	keep := flag.Bool("keep", false, "keep each cell's scratch directory")
+	keep := flag.Bool("keep", false, "keep every cell's scratch directory (failures are always kept)")
 	list := flag.Bool("list", false, "list cells and exit")
 	lockRun := flag.Bool("lock-run", false, "take the host smolvm lock, then run the command after -- (used by evals/smoke.sh)")
 	flag.Parse()
+	loadDotEnv()
 
 	if *lockRun {
 		unlock, err := eval.HostLock(os.Stderr)
@@ -46,6 +50,9 @@ func main() {
 		return
 	}
 
+	if *tier == "t2" && os.Getenv("BOXER_EVAL_LOCKED") == "" {
+		fmt.Fprintln(os.Stderr, "tier t2: credentials come from evals/.env when present; missing ones are reported as skips")
+	}
 	boxerBin, err := exec.LookPath("boxer")
 	if err != nil {
 		if p, e := filepath.Abs("bin/boxer"); e == nil {
@@ -85,7 +92,28 @@ func main() {
 		}
 		return
 	}
-	results := eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr)
+	// An interrupt writes the report for the cells that finished, then exits; the cell in flight
+	// may leave a VM behind, so the message says how to reclaim it.
+	var mu sync.Mutex
+	var partial []eval.Result
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		mu.Lock()
+		report := eval.Report(partial, *tier) + "\n_interrupted; the cell in flight is not listed. Run `boxer down --all` to reclaim its VM._\n"
+		mu.Unlock()
+		if *out != "" {
+			os.WriteFile(*out, []byte(report), 0o644)
+		}
+		fmt.Println(report)
+		os.Exit(130)
+	}()
+	results := eval.Run(drivers, *tier, boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
+		mu.Lock()
+		partial = append(partial, r)
+		mu.Unlock()
+	})
 	report := eval.Report(results, *tier)
 	if *out != "" {
 		os.WriteFile(*out, []byte(report), 0o644)
@@ -95,5 +123,33 @@ func main() {
 		if r.Status == "fail" {
 			os.Exit(1)
 		}
+	}
+}
+
+// loadDotEnv reads KEY=value lines from evals/.env (gitignored; looked up from the working directory
+// and from the binary's repository root) into the environment without overriding what is already
+// set. Values are never printed.
+func loadDotEnv() {
+	candidates := []string{filepath.Join("evals", ".env")}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "..", "evals", ".env"))
+	}
+	for _, p := range candidates {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k, v, ok := strings.Cut(line, "=")
+			if !ok || os.Getenv(k) != "" {
+				continue
+			}
+			os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+		}
+		return
 	}
 }

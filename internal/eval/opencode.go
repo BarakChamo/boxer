@@ -23,9 +23,8 @@ func (OpenCode) Available(tier string) (bool, string) {
 		return false, "opencode not installed"
 	}
 	if tier == "t2" {
-		out, _ := exec.Command("opencode", "auth", "list").CombinedOutput()
-		if strings.Contains(string(out), "0 credentials") && os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("OPENAI_API_KEY") == "" {
-			return false, "opencode has no provider credentials (opencode auth login)"
+		if _, why := gateway(); why != "" {
+			return false, why
 		}
 	}
 	return true, ""
@@ -49,24 +48,30 @@ func (OpenCode) Prepare(env *Env, c Cell) error {
 		json.Unmarshal(b, &cfg)
 	}
 	cfg["permission"] = map[string]any{"bash": "allow", "edit": "allow", "webfetch": "allow", "external_directory": "allow"}
-	if env.Tier == "t1" {
-		cfg["provider"] = map[string]any{"fake": map[string]any{
-			"npm": "@ai-sdk/openai-compatible", "name": "fake",
-			"options": map[string]any{"baseURL": env.LLMURL + "/v1", "apiKey": "fake"},
-			"models":  map[string]any{"fake-model": map[string]any{"name": "fake-model", "tool_call": true}},
-		}}
-		cfg["model"] = "fake/fake-model"
+	// One OpenAI-compatible provider named "eval": the fake model at t1, the gateway (or OpenAI) at t2.
+	p := openAICompatible{BaseURL: env.LLMURL + "/v1", Model: "fake-model"}
+	key := "fake"
+	if env.Tier == "t2" {
+		p, _ = gateway()
+		key = os.Getenv(p.KeyVar)
 	}
+	cfg["provider"] = map[string]any{"eval": map[string]any{
+		"npm": "@ai-sdk/openai-compatible", "name": "eval",
+		"options": map[string]any{"baseURL": p.BaseURL, "apiKey": key},
+		"models":  map[string]any{p.Model: map[string]any{"name": p.Model, "tool_call": true}},
+	}}
+	cfg["model"] = "eval/" + p.Model
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
 func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
-	args := []string{"run", "--print-logs", prompt}
-	if env.Tier == "t1" {
-		args = append([]string{"run", "--print-logs", "-m", "fake/fake-model"}, prompt)
+	model := "eval/fake-model"
+	if env.Tier == "t2" {
+		p, _ := gateway()
+		model = "eval/" + p.Model
 	}
-	cmd := exec.Command("opencode", args...)
+	cmd := exec.Command("opencode", "run", "--print-logs", "-m", model, prompt)
 	cmd.Dir = env.Repo
 	cmd.Env = env.BaseEnv()
 	cmd.Stdin = strings.NewReader("")
@@ -83,6 +88,7 @@ func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		cmd.Process.Kill()
 		return Transcript{Raw: out.String()}, fmt.Errorf("opencode timed out")
 	}
+	waitForHook("boxer hook opencode")
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}
 	// The final assistant text is the last non-empty line that is not a "$ command" echo.
 	for _, line := range strings.Split(stripANSI(out.String()), "\n") {
@@ -98,6 +104,20 @@ func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 }
 
 func (OpenCode) Cleanup(env *Env, c Cell) {}
+
+// waitForHook waits for a lingering hook process. OpenCode delivers `session.created` to plugins
+// as a fire-and-forget event, so when the only tool call is denied the turn can end and `opencode
+// run` exit while `boxer hook opencode` is still provisioning the VM; the oracle then finds no VM.
+// The hook process outlives its parent, so waiting for it is enough. The eval lock guarantees no
+// other harness run owns a hook process at the same time.
+func waitForHook(pattern string) {
+	for i := 0; i < 120; i++ {
+		if exec.Command("pgrep", "-f", pattern).Run() != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
 
 // stripANSI removes terminal colour codes from harness output.
 func stripANSI(s string) string {
