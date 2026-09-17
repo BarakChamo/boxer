@@ -40,7 +40,18 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 when the prompt never mentions boxer? Full matrix, spend and transcript evidence in
 [eval-adherence.md](eval-adherence.md). Verdict per cell: `harness` only when every model fails it.
 
-ADHERENCE_TABLE
+| Harness | brief (tool) | recovery (tool) | multistep (rewrite) | Verdict |
+| --- | --- | --- | --- | --- |
+| Claude Code | 4/4 | 4/4 | 4/4 | pass |
+| Codex | 4/4 | 3/4 (GLM passed `cwd: /workspace`) | 4/4 | model adherence |
+| OpenCode | 4/4 | 4/4 | 4/4 | pass |
+| pi | 4/4 | 4/4 | 4/4 | pass |
+| Kimi | 2/4 (Haiku, qwen: one denial) | 4/4 | 4/4 (tool mode) | model adherence |
+| Grok | 0/4 (one denial each) | 4/4 | 4/4 | **harness**: `boxer_run` sits behind `search_tool`; brief must say so |
+
+Models: GLM 5.3 flash 16/18 ($0.11), Haiku 4.5 16/18 ($0.79), qwen3.7 flash 16/18 ($0.03),
+deepseek v4 flash 17/18 ($0.08). No command ran on the host in any of the 72 cells. Recommended
+default: `deepseek/deepseek-v4-flash` (zero denials outside Grok, $0.0046 per cell).
 
 ## Shipped in this slice
 
