@@ -664,7 +664,13 @@ integration = "inside"    # harness runs in the VM; nothing to hook, rewrite, or
   `CODEX_CONFIG` plus `INITIAL_AGENT_MODE=agent-full-access` for its ACP server, whose agent mode
   otherwise re-enables the workspace-write sandbox) because its bwrap sandbox cannot start on the
   mounted worktree inside the guest; Claude Code gets `IS_SANDBOX=1` so it runs as root. Approval
-  policies are left as the user configured them.
+  policies are left as the user configured them. Audit of the other harnesses' own sandboxes inside
+  the guest (2026-09-17, one shell-tool turn each against the fake model in a fresh node VM, table
+  defaults, no off-switch): Gemini CLI (`--yolo`), Kimi, OpenCode, pi and Grok all ran `uname -a`
+  in the guest and answered `Linux`; none has a nested sandbox on by default (Grok's Landlock
+  profiles are opt-in through `--sandbox`, off by default), so no table row was needed for them.
+  Grok's ACP server (`grok agent stdio`) also ran through `boxer acp grok` and asked the client for
+  permission before executing.
 - **R-INT-5.** `boxer shim install --harness <name>` writes a PATH shim named after the harness
   binary that execs `boxer shell <name>`, so an orchestrator that spawns `claude` lands inside.
 - **R-INT-6.** `BOXER_INSIDE=1` is set in the guest, so outside-mode hooks committed in a
