@@ -355,6 +355,15 @@ func (r *Result) appendSection(dst, src string) {
 	}
 	cur, _ := os.ReadFile(dst)
 	if strings.Contains(string(cur), sectionMarker) {
+		// The section is already there; only the version marker moves with the binary.
+		if old, ok := versionMarker(string(cur)); ok {
+			if fresh, ok := versionMarker(string(body)); ok && old != fresh {
+				updated := strings.Replace(string(cur), versionPrefix+old, versionPrefix+fresh, 1)
+				if err := os.WriteFile(dst, []byte(updated), 0o644); err == nil {
+					r.Written = append(r.Written, dst)
+				}
+			}
+		}
 		return
 	}
 	sep := ""
@@ -364,6 +373,43 @@ func (r *Result) appendSection(dst, src string) {
 	if err := os.WriteFile(dst, append(append(cur, []byte(sep)...), body...), 0o644); err == nil {
 		r.Written = append(r.Written, dst)
 	}
+}
+
+const versionPrefix = "boxer_version: "
+
+// versionMarker finds the `boxer_version: <v>` the bundle renders into SKILL.md front matter and
+// the instruction sections; that marker is what lets doctor compare an install with the binary.
+func versionMarker(s string) (string, bool) {
+	i := strings.Index(s, versionPrefix)
+	if i < 0 {
+		return "", false
+	}
+	rest := s[i+len(versionPrefix):]
+	if j := strings.IndexAny(rest, "\n "); j >= 0 {
+		rest = rest[:j]
+	}
+	v := strings.Trim(rest, "\"'")
+	return v, v != ""
+}
+
+// installedFiles are the project-layer files that carry a version marker, relative to the root.
+var installedFiles = []string{
+	".claude/skills/boxer/SKILL.md", ".agents/skills/boxer/SKILL.md", "GEMINI.md", "AGENTS.md",
+}
+
+// InstalledVersions maps each installed marker file under root to the boxer version that wrote it.
+func InstalledVersions(root string) map[string]string {
+	out := map[string]string{}
+	for _, rel := range installedFiles {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		if v, ok := versionMarker(string(b)); ok {
+			out[rel] = v
+		}
+	}
+	return out
 }
 
 func toStrings(v any) []string {

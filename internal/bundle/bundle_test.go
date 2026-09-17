@@ -92,3 +92,26 @@ func TestUnknownHarness(t *testing.T) {
 		t.Fatal("unknown harness must fail")
 	}
 }
+
+func TestVersionIsStampedIntoManifestsAndSkill(t *testing.T) {
+	cfg := config.Defaults()
+	for h, files := range map[string][]string{
+		"claude-code": {".claude-plugin/plugin.json", "skills/boxer/SKILL.md"},
+		"codex":       {".codex-plugin/plugin.json"},
+		"grok":        {".grok-plugin/plugin.json"},
+		"gemini-cli":  {"gemini-extension.json", "GEMINI.md"},
+		"opencode":    {"AGENTS.md"},
+		"pi":          {"AGENTS.md"},
+		"kimi":        {".agents/skills/boxer/SKILL.md"},
+	} {
+		dir := t.TempDir()
+		if _, err := Render(h, cfg, "0.9.1-test", dir); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if !strings.Contains(read(t, filepath.Join(dir, f)), "0.9.1-test") {
+				t.Errorf("%s/%s: version not stamped", h, f)
+			}
+		}
+	}
+}

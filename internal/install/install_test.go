@@ -181,3 +181,42 @@ func TestUnknownHarness(t *testing.T) {
 		t.Fatal("unknown harness must error with guidance")
 	}
 }
+
+func TestInstalledVersionsTrackTheBinary(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults()
+	for _, h := range []string{"claude-code", "gemini-cli", "pi"} {
+		if _, err := Install(h, cfg, "0.1.0", root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := InstalledVersions(root)
+	for _, f := range []string{".claude/skills/boxer/SKILL.md", "GEMINI.md", "AGENTS.md"} {
+		if got[f] != "0.1.0" {
+			t.Errorf("%s: want 0.1.0, got %q (all: %v)", f, got[f], got)
+		}
+	}
+	// A newer binary refreshes the marker in copied skills and in appended sections alike.
+	for _, h := range []string{"claude-code", "gemini-cli", "pi"} {
+		if _, err := Install(h, cfg, "0.2.0-rc1", root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for f, v := range InstalledVersions(root) {
+		if v != "0.2.0-rc1" {
+			t.Errorf("%s: marker not refreshed: %q", f, v)
+		}
+	}
+	if n := strings.Count(string(mustRead(t, filepath.Join(root, "AGENTS.md"))), sectionMarker); n != 1 {
+		t.Fatalf("AGENTS.md section appended %d times", n)
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

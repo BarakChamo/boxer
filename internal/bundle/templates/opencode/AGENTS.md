@@ -1,4 +1,5 @@
 # boxer sandbox
+<!-- boxer_version: [[.Version]] -->
 
 [[.Instructions]]
 

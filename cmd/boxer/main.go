@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer run -c '<shell>'           run a shell line in the sandbox
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all]               delete this scope's sandbox (or every boxer sandbox)
+  boxer status                     this scope's sandbox; exit 0 running, 3 stopped, 4 absent
   boxer ls                         list boxer sandboxes
   boxer gc [--dry-run]             delete sandboxes whose worktree is gone
   boxer doctor                     explain the resolved configuration and state
@@ -51,8 +53,9 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer shim install --harness a,b [dir]     PATH shims named after harness binaries → boxer shell
   boxer version
 
-Identity flags accepted by up/run/down/doctor: --harness NAME --session ID --agent ID
-Harnesses: claude-code codex gemini-cli grok kimi dsh opencode
+Identity flags accepted by up/run/down/status/doctor: --harness NAME --session ID --agent ID
+--json on ls, status, down, gc, doctor prints one JSON object or array (see docs/api.md)
+Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
 `
 
 func main() {
@@ -97,10 +100,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "install":
 		return installCmd(rest, stdout, stderr)
 	case "ls":
-		return lsCmd(stdout, stderr)
+		return lsCmd(rest, stdout, stderr)
 	case "gc":
 		return gcCmd(rest, stdout, stderr)
-	case "up", "run", "down", "doctor":
+	case "up", "run", "down", "status", "doctor":
 		return scoped(cmd, rest, stdin, stdout, stderr)
 	case "shell", "acp":
 		return insideCmd(cmd, rest, stdin, stdout, stderr)
@@ -125,19 +128,26 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
+	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	e, err := box.Resolve("", *harness, *id)
 	if cmd == "doctor" {
-		return doctor(e, err, stdout)
+		r := collectDoctor(e, err)
+		if emit(stdout, r, *asJSON) {
+			return r.exit()
+		}
+		return printDoctor(r, stdout)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	switch cmd {
+	case "status":
+		return statusCmd(e, *asJSON, stdout, stderr)
 	case "up":
 		for _, w := range e.Warnings {
 			fmt.Fprintln(stderr, "boxer: warning:", w)
@@ -156,12 +166,15 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return 0
 	case "down":
 		if *all {
-			return downAll(e.VM, stdout, stderr)
+			return downAll(e.VM, *asJSON, stdout, stderr)
 		}
 		_, existed, _ := e.Exists()
 		if err := e.Down(); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
+		}
+		if emit(stdout, downJSON{Scope: e.Scope.Key, Removed: existed}, *asJSON) {
+			return 0
 		}
 		if !existed {
 			fmt.Fprintf(stdout, "boxer: %s had no sandbox\n", e.Scope.Key)
@@ -218,37 +231,177 @@ func isTerminal(f *os.File) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-func doctor(e *box.Env, resolveErr error, w io.Writer) int {
-	fmt.Fprintln(w, "boxer", Version)
-	if vm.Inside() {
-		fmt.Fprintln(w, "inside:    this process is already in a boxer guest; hooks are silent and `boxer run` executes directly")
+// emit writes v as one indented JSON document when asJSON is set and reports whether it did;
+// callers print the human form otherwise. Every --json command goes through here.
+func emit(w io.Writer, v any, asJSON bool) bool {
+	if !asJSON {
+		return false
 	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintln(w, "null")
+	}
+	return true
+}
+
+// machineJSON is one boxer sandbox as `ls`, `gc`, `status` and `doctor` report it.
+type machineJSON struct {
+	Scope       string  `json:"scope"`
+	State       string  `json:"state"`
+	Isolation   string  `json:"isolation"`
+	Worktree    string  `json:"worktree"`
+	Integration string  `json:"integration"`
+	Image       string  `json:"image"`
+	CreatedAt   int64   `json:"created_at"`
+	LastUsed    *string `json:"last_used"`
+}
+
+func machineRow(m vm.Machine) machineJSON {
+	return machineJSON{
+		Scope: m.Name, State: m.State, Image: m.Image, CreatedAt: m.CreatedAt,
+		Isolation: m.Labels["boxer.isolation"], Worktree: m.Labels["boxer.root"], Integration: m.Labels["boxer.integration"],
+		LastUsed: lastUsedJSON(m.Name),
+	}
+}
+
+func lastUsedJSON(name string) *string {
+	t := box.LastUsed(name)
+	if t.IsZero() {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
+type downJSON struct {
+	Scope   string `json:"scope"`
+	Removed bool   `json:"removed"`
+}
+
+type statusJSON struct {
+	Scope       string            `json:"scope"`
+	Isolation   string            `json:"isolation"`
+	Worktree    string            `json:"worktree"`
+	MountAt     string            `json:"mount_at"`
+	Exists      bool              `json:"exists"`
+	State       string            `json:"state"`
+	Image       string            `json:"image"`
+	ImageReason string            `json:"image_reason"`
+	Labels      map[string]string `json:"labels"`
+	LastUsed    *string           `json:"last_used"`
+}
+
+// Exit codes of `boxer status`.
+const (
+	exitStopped = 3
+	exitAbsent  = 4
+)
+
+func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
+	m, ok, err := e.Exists()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	img, why := e.Image()
+	s := statusJSON{
+		Scope: e.Scope.Key, Isolation: e.Scope.Isolation, Worktree: e.Scope.Root, MountAt: e.MountAt(),
+		Exists: ok, State: "absent", Image: img, ImageReason: why, Labels: map[string]string{}, LastUsed: lastUsedJSON(e.Scope.Key),
+	}
+	code := exitAbsent
+	if ok {
+		s.State, s.Image, s.ImageReason, s.Labels = m.State, m.Image, "machine", m.Labels
+		if s.Labels == nil {
+			s.Labels = map[string]string{}
+		}
+		code = exitStopped
+		if m.Running() {
+			code = 0
+		}
+	}
+	if emit(stdout, s, asJSON) {
+		return code
+	}
+	if !ok {
+		fmt.Fprintf(stdout, "boxer: %s absent (image would be %s: %s)\n", s.Scope, img, why)
+	} else {
+		fmt.Fprintf(stdout, "boxer: %s %s, image %s, mounted %s -> %s\n", s.Scope, s.State, s.Image, s.Worktree, s.MountAt)
+	}
+	return code
+}
+
+// doctorReport is everything `doctor` knows; the human form prints it in the order it was
+// always printed, --json emits it whole.
+type doctorReport struct {
+	Version       string            `json:"version"`
+	Inside        bool              `json:"inside"`
+	Smolvm        string            `json:"smolvm"`
+	SmolvmError   string            `json:"smolvm_error,omitempty"`
+	BoxerPath     string            `json:"boxer_path"`
+	Git           *doctorGit        `json:"git,omitempty"`
+	ConfigFiles   []string          `json:"config_files"`
+	Settings      []doctorSetting   `json:"settings"`
+	Scope         *scope.Scope      `json:"scope,omitempty"`
+	Image         string            `json:"image,omitempty"`
+	ImageReason   string            `json:"image_reason,omitempty"`
+	ImageWarning  string            `json:"image_warning,omitempty"`
+	Sandbox       *machineJSON      `json:"sandbox"`
+	SandboxError  string            `json:"sandbox_error,omitempty"`
+	Shims         *doctorShims      `json:"shims,omitempty"`
+	Installed     map[string]string `json:"installed_versions,omitempty"`
+	Warnings      []string          `json:"warnings"`
+	Error         string            `json:"error,omitempty"`
+	resolved      bool              // Env exists (config could be loaded)
+	configPrinted bool
+}
+
+type doctorGit struct {
+	Toplevel string `json:"toplevel"`
+	Linked   bool   `json:"linked"`
+}
+
+type doctorSetting struct {
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+type doctorShims struct {
+	OnPath  []string `json:"on_path"`
+	Missing []string `json:"missing"`
+}
+
+func (r *doctorReport) exit() int {
+	if r.Error != "" {
+		return 1
+	}
+	return 0
+}
+
+func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
+	r := &doctorReport{Version: Version, Inside: vm.Inside(), ConfigFiles: []string{}, Settings: []doctorSetting{}, Warnings: []string{}}
 	client := vm.New()
 	if e != nil {
 		client = e.VM
 	}
 	if v, err := client.Version(); err != nil {
-		fmt.Fprintln(w, "smolvm:    MISSING —", err)
+		r.SmolvmError = err.Error()
 	} else {
-		fmt.Fprintln(w, "smolvm:   ", v)
+		r.Smolvm = v
 	}
-	if p, err := exec.LookPath("boxer"); err != nil {
-		fmt.Fprintln(w, "boxer:     NOT on PATH — hooks and shims call `boxer` by name")
-	} else {
-		fmt.Fprintln(w, "boxer:    ", p)
+	r.BoxerPath, _ = exec.LookPath("boxer")
+	if resolveErr != nil {
+		r.Error = resolveErr.Error()
 	}
 	if e == nil {
-		fmt.Fprintln(w, resolveErr)
-		return 1
+		return r
 	}
+	r.resolved = true
 	if e.Git.Toplevel != "" {
-		kind := "main checkout"
-		if e.Git.Linked {
-			kind = "linked worktree"
-		}
-		fmt.Fprintf(w, "git:       %s (%s)\n", e.Git.Toplevel, kind)
+		r.Git = &doctorGit{Toplevel: e.Git.Toplevel, Linked: e.Git.Linked}
 	}
-	fmt.Fprintf(w, "config:    %s\n", strings.Join(append([]string{"defaults"}, e.Cfg.Files...), " < "))
+	r.ConfigFiles = append(r.ConfigFiles, e.Cfg.Files...)
 	for _, k := range []struct{ key, val string }{
 		{"isolation", e.Cfg.Isolation}, {"mode", e.Cfg.Mode}, {"enforcement", e.Cfg.Enforcement},
 		{"require_worktree", e.Cfg.RequireWorktree}, {"on_sandbox_unavailable", e.Cfg.OnSandboxUnavailable},
@@ -260,45 +413,112 @@ func doctor(e *box.Env, resolveErr error, w io.Writer) int {
 		if src == "" {
 			src = "default"
 		}
-		fmt.Fprintf(w, "  %-24s = %-40s (%s)\n", k.key, k.val, src)
+		r.Settings = append(r.Settings, doctorSetting{k.key, k.val, src})
 	}
 	if resolveErr != nil {
-		fmt.Fprintln(w, resolveErr)
-		return 1
+		return r
 	}
-	fmt.Fprintf(w, "scope:     %s (%s) root %s\n", e.Scope.Key, e.Scope.Isolation, e.Scope.Root)
-	img, why := e.Image()
-	fmt.Fprintf(w, "image:     %s (%s)\n", img, why)
+	s := e.Scope
+	r.Scope = &s
+	r.Image, r.ImageReason = e.Image()
 	if e.Cfg.Network.Mode == "off" {
-		fmt.Fprintln(w, "warning:   network.mode = off — the image can only be used if smolvm already has it cached")
+		r.ImageWarning = "network.mode = off — the image can only be used if smolvm already has it cached"
 	}
 	if m, ok, err := e.Exists(); err != nil {
-		fmt.Fprintln(w, "sandbox:   error:", err)
-	} else if !ok {
-		fmt.Fprintln(w, "sandbox:   absent (boxer up, or the first sandboxed command, creates it)")
-	} else {
-		fmt.Fprintf(w, "sandbox:   %s, image %s\n", m.State, m.Image)
+		r.SandboxError = err.Error()
+	} else if ok {
+		row := machineRow(m)
+		r.Sandbox = &row
 	}
 	if e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both" {
-		var shimmed, bare []string
+		sh := &doctorShims{OnPath: []string{}, Missing: []string{}}
 		for _, p := range e.Cfg.Intercept {
 			if p == "*" {
 				continue
 			}
 			path, err := exec.LookPath(p)
 			if err == nil && isShim(path) {
-				shimmed = append(shimmed, p)
+				sh.OnPath = append(sh.OnPath, p)
 			} else if err == nil {
-				bare = append(bare, p)
+				sh.Missing = append(sh.Missing, p)
 			}
 		}
-		fmt.Fprintf(w, "shims:     %d on PATH", len(shimmed))
-		if len(bare) > 0 {
-			fmt.Fprintf(w, "; NOT shimmed: %s (boxer shim install; prepend %s to PATH)", strings.Join(bare, ","), shim.DefaultDir())
+		r.Shims = sh
+	}
+	r.Warnings = append(r.Warnings, e.Warnings...)
+	r.Installed = install.InstalledVersions(e.Scope.Root)
+	for _, p := range sortedKeys(r.Installed) {
+		if v := r.Installed[p]; v != Version {
+			r.Warnings = append(r.Warnings, fmt.Sprintf("%s was installed by boxer %s; this is %s (boxer install <harness> refreshes it)", p, v, Version))
+		}
+	}
+	return r
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func printDoctor(r *doctorReport, w io.Writer) int {
+	fmt.Fprintln(w, "boxer", r.Version)
+	if r.Inside {
+		fmt.Fprintln(w, "inside:    this process is already in a boxer guest; hooks are silent and `boxer run` executes directly")
+	}
+	if r.SmolvmError != "" {
+		fmt.Fprintln(w, "smolvm:    MISSING —", r.SmolvmError)
+	} else {
+		fmt.Fprintln(w, "smolvm:   ", r.Smolvm)
+	}
+	if r.BoxerPath == "" {
+		fmt.Fprintln(w, "boxer:     NOT on PATH — hooks and shims call `boxer` by name")
+	} else {
+		fmt.Fprintln(w, "boxer:    ", r.BoxerPath)
+	}
+	if !r.resolved {
+		fmt.Fprintln(w, r.Error)
+		return 1
+	}
+	if r.Git != nil {
+		kind := "main checkout"
+		if r.Git.Linked {
+			kind = "linked worktree"
+		}
+		fmt.Fprintf(w, "git:       %s (%s)\n", r.Git.Toplevel, kind)
+	}
+	fmt.Fprintf(w, "config:    %s\n", strings.Join(append([]string{"defaults"}, r.ConfigFiles...), " < "))
+	for _, k := range r.Settings {
+		fmt.Fprintf(w, "  %-24s = %-40s (%s)\n", k.Key, k.Value, k.Source)
+	}
+	if r.Error != "" {
+		fmt.Fprintln(w, r.Error)
+		return 1
+	}
+	fmt.Fprintf(w, "scope:     %s (%s) root %s\n", r.Scope.Key, r.Scope.Isolation, r.Scope.Root)
+	fmt.Fprintf(w, "image:     %s (%s)\n", r.Image, r.ImageReason)
+	if r.ImageWarning != "" {
+		fmt.Fprintln(w, "warning:  ", r.ImageWarning)
+	}
+	switch {
+	case r.SandboxError != "":
+		fmt.Fprintln(w, "sandbox:   error:", r.SandboxError)
+	case r.Sandbox == nil:
+		fmt.Fprintln(w, "sandbox:   absent (boxer up, or the first sandboxed command, creates it)")
+	default:
+		fmt.Fprintf(w, "sandbox:   %s, image %s\n", r.Sandbox.State, r.Sandbox.Image)
+	}
+	if r.Shims != nil {
+		fmt.Fprintf(w, "shims:     %d on PATH", len(r.Shims.OnPath))
+		if len(r.Shims.Missing) > 0 {
+			fmt.Fprintf(w, "; NOT shimmed: %s (boxer shim install; prepend %s to PATH)", strings.Join(r.Shims.Missing, ","), shim.DefaultDir())
 		}
 		fmt.Fprintln(w)
 	}
-	for _, wn := range e.Warnings {
+	for _, wn := range r.Warnings {
 		fmt.Fprintln(w, "warning:  ", wn)
 	}
 	return 0
@@ -309,23 +529,46 @@ func isShim(path string) bool {
 	return err == nil && strings.Contains(string(b), "boxer shim")
 }
 
-func lsCmd(stdout, stderr io.Writer) int {
+func lsCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print a JSON array")
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	ms, err := vm.New().Owned()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
-	fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", "SCOPE", "STATE", "ISOLATION", "WORKTREE")
+	rows := make([]machineJSON, 0, len(ms))
 	for _, m := range ms {
-		fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", m.Name, m.State, m.Labels["boxer.isolation"], m.Labels["boxer.root"])
+		rows = append(rows, machineRow(m))
+	}
+	if emit(stdout, rows, *asJSON) {
+		return 0
+	}
+	fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", "SCOPE", "STATE", "ISOLATION", "WORKTREE")
+	for _, m := range rows {
+		fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", m.Scope, m.State, m.Isolation, m.Worktree)
 	}
 	return 0
+}
+
+// gcJSON is one `gc` decision: Deleted is false under --dry-run or when Error is set.
+type gcJSON struct {
+	machineJSON
+	Reason  string `json:"reason"`
+	Deleted bool   `json:"deleted"`
+	Error   string `json:"error,omitempty"`
 }
 
 func gcCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
 	dry := fs.Bool("dry-run", false, "print what would be deleted")
+	asJSON := fs.Bool("json", false, "print a JSON array of decisions")
+	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -351,6 +594,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	code := 0
+	rows := []gcJSON{}
 	for _, m := range ms {
 		root := m.Labels["boxer.root"]
 		reason := ""
@@ -362,33 +606,49 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		if reason == "" {
 			continue
 		}
+		row := gcJSON{machineJSON: machineRow(m), Reason: reason}
 		if *dry {
-			fmt.Fprintf(stdout, "would delete %s (%s)\n", m.Name, reason)
+			rows = append(rows, row)
+			if !*asJSON {
+				fmt.Fprintf(stdout, "would delete %s (%s)\n", m.Name, reason)
+			}
 			continue
 		}
 		if err := client.Delete(m.Name); err != nil {
+			row.Error = err.Error()
+			rows = append(rows, row)
 			fmt.Fprintln(stderr, err)
 			code = 1
 			continue
 		}
-		fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
+		row.Deleted = true
+		rows = append(rows, row)
+		if !*asJSON {
+			fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
+		}
 	}
+	emit(stdout, rows, *asJSON)
 	return code
 }
 
-func downAll(client vm.Client, stdout, stderr io.Writer) int {
+func downAll(client vm.Client, asJSON bool, stdout, stderr io.Writer) int {
 	ms, err := client.Owned()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	rows := []downJSON{}
 	for _, m := range ms {
 		if err := client.Delete(m.Name); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "boxer: %s removed\n", m.Name)
+		rows = append(rows, downJSON{Scope: m.Name, Removed: true})
+		if !asJSON {
+			fmt.Fprintf(stdout, "boxer: %s removed\n", m.Name)
+		}
 	}
+	emit(stdout, rows, asJSON)
 	return 0
 }
 
