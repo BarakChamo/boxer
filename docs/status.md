@@ -34,6 +34,14 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 | Conductor (local) | checklist | no driver (setup-script lane) |
 | ACP real client | `@agentclientprotocol/sdk` example client against `boxer acp claude` | pass: initialize, session, prompt, `Terminal` tool, `Linux` |
 
+## Adherence
+
+`boxer-eval --tier adherence` (third pass, stream B): does a live model follow the injected brief
+when the prompt never mentions boxer? Full matrix, spend and transcript evidence in
+[eval-adherence.md](eval-adherence.md). Verdict per cell: `harness` only when every model fails it.
+
+ADHERENCE_TABLE
+
 ## Shipped in this slice
 
 - `pkg/boxer` facade (experimental), `--json` on `ls`, `status`, `down`, `gc`, `doctor`.
