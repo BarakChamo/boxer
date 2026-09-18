@@ -82,6 +82,8 @@ Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
 `
 
 func main() {
+	// Only the command sweeps: the library never re-executes its host program.
+	box.ReclaimAllowed = true
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
@@ -426,6 +428,7 @@ type doctorReport struct {
 	Shims        *doctorShims    `json:"shims,omitempty"`
 	Drift        []string        `json:"drift,omitempty"`
 	Signals      []hook.Signal   `json:"signals,omitempty"`
+	Storage      *box.Footprint  `json:"storage,omitempty"`
 	Warnings     []string        `json:"warnings"`
 	Error        string          `json:"error,omitempty"`
 	resolved     bool            // Env exists (config could be loaded)
@@ -557,6 +560,15 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	for _, p := range r.Drift {
 		r.Warnings = append(r.Warnings, fmt.Sprintf("%s differs from the copy in boxer %s (boxer install <harness> rewrites it)", p, Version))
 	}
+	// What boxer costs this host, because "why is my disk full" is the question a sandbox tool
+	// has to be able to answer about itself.
+	owned, _ := client.Owned()
+	st := box.Usage(len(owned))
+	r.Storage = &st
+	if min := int64(e.Cfg.MinFreeGB * 1024 * 1024 * 1024); min > 0 && st.FreeBytes > 0 && st.FreeBytes < min {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("%s free, below min_free_gb (%.1f GB): boxer will pull images rather than cache them; `boxer gc --all` reclaims %s",
+			box.HumanBytes(st.FreeBytes), e.Cfg.MinFreeGB, box.HumanBytes(st.PackBytes)))
+	}
 	r.Warnings = append(r.Warnings, e.Cfg.Warnings...)
 	return r
 }
@@ -624,6 +636,10 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 			fmt.Fprintln(w, "           git_hook: none; `boxer install git` warms new worktrees as git creates them")
 		}
 	}
+	if st := r.Storage; st != nil {
+		fmt.Fprintf(w, "storage:   %d sandbox(es), %d pack(s) %s cached, %s free (boxer gc --all reclaims the packs)\n",
+			st.Machines, st.PackCount, box.HumanBytes(st.PackBytes), box.HumanBytes(st.FreeBytes))
+	}
 	for _, wn := range r.Warnings {
 		fmt.Fprintln(w, "warning:  ", wn)
 	}
@@ -673,6 +689,7 @@ func lsCmd(args []string, stdout, stderr io.Writer) int {
 type gcJSON struct {
 	machineJSON
 	Pack    string `json:"pack,omitempty"` // set for pack rows; machine fields are then empty
+	Bytes   int64  `json:"bytes,omitempty"`
 	Reason  string `json:"reason"`
 	Deleted bool   `json:"deleted"`
 	Error   string `json:"error,omitempty"`
@@ -681,6 +698,7 @@ type gcJSON struct {
 func gcCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
 	dry := fs.Bool("dry-run", false, "print what would be deleted")
+	all := fs.Bool("all", false, "ignore idle_timeout: reclaim every sandbox whose worktree is gone, every stopped sandbox, and every pack")
 	asJSON := fs.Bool("json", false, "print a JSON array of decisions")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
@@ -701,7 +719,9 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var idle time.Duration
-	if cfg.IdleTimeout != "" && cfg.IdleTimeout != "never" {
+	if *all {
+		idle = time.Nanosecond // everything is old enough
+	} else if cfg.IdleTimeout != "" && cfg.IdleTimeout != "never" {
 		if idle, err = time.ParseDuration(cfg.IdleTimeout); err != nil {
 			fmt.Fprintf(stderr, "idle_timeout = %q: %v\n", cfg.IdleTimeout, err)
 			return 1
@@ -716,6 +736,8 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			reason = fmt.Sprintf("worktree %s is gone", root)
 		} else if last := box.LastUsed(m.Name); idle > 0 && !last.IsZero() && time.Since(last) > idle {
 			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", last.Format(time.RFC3339), cfg.IdleTimeout)
+		} else if *all && m.State != "running" {
+			reason = "not running (--all)"
 		}
 		if reason == "" {
 			continue
@@ -741,8 +763,16 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
 		}
 	}
+	reason := fmt.Sprintf("pack unused for %s", cfg.IdleTimeout)
+	if *all {
+		reason = "pack unreferenced (--all)"
+	}
 	for _, p := range box.StalePacks(ms, idle) {
-		row := gcJSON{Pack: p, Reason: fmt.Sprintf("pack unused for %s", cfg.IdleTimeout)}
+		size := int64(0)
+		if st, err := os.Stat(p); err == nil {
+			size = st.Size()
+		}
+		row := gcJSON{Pack: p, Bytes: size, Reason: reason}
 		if *dry {
 			rows = append(rows, row)
 			if !*asJSON {
@@ -764,13 +794,21 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "deleted pack %s (%s)\n", p, row.Reason)
 		}
 	}
-	machines, packs := 0, 0
+	machines, packs, freed := 0, 0, int64(0)
 	for _, r := range rows {
 		if r.Pack != "" {
 			packs++
+			freed += r.Bytes
 		} else {
 			machines++
 		}
+	}
+	if !*asJSON && (machines > 0 || packs > 0) {
+		verb := "reclaimed"
+		if *dry {
+			verb = "would reclaim"
+		}
+		fmt.Fprintf(stdout, "%s %d sandbox(es) and %d pack(s), %s of cache\n", verb, machines, packs, box.HumanBytes(freed))
 	}
 	obs.Emit(obs.Event{Name: obs.GC, Outcome: obs.OK, Payload: map[string]any{"machines": machines, "packs": packs, "dry_run": *dry}})
 	emit(stdout, rows, *asJSON)

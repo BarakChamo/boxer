@@ -349,3 +349,66 @@ func TestVersionFallsBackToTheModuleVersion(t *testing.T) {
 		t.Fatalf("an unstamped build from a working tree: %q", got)
 	}
 }
+
+// gc --all is the answer to "my disk is full and I do not care about the cache": it ignores
+// idle_timeout, takes every stopped sandbox and every unreferenced pack, and says how much it
+// freed. The default sweep must leave a fresh pack alone.
+func TestGCAllReclaimsEveryPack(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	pack := filepath.Join(packs, "fresh.smolmachine")
+	if err := os.WriteFile(pack, make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Create(vm.CreateSpec{Name: "sb-stopped", Labels: map[string]string{"boxer.scope": "sb-stopped", "boxer.root": t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--dry-run", "--json"); code != 0 || len(rows) != 0 {
+		t.Fatalf("a fresh pack and a live worktree are not stale: %d %v %s", code, rows, out)
+	}
+	if code, out := call(t, nil, "gc", "--all", "--dry-run"); code != 0 || !strings.Contains(out, "would reclaim") || !strings.Contains(out, "fresh.smolmachine") {
+		t.Fatalf("gc --all: %d %s", code, out)
+	}
+	if _, err := os.Stat(pack); err != nil {
+		t.Fatal("a dry run must delete nothing")
+	}
+	if code, out := call(t, nil, "gc", "--all"); code != 0 || !strings.Contains(out, "reclaimed") {
+		t.Fatalf("gc --all: %d %s", code, out)
+	}
+	if _, err := os.Stat(pack); !os.IsNotExist(err) {
+		t.Fatalf("the pack survived gc --all: %v", err)
+	}
+	ls, _ := client.List()
+	for _, m := range ls {
+		if m.Name == "sb-stopped" {
+			t.Fatal("a stopped sandbox must not survive gc --all")
+		}
+	}
+}
+
+// doctor answers "what is boxer costing me", because that is the question a sandbox tool has to
+// be able to answer about itself.
+func TestDoctorReportsStorage(t *testing.T) {
+	vmtest.Install(t)
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if err := os.WriteFile(filepath.Join(packs, "p.smolmachine"), make([]byte, 1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var r map[string]any
+	if code, out := call(t, &r, "doctor", "--json"); code != 0 {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+	st, _ := r["storage"].(map[string]any)
+	if st == nil || st["pack_count"].(float64) != 1 || st["pack_bytes"].(float64) != 1024 || st["free_bytes"].(float64) <= 0 {
+		t.Fatalf("storage: %v", r["storage"])
+	}
+	if code, out := call(t, nil, "doctor"); code != 0 || !strings.Contains(out, "storage:") {
+		t.Fatalf("human doctor must print the footprint: %d %s", code, out)
+	}
+}

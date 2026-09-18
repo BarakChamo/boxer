@@ -232,6 +232,9 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		image, why := e.Image()
 		e.event(obs.Provision, outcome, time.Since(start), map[string]any{"created": created, "image": image, "image_reason": why})
 	}()
+	// Provisioning is the moment worth sweeping at: it is when boxer is about to spend storage,
+	// and when a host that has drifted full is most likely to be about to fail.
+	e.ReclaimDetached()
 	unlock, err := lockScope(e.Scope.Key)
 	if err != nil {
 		return false, err
@@ -427,6 +430,12 @@ func (e *Env) PackHarness() {
 	if packReady(side) { // packed while we waited
 		return
 	}
+	if free, crowded := packingWouldCrowdTheDisk(e.minFree()); crowded {
+		fmt.Fprintf(e.Stderr, "boxer: not caching the %s install: %s free, below min_free_gb (%.1f GB). The next worktree pays the install again; `boxer gc` reclaims space.\n",
+			e.Harness, humanBytes(free), e.Cfg.MinFreeGB)
+		e.event(obs.Pack, obs.Skipped, 0, map[string]any{"kind": "harness", "image": image, "free_bytes": free})
+		return
+	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s with %s installed (once per host)\n", image, e.Harness)
 	start := time.Now()
 	err = e.VM.Stop(e.Scope.Key)
@@ -484,6 +493,12 @@ func (e *Env) packed(image string) string {
 	defer unlock()
 	if packReady(side) { // packed while we waited
 		return side
+	}
+	if free, crowded := packingWouldCrowdTheDisk(e.minFree()); crowded {
+		fmt.Fprintf(e.Stderr, "boxer: not caching %s: %s free, below min_free_gb (%.1f GB). The image is pulled instead; `boxer gc` reclaims space.\n",
+			image, humanBytes(free), e.Cfg.MinFreeGB)
+		e.event(obs.Pack, obs.Skipped, 0, map[string]any{"kind": "image", "image": image, "free_bytes": free})
+		return ""
 	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s (once per host)\n", image)
 	start := time.Now()
@@ -662,6 +677,38 @@ var Executable = os.Executable
 // UpDetached starts `boxer up` for this Env in its own session and returns without waiting, so a
 // hook (harness SessionStart, git post-checkout) can warm the scope without blocking its caller.
 // Ensure's per-scope lock makes the detached create and a concurrent first `run` produce one VM.
+// ReclaimAllowed lets the boxer command enable the automatic sweep. It is off by default so that
+// a program importing pkg/boxer never re-executes itself, and so tests do not spawn themselves.
+var ReclaimAllowed = false
+
+// ReclaimDetached starts a background `boxer gc` when one is due and the configuration allows it.
+// It is how boxer's storage stays bounded without a daemon: an ordinary command starts the sweep,
+// never waits for it, and never fails because of it. A sandbox costs about half a gigabyte, so
+// the alternative is a host that fills up while every individual command looks harmless.
+func (e *Env) ReclaimDetached() {
+	// The sweep re-executes this binary. That is right for the boxer command and wrong for
+	// anything embedding pkg/boxer, which would run its own program with an argument it never
+	// declared, so the launcher opts in and BOXER_NO_RECLAIM opts out.
+	if !e.Cfg.AutoReclaim || e.Inside() || !ReclaimAllowed || os.Getenv("BOXER_NO_RECLAIM") == "1" {
+		return
+	}
+	every, err := time.ParseDuration(e.Cfg.ReclaimEvery)
+	if err != nil || !ReclaimDue(every) {
+		return
+	}
+	exe, err := Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "gc")
+	cmd.Dir = e.CWD
+	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if cmd.Start() == nil {
+		_ = cmd.Process.Release()
+	}
+}
+
 func (e *Env) UpDetached() error {
 	exe, err := Executable()
 	if err != nil {
@@ -744,4 +791,28 @@ func InstructionsFor(cfg config.Config, runTool string) string {
 	b.WriteString(" always run on the host.\n")
 	b.WriteString("Any line beginning `boxer:` on stderr is an instruction, not a transient error: its `fix:` line is the exact command to run next.")
 	return b.String()
+}
+
+// minFree is the configured margin in bytes; 0 disables the check.
+func (e *Env) minFree() int64 {
+	if e.Cfg.MinFreeGB <= 0 {
+		return 0
+	}
+	return int64(e.Cfg.MinFreeGB * 1024 * 1024 * 1024)
+}
+
+// HumanBytes is humanBytes for callers outside this package.
+func HumanBytes(n int64) string { return humanBytes(n) }
+
+// humanBytes prints a size the way a person reads one. Storage messages are read by someone who
+// is already annoyed; "3.1 GB" is kinder than 3328599654.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
 }

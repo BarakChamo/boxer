@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package install-routes release-gate clean help
+.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package install-routes release-gate clean clean-evals help
 
 help:             ## list the targets
 	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -73,3 +73,8 @@ release-gate:     ## the mechanical half of the release gate in docs/release.md;
 
 clean:            ## remove build output and coverage
 	rm -rf bin dist coverage.out
+
+clean-evals:      ## reclaim what the evaluation suite leaves on this host: scratch repos and its pack cache
+	@bin/boxer gc --all >/dev/null 2>&1 || true
+	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs
+	@echo "reclaimed the eval scratch directories and pack cache"

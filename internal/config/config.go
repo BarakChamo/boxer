@@ -57,7 +57,17 @@ type Config struct {
 	CreateOn              []string `toml:"create_on"`
 	DestroyOn             []string `toml:"destroy_on"`
 	IdleTimeout           string   `toml:"idle_timeout"`
-	ReuseExisting         bool     `toml:"reuse_existing"`
+	// AutoReclaim lets an ordinary command sweep what it no longer needs — sandboxes whose
+	// worktree is gone, sandboxes idle past idle_timeout, and unreferenced packs — at most once
+	// every reclaim_every. Without it nothing reclaims anything until someone runs `boxer gc` by
+	// hand, and a sandbox costs about half a gigabyte.
+	AutoReclaim  bool   `toml:"auto_reclaim"`
+	ReclaimEvery string `toml:"reclaim_every"`
+	// MinFreeGB is the margin boxer refuses to spend on its own cache. Packing writes hundreds of
+	// megabytes; below this the pack is skipped and the image pulled instead, because a full disk
+	// breaks every VM on the host, not only boxer's.
+	MinFreeGB     float64 `toml:"min_free_gb"`
+	ReuseExisting bool    `toml:"reuse_existing"`
 	// WarmOnSessionStart makes the SessionStart hook provision in a detached `boxer up` and
 	// return at once, so the session is never blocked on a VM create.
 	WarmOnSessionStart bool `toml:"warm_on_session_start"`
@@ -106,6 +116,9 @@ func Defaults() Config {
 		CreateOn:              []string{"session_start", "run", "mcp"},
 		DestroyOn:             []string{},
 		IdleTimeout:           "2h",
+		AutoReclaim:           true,
+		ReclaimEvery:          "6h",
+		MinFreeGB:             5,
 		ReuseExisting:         true,
 		Integration:           "outside",
 		Mode:                  "rewrite",

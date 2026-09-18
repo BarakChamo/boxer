@@ -314,7 +314,10 @@ func (e *Env) BaseEnv() []string {
 		"BOXER_TRACE="+e.Trace,
 		"XDG_CONFIG_HOME="+filepath.Join(e.Work, "xdg"),
 		"XDG_STATE_HOME="+filepath.Join(e.Work, "xdg-state"),
-		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"), // image packs survive across cells and runs
+		// Image packs survive across cells and runs; they are the reason a tier takes minutes rather
+		// than hours. They also grow to gigabytes, and nothing but `make clean-evals` reclaims them,
+		// because they must outlive the scratch directory of any one cell.
+		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"),
 	)
 	return env
 }

@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Storage reclaims itself. Any command that provisions a sandbox starts a background sweep, at
+  most once every `reclaim_every` (6 hours by default), deleting sandboxes whose worktree is gone,
+  sandboxes idle past `idle_timeout`, and packs nothing references. `auto_reclaim = false` turns
+  it off, and `BOXER_NO_RECLAIM=1` does the same for one run.
+- `min_free_gb` (5 GB by default): boxer refuses to write a pack when free space is below it and
+  pulls the image instead. A cache is worth less than a working disk.
+- `boxer gc --all` reclaims every stopped sandbox and every unreferenced pack whatever their age,
+  and `gc` now reports how much it freed.
+- `boxer doctor` prints the footprint: sandboxes, packs, bytes cached and bytes free, with a
+  warning when free space is under the margin.
+- `make clean-evals` reclaims the evaluation suite's scratch repositories and pack cache, which
+  live outside boxer's state and which nothing reclaimed before.
 - The remote, and with it the first proof of the publishing path: `v1.0.0-rc.1` published four
   platform archives, four SBOMs, the plugin, skill and npm tarballs, and a signed `checksums.txt`
   that verifies against the release workflow's OIDC identity.

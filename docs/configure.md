@@ -34,6 +34,11 @@ allow_hosts = ["registry.npmjs.org"]
 manage      = "off"             # detect: a session in the main checkout shares the repository
                                 # VM until it moves into a worktree
 
+idle_timeout = "2h"             # gc reclaims a sandbox unused for this long; "never" disables it
+auto_reclaim = true             # an ordinary command sweeps in the background, at most every…
+reclaim_every = "6h"
+min_free_gb  = 5                # below this, boxer pulls images rather than caching them
+
 [telemetry]
 enabled     = false             # the event stream, off by default
 sink        = "none"            # none | file | stderr | otel (otel needs a -tags otel build)
@@ -80,6 +85,16 @@ ships calls tasks first, and `boxer brief` tells the agent which ones exist.
 `enabled = true` with `sink = "file"` writes one JSON event per line, which `boxer logs` reads back
 and `boxer status --json` carries the tail of. Command lines are elided unless `record_commands`
 says otherwise. The schema and the redaction rules are in [events.md](events.md).
+
+**`idle_timeout`, `auto_reclaim`, `reclaim_every` and `min_free_gb`** are what keep a machine from
+filling up. A sandbox's data directory is about half a gigabyte and a cached image pack is 130 to
+365 MB, so storage is the cost users actually notice. By default any `boxer` command that
+provisions a sandbox also starts a background sweep, at most once every `reclaim_every`, which
+deletes sandboxes whose worktree is gone, sandboxes idle past `idle_timeout`, and packs nothing
+references. `auto_reclaim = false` turns that off and leaves `boxer gc` to you. Separately, boxer
+refuses to write a pack when free space is below `min_free_gb` and pulls the image instead: a
+cache is worth less than a working disk. `boxer doctor` prints the current footprint, and
+`boxer gc --all` reclaims every pack and every stopped sandbox regardless of age.
 
 **`network`** is off by default, in keeping with smolvm. `allowlist` opens named hosts; the
 registry hosts your image needs are always allowed, so a package install works without you listing

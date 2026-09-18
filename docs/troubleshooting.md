@@ -66,8 +66,23 @@ boxer down --all         # stop every running sandbox first, if you want everyth
 ```
 
 `gc` prunes by `idle_timeout`, so it does nothing to something you used an hour ago. If you are
-short of space now, `boxer down --all && boxer gc` is the blunt version. Run `gc` on a schedule if
-you create many worktrees.
+short of space now:
+
+```sh
+boxer doctor            # the storage line: sandboxes, packs, bytes cached, bytes free
+boxer gc --all          # every stopped sandbox and every unreferenced pack, whatever their age
+boxer down --all && boxer gc --all   # including the ones still running
+```
+
+You should rarely need to. By default any command that provisions a sandbox starts a background
+sweep, at most once every `reclaim_every` (6 hours), and boxer refuses to write a pack when free
+space is below `min_free_gb` (5 GB), pulling the image instead. `auto_reclaim = false` turns the
+sweep off.
+
+Two things boxer does not reclaim. smolvm's own per-machine data directory goes when the sandbox
+does, so `boxer gc` covers it, but the evaluation suite's pack cache and scratch repositories are
+outside boxer's state entirely: `make clean-evals` reclaims those, and only maintainers running
+the tiers ever have them.
 
 ## Every sandbox fails with "read checkpoint footer"
 
