@@ -16,7 +16,6 @@
 - [eval-plan.md](eval-plan.md) — how boxer's claims are evaluated: the tiers, the oracle, the matrix
 - [release.md](release.md) — what 1.0 promises, versioning, and the release gate
 - [status.md](status.md) — what the last full evaluation run proved, with dates and skips
-- [plan.md](plan.md) — the plan of record
 
 Evaluation reports, regenerated from runs rather than written: [eval-t1.md](eval-t1.md),
 [eval-t2.md](eval-t2.md), [eval-adherence.md](eval-adherence.md).
