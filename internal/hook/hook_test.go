@@ -226,7 +226,9 @@ func TestWarmOnSessionStartDoesNotBlock(t *testing.T) {
 	if b, _ := os.ReadFile(log); strings.Contains(string(b), "machine create") {
 		t.Fatal("the hook itself must not create the VM when warming in the background")
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	// Generous on purpose: this waits for a detached process to be scheduled, and the machine may
+	// be busy running the eval suite. A short deadline here fails for load, not for behaviour.
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if b, err := os.ReadFile(marker); err == nil {
 			if strings.TrimSpace(string(b)) != "up --harness claude-code --session s1" {
