@@ -8,7 +8,7 @@ internal/config    66
 internal/decide    99
 internal/eval      14
 internal/fakellm   81
-internal/hook      88
+internal/hook      90
 internal/inside    73
 internal/install   84
 internal/mcp       94
@@ -17,4 +17,4 @@ internal/scope     87
 internal/shim      67
 internal/vm        75
 pkg/boxer          78
-cmd/boxer          65
+cmd/boxer          69

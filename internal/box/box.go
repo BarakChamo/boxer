@@ -789,6 +789,19 @@ func InstructionsFor(cfg config.Config, runTool string) string {
 	}
 	b.WriteString(strings.Join(cfg.Passthrough, ", "))
 	b.WriteString(" always run on the host.\n")
+	// Named tasks are the deterministic path, so the brief has to name them: an agent that never
+	// reads the skill still learns them here, and a task is the one command whose spelling the
+	// repository guarantees.
+	if names := cfg.TaskNames(); len(names) > 0 {
+		b.WriteString("This repository declares tasks; prefer them over composing a command line: ")
+		for i, n := range names {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("`boxer run --task " + n + "`")
+		}
+		b.WriteString(".\n")
+	}
 	b.WriteString("Any line beginning `boxer:` on stderr is an instruction, not a transient error: its `fix:` line is the exact command to run next.")
 	return b.String()
 }
