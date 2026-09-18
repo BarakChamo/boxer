@@ -18,8 +18,12 @@ import (
 // that leaves the project directory, and a nested linked worktree is a worktree like any other.
 func (e *Env) Worktree() string { return filepath.Join(e.Repo, "wt") }
 
-// SessionRoot is the worktree the cell's command runs from.
+// SessionRoot is the worktree the cell's command runs from: the one an orchestrator created
+// (Env.Root, set by its driver), the timing matrix's linked worktree, or the main checkout.
 func (e *Env) SessionRoot(c Cell) string {
+	if e.Root != "" {
+		return e.Root
+	}
 	if c.Timing == "before" || c.Timing == "mid" {
 		return e.Worktree()
 	}

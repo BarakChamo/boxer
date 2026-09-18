@@ -111,6 +111,9 @@ type Env struct {
 	llmStop     func()
 	Log         io.Writer
 	Scenario    string // copied from the cell; selects the prompt
+	// Root is the worktree an orchestrator created for the task, when its driver learns it only
+	// at run time; the oracle then judges that worktree's VM instead of Repo.
+	Root string
 }
 
 // Prompt is what every cell asks; the leak canary rides in the command the fake model issues, and

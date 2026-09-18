@@ -197,7 +197,10 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 	var f []Finding
 	add := func(check, format string, a ...any) { f = append(f, Finding{check, fmt.Sprintf(format, a...)}) }
-	cfg, err := config.Load(env.Repo, env.Repo)
+	// The worktree the command ran from: an orchestrator cuts its own (Env.Root, set by its
+	// driver), so the scope and the boxer.toml that governs it come from there, not the checkout.
+	root := env.SessionRoot(c)
+	cfg, err := config.Load(root, env.Repo)
 	if err != nil {
 		add("config", "%v", err)
 		return f
@@ -205,7 +208,6 @@ func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 	if cfg.Isolation == "session" || cfg.Isolation == "subagent" {
 		return judgeIdentity(env, c)
 	}
-	root := env.SessionRoot(c) // the worktree the command ran from
 	g, _ := scope.Detect(root)
 	tag := ""
 	if cfg.Integration == "inside" {
