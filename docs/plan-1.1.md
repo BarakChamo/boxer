@@ -65,10 +65,13 @@ everything below.
 
 ## Progress
 
-Streams A, B, C and D have landed on `main`, each with its tests, its documentation and the
-release gate green. Stream G's requirements contradiction is resolved. What remains is Stream E
-(a Conductor run, which needs the GUI app and so is a person's afternoon) and Stream F (the flow
-tier, in progress).
+Streams A, B, C, D and F have landed on `main`, each with its tests, its documentation and the
+release gate green; the flow tier passes in 54 seconds warm. Stream G is done but for the three
+publishing steps that need an account.
+
+What remains is **Stream E**: opening a Conductor workspace and confirming a project-layer hook
+fires. Conductor is a GUI application, so that is a person's afternoon rather than something to
+automate. Everything else it needed is already written.
 
 ## Stream A — environment packs — **done**
 
@@ -212,14 +215,14 @@ the page answered 200 through the forwarded port; the MCP call actually happened
 trace rather than from the model's prose; the error was fixed; the sandbox survived a restart with
 its dependencies intact.
 
-## Stream G — gaps and corrections
+## Stream G — gaps and corrections — **done but for publishing**
 
-- **The requirements document contradicts itself** on devcontainers: one section specifies reading
-  a subset, another lists consuming `devcontainer.json` as out of scope. Stream C resolves it in
-  favour of reading; the document must be corrected in the same change.
-- **Two inside-mode rows have never been run**, DSH and Copilot. Run them or mark them unverified.
-- **Gemini's live tier needs its own key**, because the gateway speaks no Gemini protocol. That
-  belongs in the README, not only in the status report.
+- ~~The requirements document contradicts itself on devcontainers.~~ Resolved in favour of reading
+  the runtime subset, in the same change that implemented it.
+- ~~Two inside-mode rows have never been run.~~ Copilot is in the inside cells now. DSH has no
+  inside row at all — it is a plugin stack rather than a single binary — which the status report
+  says rather than implying it was merely untested.
+- ~~Gemini's live tier needs its own key.~~ Said in the README, with the reason.
 - **Three publishing steps remain manual**: npm, the Homebrew tap (which needs a tap repository and
   a token secret), and the agentskills.io listing.
 - **A `Backend` interface** stays deferred, but the pack work must not leak smolvm's pack format

@@ -69,7 +69,7 @@ every skip reason: [docs/status.md](docs/status.md).
 | --- | --- | --- | --- |
 | Claude Code | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
 | Codex | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
-| Gemini CLI | rewrite, tool | `shell`, ACP | T1; T2 needs `GEMINI_API_KEY` |
+| Gemini CLI | rewrite, tool | `shell`, ACP | T1; its live tier needs your own `GEMINI_API_KEY`, because Gemini CLI speaks only the Gemini API and the gateway the other harnesses share does not serve it |
 | OpenCode | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
 | pi | rewrite, tool | `shell` (no ACP server) | T1, T2 live, adherence |
 | Grok | rewrite (recommended), tool | `shell`, ACP | T1, T2 live, adherence |
