@@ -36,6 +36,18 @@ go install github.com/BarakChamo/boxer/cmd/boxer@latest
 `BOXER_VERSION=v1.2.3` pins the install script to a release; `BOXER_INSTALL_DIR` changes where it
 puts the binary. If `~/.local/bin` is not on your PATH the script tells you so.
 
+## Teaching your harnesses to use it
+
+```sh
+boxer install all            # every harness this repository can take, merged and idempotent
+boxer install copilot --user # Copilot CLI is user-level only: its repository hooks need a trusted
+                             # directory, which headless mode does not grant
+```
+
+`boxer install all` writes a project layer that orchestrators also load, because a harness they
+launch gets its own configuration directory and never sees a user-level plugin. The five ways an
+agent ends up in the sandbox, and which harness gets which, are in [integrate.md](integrate.md).
+
 ## Check the install
 
 ```sh
@@ -61,5 +73,6 @@ layer older than the binary; `boxer install <harness>` rewrites it.
 
 To remove boxer: delete the binary, run `boxer down --all` first if any sandbox is still running,
 and delete the files `boxer install` wrote into your repository (`.claude/`, `.codex/`,
-`.gemini/`, `.opencode/`, `.grok/` entries — they are merged, so remove boxer's entries rather
-than the files).
+`.gemini/`, `.opencode/`, `.grok/`, `.pi/`, `.dsh/` entries, and `~/.copilot/hooks/boxer.json` —
+they are merged, so remove boxer's entries rather than the files). `boxer gc` reclaims the packs
+under `~/.local/state/boxer/packs`, which are a cache and nothing else.
