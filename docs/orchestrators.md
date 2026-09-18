@@ -201,6 +201,13 @@ Proved live on 2026-09-18 (`zai/glm-5.3-flash`): `t3code/rewrite/project/worktre
 $0.0047, `t3code/inside/shim/worktree` pass in 27 s for $0.0070. Both: one VM keyed to the worktree
 T3 created, canary in that guest and not on the host, answer `Linux`. Scripted (t1): 9 s and 18 s.
 
+**The inside path needs the git warm-up.** T3 creates the worktree and starts the harness in the
+same step, and its provider session fails with `turn/setPermissionMode failed` while a cold VM
+boots (reproduced three times: 38 s, 39 s, 32 s). `boxer install git` writes the post-checkout
+hook, so `git worktree add` warms the sandbox before the harness starts; the cell then passes
+(2026-09-18, 1 m 15 s, $0.0041). Any orchestrator that creates a worktree and launches into it
+wants that hook.
+
 ### Multica (checklist; spike 9: `MULTICA_CLAUDE_ARGS`, env inheritance)
 
 - The `multica` binary (Homebrew) reads `MULTICA_CLAUDE_ARGS`, `MULTICA_CLAUDE_PATH`,

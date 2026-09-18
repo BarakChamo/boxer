@@ -70,6 +70,12 @@ func (d *T3) Prepare(env *Env, c Cell) error {
 		if out, err := env.boxer(env.Repo, "shim", "install", "--harness", "claude", shims); err != nil {
 			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
 		}
+		// T3 creates the worktree and starts the harness in it at once, and its provider session
+		// gives up while a cold VM boots. The git post-checkout hook is boxer's answer: the VM is
+		// warm before the harness starts. This is the integration a user of an orchestrator wants.
+		if out, err := env.boxer(env.Repo, "install", "git"); err != nil {
+			return fmt.Errorf("boxer install git: %v\n%s", err, out)
+		}
 		add((Inside{}).guestEnvFor(env, "claude"))
 		instance["config"] = map[string]any{"binaryPath": filepath.Join(shims, "claude"), "homePath": (Inside{}).cfgDir(env, "claude")}
 	} else {
