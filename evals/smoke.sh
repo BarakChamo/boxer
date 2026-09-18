@@ -141,6 +141,25 @@ echo "# gc"
 mkrepo "$WORK/g" "$BASE"; (cd "$WORK/g" && boxer up >/dev/null); rm -rf "$WORK/g"
 check "gc reaps orphan" 'boxer gc | grep -q deleted'
 
+echo "# performance (numbers printed; the bounds are generous, they catch a regression, not jitter)"
+mkrepo "$WORK/p" "$BASE"
+cd "$WORK/p"
+ms() { python3 -c "import subprocess,time,sys; t=time.monotonic(); subprocess.run(sys.argv[1:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(int((time.monotonic()-t)*1000))" "$@"; }
+COLD=$(ms boxer up)
+WARM=$(ms boxer run -- true)
+for i in 1 2 3; do W=$(ms boxer run -- true); [ "$W" -lt "$WARM" ] && WARM=$W; done
+HOOK=$(python3 -c "
+import subprocess,time,os,sys
+payload='{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm test\"},\"cwd\":\"%s\",\"session_id\":\"s\"}' % os.getcwd()
+t=time.monotonic()
+subprocess.run(['boxer','hook','claude-code'], input=payload, text=True, stdout=subprocess.DEVNULL)
+print(int((time.monotonic()-t)*1000))")
+echo "  ..   cold start ${COLD}ms · warm run ${WARM}ms · rewrite hook ${HOOK}ms"
+check "cold start under 120s"  '[ "$COLD" -lt 120000 ]'
+check "warm run under 1500ms"  '[ "$WARM" -lt 1500 ]'
+check "rewrite hook under 500ms" '[ "$HOOK" -lt 500 ]'
+boxer down >/dev/null 2>&1 || true
+
 echo
 echo "passed $pass, failed $fail"
 [ "$fail" = 0 ]
