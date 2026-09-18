@@ -53,21 +53,6 @@ func wait(cmd *exec.Cmd, name string) error {
 	}
 }
 
-// lastLines returns the final n non-empty lines of s, joined: the tail of a process's stderr is
-// what explains its death, and the whole log is too much for a report cell.
-func lastLines(s string, n int) string {
-	var keep []string
-	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) != "" {
-			keep = append(keep, strings.TrimSpace(l))
-		}
-	}
-	if len(keep) > n {
-		keep = keep[len(keep)-n:]
-	}
-	return strings.Join(keep, "; ")
-}
-
 // lastAnswer returns the first word of the last non-empty line of raw that starts with none of
 // the given prefixes. Several harnesses print their answer as the last interesting line of a
 // noisy stream, and each had written its own loop for it; what differs between them is only the

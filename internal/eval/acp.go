@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/BarakChamo/boxer/internal/inside"
 	"time"
 )
 
@@ -59,7 +61,7 @@ func (d InsideACP) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		// dying is the whole diagnosis, and a cell that fails once in a hundred runs is not worth
 		// re-running by hand to find out.
 		if err != nil {
-			if last := lastLines(stderr.String(), 3); last != "" {
+			if last := inside.LastLines(stderr.String(), 3); last != "" {
 				err = fmt.Errorf("%v: %s", err, last)
 			}
 		}

@@ -147,3 +147,17 @@ func TestHarnessMarkerProbeDistinguishesTransportFailure(t *testing.T) {
 		t.Fatalf("no install may run when the probe could not answer:\n%s", b)
 	}
 }
+
+// LastLines is what an install or an agent failure carries instead of a whole log.
+func TestLastLines(t *testing.T) {
+	raw := "npm warn one\n\n  npm error two  \nnpm error three\n"
+	if got := LastLines(raw, 2); got != "npm error two; npm error three" {
+		t.Fatalf("got %q", got)
+	}
+	if got := LastLines(raw, 9); got != "npm warn one; npm error two; npm error three" {
+		t.Fatalf("fewer lines than asked for: %q", got)
+	}
+	if got := LastLines("\n \n", 3); got != "" {
+		t.Fatalf("nothing but blank lines: %q", got)
+	}
+}
