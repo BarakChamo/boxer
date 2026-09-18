@@ -96,6 +96,7 @@ in the release notes.
 | 6 | T1, twice | `make eval-t1` twice | zero failures both times, and the two runs give identical per-cell verdicts; every skip has a named reason |
 | 7 | T2 live | `make eval-t2` | zero failures; skips only for a named missing credential |
 | 8 | Adherence | `make eval-adherence` | no harness verdict regresses against the previous release; per-model numbers recorded in `docs/eval-adherence.md` |
+| 8a | Flow | `make eval-flow` | the development session passes: scaffold, serve, reach it from the host, MCP in the guest, restart with the environment intact. Slow and network-heavy, so it runs here rather than in CI |
 | 9 | Orchestrators | the orchestrator cells in T1 and T2 | OpenHands, Paperclip, T3 Code and herdr pass live; the Conductor and Multica checklists in [orchestrators.md](orchestrators.md) are current |
 | 10 | Install routes | `make install-routes`, plus each route on a machine that has never had boxer | `install.sh`, npm, Homebrew and `go install` each produce a binary that passes `boxer doctor`; a tampered checksum aborts both download routes |
 
@@ -103,7 +104,7 @@ Gates 1 to 4 and the staged half of 10 are enforced by the workflow. Gates 5 to 
 clean-machine half of 10 are the human half; a release whose notes do not name their results has
 not passed the gate.
 
-Then: regenerate `docs/status.md`, `docs/eval-t1.md`, `docs/eval-t2.md` and
+Then: regenerate `docs/status.md`, `docs/eval-t1.md`, `docs/eval-t2.md`, `docs/eval-flow.md` and
 `docs/eval-adherence.md` from those runs, commit them, update `CHANGELOG.md`, tag, and let the
 workflow publish. Two steps stay manual because they need an account the workflow does not hold:
 
