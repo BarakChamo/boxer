@@ -396,27 +396,26 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 // doctorReport is everything `doctor` knows; the human form prints it in the order it was
 // always printed, --json emits it whole.
 type doctorReport struct {
-	Version       string          `json:"version"`
-	Inside        bool            `json:"inside"`
-	Smolvm        string          `json:"smolvm"`
-	SmolvmError   string          `json:"smolvm_error,omitempty"`
-	BoxerPath     string          `json:"boxer_path"`
-	Git           *doctorGit      `json:"git,omitempty"`
-	ConfigFiles   []string        `json:"config_files"`
-	Settings      []doctorSetting `json:"settings"`
-	Scope         *scopeJSON      `json:"scope,omitempty"`
-	Image         string          `json:"image,omitempty"`
-	ImageReason   string          `json:"image_reason,omitempty"`
-	ImageWarning  string          `json:"image_warning,omitempty"`
-	Sandbox       *machineJSON    `json:"sandbox"`
-	SandboxError  string          `json:"sandbox_error,omitempty"`
-	Shims         *doctorShims    `json:"shims,omitempty"`
-	Drift         []string        `json:"drift,omitempty"`
-	Signals       []hook.Signal   `json:"signals,omitempty"`
-	Warnings      []string        `json:"warnings"`
-	Error         string          `json:"error,omitempty"`
-	resolved      bool            // Env exists (config could be loaded)
-	configPrinted bool
+	Version      string          `json:"version"`
+	Inside       bool            `json:"inside"`
+	Smolvm       string          `json:"smolvm"`
+	SmolvmError  string          `json:"smolvm_error,omitempty"`
+	BoxerPath    string          `json:"boxer_path"`
+	Git          *doctorGit      `json:"git,omitempty"`
+	ConfigFiles  []string        `json:"config_files"`
+	Settings     []doctorSetting `json:"settings"`
+	Scope        *scopeJSON      `json:"scope,omitempty"`
+	Image        string          `json:"image,omitempty"`
+	ImageReason  string          `json:"image_reason,omitempty"`
+	ImageWarning string          `json:"image_warning,omitempty"`
+	Sandbox      *machineJSON    `json:"sandbox"`
+	SandboxError string          `json:"sandbox_error,omitempty"`
+	Shims        *doctorShims    `json:"shims,omitempty"`
+	Drift        []string        `json:"drift,omitempty"`
+	Signals      []hook.Signal   `json:"signals,omitempty"`
+	Warnings     []string        `json:"warnings"`
+	Error        string          `json:"error,omitempty"`
+	resolved     bool            // Env exists (config could be loaded)
 }
 
 // scopeJSON is scope.Scope with the field names the JSON API promises.
@@ -547,15 +546,6 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	r.Warnings = append(r.Warnings, e.Cfg.Warnings...)
 	return r
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func printDoctor(r *doctorReport, w io.Writer) int {
@@ -754,7 +744,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			code = 1
 			continue
 		}
-		os.Remove(strings.TrimSuffix(p, ".smolmachine") + ".lock")
+		_ = os.Remove(strings.TrimSuffix(p, ".smolmachine") + ".lock")
 		row.Deleted = true
 		rows = append(rows, row)
 		if !*asJSON {
@@ -853,7 +843,7 @@ func insideCmd(kind string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	os.Setenv("BOXER_INTEGRATION", "inside") // this command is the inside placement by definition
+	_ = os.Setenv("BOXER_INTEGRATION", "inside") // this command is the inside placement by definition
 	e, err := box.Resolve("", name, scope.Identity{})
 	if err != nil {
 		fmt.Fprintln(stderr, err)

@@ -236,7 +236,7 @@ func install(e *box.Env, name string, h Harness) error {
 		}
 	}
 	if err != nil || code != 0 {
-		return &box.Error{Reason: fmt.Sprintf("installing %s failed (exit %d)", name, code), Cause: "HARNESS_INSTALL_FAILED", Scope: e.Scope,
+		return &box.Error{Reason: fmt.Sprintf("installing %s failed (exit %d): %s", name, code, lastLines(msg, 3)), Cause: "HARNESS_INSTALL_FAILED", Scope: e.Scope,
 			Fix: "check network.allow_hosts includes registry.npmjs.org, then: boxer shell " + name}
 	}
 	return nil
@@ -285,4 +285,19 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// lastLines returns the final n non-empty lines of s, which is what an install failure has to
+// carry: npm prints its reason last, and the whole log is already on the operator's screen.
+func lastLines(s string, n int) string {
+	var keep []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			keep = append(keep, strings.TrimSpace(l))
+		}
+	}
+	if len(keep) > n {
+		keep = keep[len(keep)-n:]
+	}
+	return strings.Join(keep, "; ")
 }

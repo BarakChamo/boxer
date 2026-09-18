@@ -200,7 +200,7 @@ func (c Client) Pack(image, stub string) (string, error) {
 	if _, err := c.output("pack", "create", "-I", image, "-o", stub, "--no-sign"); err != nil {
 		return "", err
 	}
-	os.Remove(stub)
+	_ = os.Remove(stub)
 	return stub + ".smolmachine", nil
 }
 
@@ -210,7 +210,7 @@ func (c Client) PackFromVM(name, stub string) (string, error) {
 	if _, err := c.output("pack", "create", "--from-vm", name, "-o", stub, "--no-sign"); err != nil {
 		return "", err
 	}
-	os.Remove(stub)
+	_ = os.Remove(stub)
 	return stub + ".smolmachine", nil
 }
 

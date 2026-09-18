@@ -122,7 +122,7 @@ func main() {
 		report := render(partial) + "\n_interrupted; the cell in flight is not listed. Run `boxer down --all` to reclaim its VM._\n"
 		mu.Unlock()
 		if *out != "" {
-			os.WriteFile(*out, []byte(report), 0o644)
+			_ = os.WriteFile(*out, []byte(report), 0o644)
 		}
 		fmt.Println(report)
 		os.Exit(130)
@@ -132,15 +132,17 @@ func main() {
 		// Adherence cells are t2 cells with another prompt: the drivers see tier t2 and the .env
 		// model override is set per model, so every driver's model plumbing is reused as is.
 		for _, m := range eval.Models(*models) {
-			os.Setenv("BOXER_EVAL_MODEL", m)
+			_ = os.Setenv("BOXER_EVAL_MODEL", m)
 			fmt.Fprintf(os.Stderr, "model %s\n", m)
-			results = append(results, eval.Run(drivers, "t2", boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
+			// The per-cell callback is what collects the results, because only it can stamp the
+			// model; Run's return value is the same rows without that field.
+			eval.Run(drivers, "t2", boxerBin, only, *keep, os.Stderr, func(r eval.Result) {
 				r.Model = m
 				mu.Lock()
 				partial = append(partial, r)
 				mu.Unlock()
 				appendJSONL(*jsonl, r)
-			})...)
+			})
 		}
 		results = partial
 	} else {
@@ -152,7 +154,7 @@ func main() {
 	}
 	report := render(results)
 	if *out != "" {
-		os.WriteFile(*out, []byte(report), 0o644)
+		_ = os.WriteFile(*out, []byte(report), 0o644)
 	}
 	fmt.Println(report)
 	for _, r := range results {
@@ -173,9 +175,9 @@ func appendJSONL(path string, r eval.Result) {
 		fmt.Fprintln(os.Stderr, "jsonl:", err)
 		return
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // cleanup of a temporary; nothing can act on the failure
 	b, _ := json.Marshal(r)
-	f.Write(append(b, '\n'))
+	_, _ = f.Write(append(b, '\n'))
 }
 
 // readJSONL loads earlier results; a missing file is an empty history.
@@ -187,7 +189,7 @@ func readJSONL(path string) []eval.Result {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only handle
 	var out []eval.Result
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
@@ -223,7 +225,7 @@ func loadDotEnv() {
 			if !ok || os.Getenv(k) != "" {
 				continue
 			}
-			os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
+			_ = os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"'`))
 		}
 		return
 	}

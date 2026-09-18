@@ -39,7 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("http://%s\n", ln.Addr().String())
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 
 	var logf *os.File
 	if *logPath != "" {
@@ -63,7 +63,7 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
-		ln.Close()
+		_ = ln.Close()
 	}()
 	_ = http.Serve(ln, logged)
 }

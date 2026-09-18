@@ -45,7 +45,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
-	defer os.RemoveAll(tmp)
+	defer os.RemoveAll(tmp) //nolint:errcheck // cleanup of a temporary; nothing can act on the failure
 	if _, err := bundle.Render(harness, version, tmp); err != nil {
 		return Result{}, err
 	}
@@ -157,7 +157,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	defer os.RemoveAll(tmp)
+	defer os.RemoveAll(tmp) //nolint:errcheck // cleanup of a temporary; nothing can act on the failure
 	if _, err := bundle.Render(harness, version, tmp); err != nil {
 		return Result{}, err
 	}
@@ -466,7 +466,7 @@ func Drift(root, version string) []string {
 	if err != nil {
 		return nil
 	}
-	defer os.RemoveAll(tmp)
+	defer os.RemoveAll(tmp) //nolint:errcheck // cleanup of a temporary; nothing can act on the failure
 	if _, err := bundle.Render(bundle.Package, version, tmp); err != nil {
 		return nil
 	}
