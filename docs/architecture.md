@@ -17,13 +17,14 @@ install case, a template namespace and an eval driver, and nothing else.
 | Package | Owns |
 | --- | --- |
 | `internal/scope` | the identity of a sandbox: `sha256(worktree path)`, widened or narrowed by `isolation` |
-| `internal/config` | `boxer.toml` and `BOXER_*`, merged across three locations, unknown keys rejected |
+| `internal/config` | `boxer.toml` and `BOXER_*`, merged across three locations; an unknown key is rejected, an unknown table warns |
 | `internal/decide` | given a command and a configuration, what happens to it: run here, run there, deny |
 | `internal/box` | the lifecycle above a VM: provision, setup, pack, run, reclaim |
 | `internal/vm` | the smolvm process boundary, and nothing else |
 | `internal/hook` | one dialect row per harness, translating each one's hook protocol |
 | `internal/install` | writing a repository's configuration, merged and idempotent |
-| `internal/bundle` | rendering the published skill and plugin package |
+| `internal/bundle` | rendering the published skill and plugin package, from a version and nothing else |
+| `internal/obs` | the event stream and its sinks; off unless `[telemetry]` turns it on |
 | `internal/inside` | running a harness inside the guest: `boxer shell`, `boxer acp` |
 | `internal/mcp` | the MCP server: `boxer_run`, `boxer_status`, lifecycle signals |
 | `internal/shim` | programs on PATH that are really boxer |

@@ -16,6 +16,17 @@ Every harness worth using speaks MCP, and most now load Agent Skills. boxer ship
 server exposing `boxer_run` and `boxer_status`, and a skill that tells the agent, in its own
 words, that shell commands here go through boxer, plus scripts it can call directly.
 
+The scripts are the part worth knowing about. `skills/boxer/scripts/` holds four one-line wrappers
+over the installed command — `run`, `task`, `status`, `brief` — so an agent that can run a shell
+script has a deterministic path into the sandbox even where MCP tools are hidden behind a
+dispatcher, which is exactly Grok's problem. `scripts/task` is the one to prefer: it runs a command
+the repository declared in `[tasks]` by name, so nothing depends on the intercept list recognising
+a line the model composed.
+
+The skill's text is the same for everyone. Anything that depends on this checkout — the mount
+point, the mode, the intercept list, the tasks that exist — comes from `boxer brief` at run time,
+which is also what hooks inject at session start and what the MCP server serves as a resource.
+
 This is the floor. It requires no hook API, no plugin loader and no cooperation beyond loading a
 server, and it is the only level that works on a harness nobody has integrated yet.
 
@@ -103,10 +114,18 @@ Verified by the evaluation suite; the per-cell results and their dates are in
 | Grok | rewrite (user and project hooks) | yes | yes | yes | T1, T2 live, adherence — use rewrite mode, see below |
 | Kimi | block only, so tool mode | files listed | yes | yes | T1, T2 live, adherence |
 | DSH | deny only, through the Claude Code hook bridge | profile patch layer | — | — | T1, T2 live |
+| GitHub Copilot CLI | rewrite, at user scope only | yes | row present, not run | `copilot --acp` | T1, T2 live |
 
 Grok does not surface session-start context to the model, so in tool mode its first shell command
 always costs one denial before the agent learns to use `boxer_run`. Rewrite mode is the right
 default there, and boxer's own dialect records this.
+
+Copilot CLI is the one harness whose hooks are user-level only: repository hooks under
+`.github/hooks/` load from a trusted working directory, which `-p` mode does not grant, so
+`boxer install copilot --user` writes `${COPILOT_HOME:-~/.copilot}/hooks/boxer.json` instead. Two
+of its behaviours are worth knowing: a hook that times out fails open while a non-zero exit fails
+closed, so boxer's hook always exits 0, and auto-update is on by default, so pin
+`COPILOT_AUTO_UPDATE=false` when the version under test matters.
 
 ## Orchestrators
 

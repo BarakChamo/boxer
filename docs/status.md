@@ -69,6 +69,29 @@ default: `deepseek/deepseek-v4-flash` (zero denials outside Grok, $0.0046 per ce
 
 ## Shipped in this slice
 
+Fourth pass (2026-09-18), the work towards a first public release:
+- **Published content is static.** The package and the skill are byte-identical for every user but
+  for the release version, and a test renders them twice under hostile configurations to prove it.
+  Configuration reaches the agent at run time instead: `boxer brief [--json]`, the same text hooks
+  inject, also served as an MCP resource.
+- **The skill carries its `scripts/` layer** (`run`, `task`, `status`, `brief`), which is the
+  deterministic command path the Agent Skills specification defines and the answer to a harness
+  that hides MCP tools behind a dispatcher.
+- **Named tasks.** `[tasks]` in `boxer.toml`, `boxer tasks`, `boxer run --task <name>`: the agent
+  invokes a name the repository declared rather than composing a line the intercept list has to
+  catch. An unknown name is refused with the real ones.
+- **An opt-in event stream.** `[telemetry]` with file, stderr and OpenTelemetry sinks, `boxer logs`,
+  an event tail on `boxer status --json`, command lines elided unless asked for. Off by default.
+  Schema in [events.md](events.md).
+- **GitHub Copilot CLI** as the ninth harness, its dialect corrected against a running binary, and
+  a real herdr driver and plugin replacing that checklist.
+- **Release engineering:** Apache-2.0 and the community files, a CI gate with the race detector,
+  per-package coverage floors, lint and vulnerability scanning on two platforms, reproducible
+  builds, SBOMs, keyless signing, the npm launcher the package always declared but never shipped,
+  and the four install routes exercised against a staged release.
+- **An unknown top-level table in `boxer.toml` warns rather than fails**, so a repository that
+  adopts a newer boxer's table still loads under an older binary.
+
 Third pass (2026-09-18): `warm_on_session_start` (SessionStart returns in 9 ms, VM ready before the
 first tool call), `worktree.manage`, `boxer install git` (post-checkout warm-up), `doctor` signal
 report, rewrites carry `--session/--agent` under those isolations, Agent Plugins 1.0.0 package
@@ -104,7 +127,11 @@ First and second pass:
 - An orchestrator that creates a worktree and launches a harness into it in one step wants
   `boxer install git`: T3's provider gives up while a cold VM boots.
 - Packs are 130 to 365 MB each. `gc` prunes them by `idle_timeout`; a long eval session can fill a
-  small disk before that runs.
+  small disk before that runs, and two back-to-back T1 runs have done exactly that.
+- Copilot's inside-mode row exists but has never been run; an inside cell costs a full npm install
+  in the guest.
+- Conductor and Multica remain checklists: local Conductor workspaces have no API, and a Multica
+  driver needs a self-hosted server.
 
 ## To run the rest
 
