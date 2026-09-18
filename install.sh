@@ -17,7 +17,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
 case "$OS/$ARCH" in
-  darwin/arm64|linux/amd64|linux/arm64) ;;
+  darwin/arm64|darwin/amd64|linux/amd64|linux/arm64) ;;
   *) echo "boxer: no release binary for $OS/$ARCH; use: go install github.com/$REPO/cmd/boxer@v$VERSION" >&2; exit 1 ;;
 esac
 

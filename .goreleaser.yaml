@@ -1,13 +1,19 @@
-# goreleaser v2. Tag v0.x.y, push, and the release workflow runs `goreleaser release --clean`.
+# goreleaser v2. Tag vX.Y.Z, push, and .github/workflows/release.yml runs `goreleaser release
+# --clean`. Locally, `goreleaser check` validates this file and
+# `goreleaser release --snapshot --clean --skip=publish` builds everything without publishing.
 version: 2
 project_name: boxer
 
 before:
   hooks:
     - go mod tidy
-    # Plugins carry the version they were rendered from, so the renderer is built with it stamped.
-    # They land in build/, not dist/: goreleaser requires dist/ to be empty after the hooks run.
-    - sh -c 'rm -rf build && go run -ldflags "-X main.Version={{ .Version }}" ./cmd/boxer package all --out build/plugins && tar -czf build/boxer-plugins-{{ .Version }}.tar.gz -C build/plugins .'
+    # The published skill and plugin carry the release version, so the renderer is built with it
+    # stamped. They land in build/, not dist/: goreleaser requires dist/ to be empty after the
+    # hooks run. Two assets: the whole plugin package, and the skill on its own for harnesses
+    # that install a skill directory and nothing else.
+    - sh -c 'rm -rf build && go run -ldflags "-X main.Version={{ .Version }}" ./cmd/boxer package all --out build/plugins'
+    - sh -c 'tar -czf build/boxer-plugins-{{ .Version }}.tar.gz -C build/plugins .'
+    - sh -c 'tar -czf build/boxer-skill-{{ .Version }}.tar.gz -C build/plugins/boxer/skills boxer'
 
 builds:
   - id: boxer
@@ -17,9 +23,11 @@ builds:
       - CGO_ENABLED=0
     goos: [darwin, linux]
     goarch: [amd64, arm64]
-    ignore:
-      - goos: darwin
-        goarch: amd64
+    # Reproducible: no local paths in the binary, and a timestamp taken from the commit rather
+    # than from the clock, so rebuilding the same tag produces the same bytes.
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X main.Version={{ .Version }}
 
@@ -29,9 +37,50 @@ archives:
     name_template: "boxer_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - LICENSE
 
 checksum:
   name_template: checksums.txt
+
+sboms:
+  - id: archives
+    artifacts: archive
+
+# Keyless signing: the GitHub Actions OIDC token identifies the workflow that produced the
+# release, so `cosign verify-blob` needs no public key. Verification command is in docs/release.md.
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    artifacts: checksum
+    certificate: "${artifact}.pem"
+    output: true
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - --yes
+
+# Homebrew, as a cask: goreleaser deprecated formulae for tools it ships as prebuilt binaries.
+# macOS only; Linux users take install.sh or `go install`.
+homebrew_casks:
+  - name: boxer
+    repository:
+      owner: BarakChamo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/BarakChamo/boxer
+    description: Runs coding-agent shell commands in a smolvm microVM keyed to the git worktree
+    directory: Casks
+    caveats: |
+      boxer needs smolvm:  curl -sSL https://smolmachines.com/install.sh | bash
+    hooks:
+      post:
+        # Downloaded binaries carry macOS quarantine, which refuses to run an unsigned CLI.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/boxer"]
+          end
 
 release:
   github:
@@ -39,6 +88,7 @@ release:
     name: boxer
   extra_files:
     - glob: build/boxer-plugins-*.tar.gz
+    - glob: build/boxer-skill-*.tar.gz
 
 changelog:
   use: git

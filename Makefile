@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package clean help
+.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package install-routes release-gate clean help
 
 help:             ## list the targets
 	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -50,6 +50,20 @@ package: build    ## render the package and every client view into dist/, and re
 	# the release version is stamped into the release artifact, not into the checkout.
 	go run ./cmd/boxer package plugin --out dist/checked
 	rm -rf plugin && mv dist/checked/boxer plugin && rmdir dist/checked
+
+install-routes:   ## install.sh and the npm package against a release staged on this machine
+	./scripts/install-routes.sh
+
+release-gate:     ## the mechanical half of the release gate in docs/release.md; no VM, no model
+	$(MAKE) fmt-check
+	go vet ./...
+	go mod tidy -diff
+	$(MAKE) test
+	golangci-lint run
+	govulncheck ./...
+	go run ./cmd/boxer package all --out dist/gate
+	goreleaser check
+	$(MAKE) install-routes
 
 clean:            ## remove build output and coverage
 	rm -rf bin dist coverage.out

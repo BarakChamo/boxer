@@ -13,7 +13,7 @@ const pkg = require('./package.json');
 const version = pkg.version;
 const os = process.platform; // darwin | linux
 const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
-const supported = ['darwin/arm64', 'linux/amd64', 'linux/arm64'];
+const supported = ['darwin/arm64', 'darwin/amd64', 'linux/amd64', 'linux/arm64'];
 if (!arch || !supported.includes(`${os}/${arch}`)) {
   console.error(`boxer-cli: no release binary for ${os}/${process.arch}; use: go install github.com/BarakChamo/boxer/cmd/boxer@v${version}`);
   process.exit(1);

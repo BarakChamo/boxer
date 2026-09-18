@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - Apache-2.0 licence, contribution guide, security policy and code of conduct.
+- `npm/bin/boxer.js`, the launcher `package.json` had always declared but the repository never
+  contained, so packed tarballs installed a command that could not run.
+- `scripts/install-routes.sh` and a CI job running it on Linux and macOS: `install.sh` and the npm
+  package against a release staged on the machine, each of them also with a tampered checksum that
+  must abort.
+- Release artifacts: darwin/amd64 binaries, reproducible builds (`-trimpath` and a commit-derived
+  timestamp), a syft SBOM per archive, keyless cosign signing of `checksums.txt`, the skill as its
+  own tarball, and a Homebrew tap.
+- `make release-gate`, the mechanical half of the release gate, enforced on the tag before
+  anything is published.
+- User-facing documentation: `docs/install.md`, `docs/configure.md`, `docs/integrate.md` and
+  `docs/troubleshooting.md`, with `docs/architecture.md` and a `docs/README.md` index.
+
+### Changed
+- `docs/release.md` now states what is stable at 1.0 and what is not, sets a deprecation window of
+  one minor release, and gives the release gate as a runnable checklist.
+- The README opens with a two-minute quickstart and the five integration levels.
 
 ## [0.2.0] - 2026-09-18
 
