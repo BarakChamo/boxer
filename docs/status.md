@@ -1,4 +1,4 @@
-# Status: v1.0.0 (2026-09-18)
+# Status: 1.1 in progress (2026-09-19)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
@@ -9,12 +9,13 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 
 Unit tests green with the race detector and a per-package coverage floor; lint and the
 vulnerability scan clean; smoke **53/53** (which also prints and bounds cold start, warm run and
-hook latency); T1 **67 pass, 0 fail, 1 skip**, run twice with identical per-cell verdicts; T2 live
-on `zai/glm-5.3-flash` **42 pass, 0 fail, 14 skip** for $0.19. Every cell is a fresh repository and
-a fresh VM.
+hook latency); T1 **68 pass, 0 fail, 1 skip** on the 1.1 tree, including the Copilot inside cell
+that 1.0 listed without running; T2 live on `zai/glm-5.3-flash` **42 pass, 0 fail, 14 skip** for
+$0.19, measured at 1.0 and not yet re-run. Every cell is a fresh repository and a fresh VM.
 
-Measured on Apple Silicon with smolvm 1.16.1: cold start 687 ms from a host pack, warm `boxer run`
-60 ms, rewrite hook 10 ms.
+Measured on Apple Silicon with smolvm 1.16.1: cold start 655 ms from a host pack, warm `boxer run`
+53 ms, rewrite hook 10 ms. A second worktree of a repository with a `setup` list now starts in
+0.7 s with its dependencies already installed, against 2.9 s before environment packs.
 
 The publishing path is proven rather than asserted: `v1.0.0-rc.1` published four platform
 archives, four SBOMs, the plugin and skill tarballs, the npm tarball and a `checksums.txt` signed
