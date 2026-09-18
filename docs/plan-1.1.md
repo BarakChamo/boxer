@@ -151,7 +151,57 @@ The 1.1 work is therefore:
 No interface ships in 1.1. The test of this work is that someone could build one in a weekend
 without touching boxer.
 
-## 5. Other gaps worth closing
+## 5. A flow tier: one real development session, end to end
+
+Every existing cell is one command in and one answer out. A development session is not that: it
+scaffolds a project, starts a server, breaks something, reads a tool's view of the failure, fixes
+it, and checks the page again. The flow tier runs that session, once, per harness.
+
+The scenario, in a fresh worktree:
+
+1. **Scaffold.** The agent runs `create-next-app` in the sandbox. This alone exercises the npm
+   registry through the allowlist, a large install in the guest, and the mount: the files must
+   appear in the host worktree, because that is what the user edits.
+2. **Serve.** `next dev` runs in the guest and the host reaches the page through a forwarded port.
+   Proven to work today: a background server started inside the guest survives the command that
+   launched it, and `curl` from the host reaches it.
+3. **Diagnose through MCP.** A deliberate error is introduced. The agent asks the Next.js dev
+   server's own MCP tools what is wrong (`get_errors`, `get_compilation_issues`), fixes it, and the
+   page returns 200 again.
+4. **Persist.** The sandbox goes down and comes back. Dependencies survive in the environment pack
+   and the server returns without reinstalling anything.
+
+**The finding that makes step 3 interesting.** `next-devtools-mcp` is a stdio proxy that discovers
+a running dev server and forwards tool calls to its `/_next/mcp` endpoint. It therefore has to run
+next to the code — which, here, is inside the sandbox. `boxer run` turns out to be a clean stdio
+pipe, so a harness on the host addresses it with nothing new:
+
+```json
+{ "mcpServers": { "next-devtools": {
+    "command": "boxer", "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"] } } }
+```
+
+That is a capability boxer has and has never claimed: **an MCP server that must live beside the
+code runs in the sandbox, with boxer as the transport.** Verified by hand with a JSON-RPC echo
+server through `boxer run`. The flow tier is what turns it into a claim we can make, and
+`boxer install` should offer to write that entry.
+
+**Determinism and cost.** Versions are pinned, because `@latest` drifts and a moving scaffold is
+not an oracle. The environment pack from §2 makes repeat runs cheap: the install happens once per
+host, not once per cell. The tier is slow and network-heavy, so it runs before a release and on
+demand, never in the default gate, and a separate unpinned canary cell may fail loudly when the
+upstream template changes.
+
+**What the oracle checks:** the scaffold landed in the host worktree; no command ran on the host
+(the existing canary); the page answered 200 through the forwarded port; the MCP call actually
+happened, from the trace rather than from the model's prose; the error was fixed; and the sandbox
+survived a restart with its dependencies intact.
+
+**Why it is worth the minutes it costs.** It is the first cell where boxer's own features have to
+work together rather than in isolation — ports, mounts, background processes, packs, an MCP server
+in the guest — and it is the closest thing to what a user will actually do on the first day.
+
+## 6. Other gaps worth closing
 
 - **The requirements document contradicts itself** on devcontainers: one section specifies reading
   a subset, another lists consuming `devcontainer.json` as out of scope. This plan resolves it in
@@ -173,6 +223,7 @@ without touching boxer.
 3. Devcontainer reader, once the keys it maps onto all exist.
 4. Labels, resources and `boxer watch`. Independent of the rest; could run in parallel.
 5. Conductor verification, which is an afternoon and a status-report line.
+6. The flow tier, last, because it consumes everything above and is the acceptance test for it.
 
 Each step keeps the release gate green: unit tests with the race detector, smoke against a real
 microVM, T1 twice with identical verdicts, and the live tiers before a tag.
