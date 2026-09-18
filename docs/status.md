@@ -1,4 +1,4 @@
-# Status: operational slice v0.1.1 (2026-09-18)
+# Status: v0.2.0 (2026-09-18)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
@@ -7,14 +7,17 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 
 ## Proven
 
-Unit tests green; smoke 46/46; T1 **55 pass, 0 fail, 4 skip** (skips are orchestrators that need an install or
-account); T2 live on `zai/glm-5.3-flash` **31 pass, 1 fail, 16 skip** for $0.15 (the fail is the Grok
-tool-mode finding below; skips are Gemini without its own key, scripted-only noncompliant cells,
-and orchestrators). Every cell is a fresh repository and a fresh VM.
+Unit tests green; smoke **49/49** (which now also prints and bounds cold start, warm run and hook
+latency); T1 **61 pass, 0 fail, 2 skip**, and two consecutive full runs gave identical per-cell
+verdicts; T2 live on `zai/glm-5.3-flash` **38 pass, 0 fail, 14 skip** for $0.20. Every cell is a
+fresh repository and a fresh VM.
 
-Since that pass the Paperclip and T3 Code orchestrator cells are driven headlessly and were run on
-their own (2026-09-18): three cells, all pass, $0.048 of live spend. The matrix totals above are
-from the earlier full run and do not yet include them.
+Skips, all of them explained: Gemini CLI and its inside and ACP cells need `GEMINI_API_KEY`
+(the gateway has no Gemini-protocol endpoint), the six noncompliant cells are scripted and run at
+t1 only, and Multica needs an account (`multica setup`).
+
+Measured on Apple Silicon, smolvm 1.16.1: cold start 0.9 s from a host pack, warm `boxer run`
+66 ms, rewrite hook 13 ms.
 
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
@@ -24,7 +27,7 @@ from the earlier full run and do not yet include them.
 | OpenCode | pass | pass | pass 11 s | pass 11 s | 3/3 live |
 | pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
 | Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
-| Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 3/4 live: tool mode costs one denial (below) |
+| Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 4/4 live |
 | DSH | deny-only hooks through the `dsh-hooks-claude-code` bridge; shims | pass | not in table | none | t1 3/3, t2 2/2 live; tool mode only (the bridge ignores `updatedInput`), and boxer provisions on `UserPromptSubmit` because its `SessionStart` is detached |
 
 Inside timings are for a host that already holds the harness pack; the first `boxer shell <h>`
@@ -84,20 +87,19 @@ First and second pass:
 ## Known limits
 
 - One host drives one smolvm at a time (`~/.local/state/boxer/eval.lock`).
-- First harness install per host depends on npm through smolvm's TSI networking; observed 10 s
-  to 11 min and one stall over 13 min. The install is retried once and verified.
+- The first `boxer shell <harness>` on a host pays the harness install (10 s to 11 min, npm over
+  smolvm's TSI networking); every later worktree starts from the host pack in seconds.
 - Claude Code's Keychain login does not enter the VM (`claude setup-token`); Gemini likewise.
-- Grok plugin hooks do not run headless (1.0.34); user or project hooks do. Grok also does not
-  surface session-start context to the model, so tool mode costs one denial on the first shell
-  command; rewrite mode is the right Grok default.
-- Under `session`/`subagent` isolation the MCP run tool resolves the worktree scope (MCP carries
-  no ids); hooks carry them.
-- Codex strips `XDG_STATE_HOME` from its shell, so boxer processes started by its shell and by its
-  MCP server lock different directories; the create race is handled by waiting on smolvm's
-  "already exists" answer.
-- Packs are 130 to 365 MB each under the state directory.
-- OpenCode's `session.created` is not awaited, so a very short first turn can finish before the
-  VM exists; harmless in real use.
+- Grok does not surface session-start context to the model, so tool mode costs one denial on the
+  first shell command; rewrite mode is the right Grok default. Recorded in its dialect.
+- DSH has no session-end signal, so nothing reclaims its sandbox at the end of a session; MCP EOF
+  and `gc` are the fallbacks.
+- Under `session` and `subagent` isolation the MCP run tool resolves the worktree scope (MCP
+  carries no ids); hooks carry them.
+- An orchestrator that creates a worktree and launches a harness into it in one step wants
+  `boxer install git`: T3's provider gives up while a cold VM boots.
+- Packs are 130 to 365 MB each. `gc` prunes them by `idle_timeout`; a long eval session can fill a
+  small disk before that runs.
 
 ## To run the rest
 
