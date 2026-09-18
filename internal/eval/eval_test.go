@@ -149,3 +149,54 @@ func TestWaitDoesNotHangOnASurvivingChild(t *testing.T) {
 		t.Fatal("wait hung after killing a process whose child still holds the pipe")
 	}
 }
+
+// The flow tier's shape: two cells, and a tier that refuses to run anywhere but its own.
+func TestFlowCellsAndAvailability(t *testing.T) {
+	f := Flow{}
+	if _, why := f.Available("t1"); why == "" {
+		t.Fatal("the flow tier must not run inside t1")
+	}
+	cells := f.Cells("flow")
+	if len(cells) != 2 {
+		t.Fatalf("mechanics and agent: %v", cells)
+	}
+	seen := map[string]bool{}
+	for _, c := range cells {
+		seen[c.Scenario] = true
+		if c.Tier != "flow" || c.Harness != "flow" {
+			t.Errorf("cell: %+v", c)
+		}
+	}
+	if !seen["flow"] || !seen["flow-agent"] {
+		t.Fatalf("both scenarios: %v", seen)
+	}
+}
+
+// A step's outcome is printed as it happens, and a failure must carry its reason: the transcript
+// is the only thing kept when a flow cell fails.
+func TestFlowStepStatusAndTail(t *testing.T) {
+	if got := status(nil); got != "ok" {
+		t.Errorf("ok: %q", got)
+	}
+	if got := status(errStub{}); !strings.Contains(got, "FAIL") || !strings.Contains(got, "boom") {
+		t.Errorf("a failure names itself: %q", got)
+	}
+	if got := lastOf("abcdef", 3); got != "def" {
+		t.Errorf("tail: %q", got)
+	}
+	if got := lastOf("ab", 5); got != "ab" {
+		t.Errorf("short input is itself: %q", got)
+	}
+}
+
+type errStub struct{}
+
+func (errStub) Error() string { return "boom" }
+
+// httpOK gives up rather than hanging, and says what it last saw.
+func TestHTTPOKGivesUp(t *testing.T) {
+	err := httpOK("http://127.0.0.1:1/", 300*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "never answered") {
+		t.Fatalf("want a timeout naming the url, got %v", err)
+	}
+}

@@ -848,3 +848,41 @@ func TestStalePacksBoundsTheCacheByCountAsWellAsAge(t *testing.T) {
 		}
 	}
 }
+
+// Dropping the cached environment is what `boxer up --rebuild` does, and it has to be safe to call
+// when there is nothing to drop.
+func TestDropEnvPack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo installing\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+
+	if got, err := e.DropEnvPack(); err != nil || got != "" {
+		t.Fatalf("nothing cached yet: %q %v", got, err)
+	}
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	pack := PackPath(EnvKey("alpine", e.Cfg))
+	got, err := e.DropEnvPack()
+	if err != nil || got != pack {
+		t.Fatalf("drop: %q %v", got, err)
+	}
+	if packReady(pack) {
+		t.Fatal("the pack must be gone")
+	}
+	// A repository with no setup has no environment to drop.
+	plain := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n")
+	e2, err := Resolve(plain, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e2.DropEnvPack(); err != nil || got != "" {
+		t.Fatalf("no setup, nothing to drop: %q %v", got, err)
+	}
+}
