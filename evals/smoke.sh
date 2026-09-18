@@ -123,7 +123,8 @@ check "views are subsets of the package" 'for h in claude-code codex grok gemini
 check "package has no root hooks dir" '[ ! -d "$D/boxer/hooks" ]'
 check "all json valid" 'for f in $(find "$D" -name "*.json"); do python3 -m json.tool "$f" >/dev/null || exit 1; done'
 check "claude bundle has shims" '[ -x "$D/claude-code/bin/npm" ]'
-check "no view but claude mentions claude" '! grep -ril claude "$D" | grep -v "/claude-code/\|/boxer/" | grep -q .'
+# DSH's only hook mechanism is the dsh-hooks-claude-code bridge, so its view names the package.
+check "no view but claude mentions claude" '! grep -ril claude "$D" | grep -v "/claude-code/\|/boxer/\|/com.deepseek.dsh/" | grep -q .'
 
 echo "# install (project layer)"
 mkrepo "$WORK/i" "$BASE"

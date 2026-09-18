@@ -294,6 +294,28 @@ fake model (guest reaches the host's loopback through smolvm's TSI networking) a
 from `uname -a`; and one cell that drives `boxer acp <harness>` with a minimal ACP client. Outside
 cells are unchanged.
 
+### Determinism
+
+T1 is deterministic by construction: a scripted model, a fresh repository and a fresh VM per cell,
+one oracle. It is also checked rather than assumed. Two consecutive full runs on 2026-09-18 gave
+identical per-cell verdicts (61 pass, 0 fail, 2 skip both times):
+
+```sh
+boxer-eval --tier t1 --out a.md && boxer-eval --tier t1 --out b.md
+diff <(grep '^| ' a.md | cut -d'|' -f2,3) <(grep '^| ' b.md | cut -d'|' -f2,3)
+```
+
+A cell that fails on infrastructure is retried once and marked `retried`, so a flake shows in the
+report rather than changing the verdict. Live tiers cannot be deterministic: the model chooses, and
+the adherence tier measures that choice across models instead of pretending it is fixed.
+
+### Performance
+
+`evals/smoke.sh` prints and bounds three numbers every run, so a regression shows up without a
+benchmark suite. On Apple Silicon, smolvm 1.16.1, 2026-09-18: cold start 0.9 s (from a host pack),
+warm `boxer run` 66 ms, rewrite hook 13 ms. The bounds (120 s, 1500 ms, 500 ms) are deliberately
+loose: they catch a regression, not jitter.
+
 ## 5. Work items
 
 Ordered; each lands with its own proof.
