@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   repository starts with dependencies already installed — measured at 0.7 s against 2.9 s, and the
   saving grows with the size of the install. Changing a setup line changes the key, exactly like a
   Docker layer.
+- `boxer up --rebuild` drops the cached environment and runs setup again, and `packs_keep_last`
+  (5 by default) bounds the pack cache by count as well as by age — an environment that changes
+  often leaves a pack per version, all of them younger than `idle_timeout`.
 - **`start` and `ready`.** `setup` installs a service, `start` launches it detached at every VM
   start, and `ready` is polled until it exits zero before boxer reports the sandbox up. A dev
   server or a database now runs in the sandbox and answers the host through a forwarded port,

@@ -46,6 +46,7 @@ idle_timeout = "2h"             # gc reclaims a sandbox unused for this long; "n
 auto_reclaim = true             # an ordinary command sweeps in the background, at most every…
 reclaim_every = "6h"
 min_free_gb  = 5                # below this, boxer pulls images rather than caching them
+packs_keep_last = 5             # keep at most this many unreferenced packs, newest first
 
 [telemetry]
 enabled     = false             # the event stream, off by default
@@ -94,6 +95,11 @@ than however long `bun install` takes.
 The pack is keyed on the image plus the setup commands, like a Docker layer: change a setup line
 and the key changes, the old pack is no longer used, and `boxer gc` reclaims it. `boxer doctor`
 prints the key and whether it is cached yet.
+
+`boxer up --rebuild` throws the cached environment away and runs setup again, for the day an
+install depends on something the setup list does not name. `packs_keep_last` bounds the cache by
+count as well as by age, which is what actually holds it down when an environment changes often:
+every version leaves a pack, and all of them are younger than `idle_timeout`.
 
 One thing to know: snapshotting stops the VM for a moment, and the guest's `/tmp` is memory-backed,
 so anything `setup` writes there is gone afterwards. That was already true across any restart.

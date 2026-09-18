@@ -164,6 +164,7 @@ func identity(name string, args []string) (*flag.FlagSet, *string, *scope.Identi
 func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs, harness, id := identity(cmd, args)
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
+	rebuild := fs.Bool("rebuild", false, "recreate the sandbox and rebuild its environment, ignoring the cached pack (up)")
 	detach := fs.Bool("detach", false, "start the sandbox in a background boxer and return at once (up)")
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	scopeName := fs.String("scope", "", "sandbox name from `boxer ls` (down): act on it without resolving a worktree")
@@ -220,7 +221,18 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			fmt.Fprintf(stdout, "boxer: %s starting in the background\n", e.Scope.Key)
 			return 0
 		}
-		created, err := e.Ensure(true, *recreate)
+		if *rebuild {
+			// The pack is a cache of `setup`, and a cache you cannot drop is a liability: a build
+			// that depends on something outside the setup list (a base image tag that moved, a
+			// dependency resolved at install time) needs a way to start again.
+			if n, err := e.DropEnvPack(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			} else if n != "" {
+				fmt.Fprintf(stdout, "boxer: dropped the cached environment %s\n", filepath.Base(n))
+			}
+		}
+		created, err := e.Ensure(true, *recreate || *rebuild)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -860,7 +872,11 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	if *all {
 		reason = "pack unreferenced (--all)"
 	}
-	for _, p := range box.StalePacks(ms, idle) {
+	keepLast := cfg.PacksKeepLast
+	if *all {
+		keepLast = 1 // --all means the cache goes, not that it is trimmed
+	}
+	for _, p := range box.StalePacks(ms, idle, keepLast) {
 		size := int64(0)
 		if st, err := os.Stat(p); err == nil {
 			size = st.Size()

@@ -475,6 +475,24 @@ func (e *Env) envPack(image string) string {
 	return side
 }
 
+// DropEnvPack deletes this environment's cached pack, so the next provision runs setup again. It
+// returns the path it removed, or "" when there was nothing cached.
+func (e *Env) DropEnvPack() (string, error) {
+	image, _ := e.Image()
+	if image == "" || len(e.Cfg.Setup) == 0 {
+		return "", nil
+	}
+	side := PackPath(EnvKey(image, e.Cfg))
+	if !packReady(side) {
+		return "", nil
+	}
+	if err := os.Remove(side); err != nil {
+		return "", err
+	}
+	_ = os.Remove(strings.TrimSuffix(side, ".smolmachine") + ".lock")
+	return side, nil
+}
+
 // PackEnv snapshots the scope's VM, setup already run, into the pack envPack looks for. Without
 // it every new worktree repeats `bun install` from scratch while a pack of the bare image sits
 // beside it, which is the most expensive thing about boxer before 1.1.
@@ -602,21 +620,40 @@ func (e *Env) PackHarness() {
 	e.event(obs.Pack, outcome, time.Since(start), map[string]any{"kind": "harness", "image": image, "path": side})
 }
 
-// StalePacks lists packs no machine references (by its boxer.pack label) whose last use is
-// older than idle; idle <= 0 disables pruning, matching idle_timeout = "never".
-func StalePacks(ms []vm.Machine, idle time.Duration) []string {
-	if idle <= 0 {
-		return nil
-	}
+// StalePacks lists packs no machine references (by its boxer.pack label), by two rules that catch
+// different things. Age: unused for longer than idle, which is `idle_timeout`; idle <= 0 disables
+// it, matching `idle_timeout = "never"`. Count: beyond keepLast, oldest first, which is what
+// catches an environment that changes often — a pack per version, every one of them young.
+func StalePacks(ms []vm.Machine, idle time.Duration, keepLast int) []string {
 	used := map[string]bool{}
 	for _, m := range ms {
 		used[m.Labels[vm.LabelPrefix+"pack"]] = true
 	}
 	packs, _ := filepath.Glob(filepath.Join(PackDir(), "*.smolmachine"))
-	var out []string
+	type pack struct {
+		path string
+		age  time.Time
+	}
+	var unused []pack
 	for _, p := range packs {
-		if st, err := os.Stat(p); err == nil && !used[p] && time.Since(st.ModTime()) > idle {
-			out = append(out, p)
+		if st, err := os.Stat(p); err == nil && !used[p] {
+			unused = append(unused, pack{p, st.ModTime()})
+		}
+	}
+	sort.Slice(unused, func(i, j int) bool { return unused[i].age.After(unused[j].age) }) // newest first
+	stale := map[string]bool{}
+	for i, p := range unused {
+		if idle > 0 && time.Since(p.age) > idle {
+			stale[p.path] = true
+		}
+		if keepLast > 0 && i >= keepLast {
+			stale[p.path] = true
+		}
+	}
+	var out []string
+	for _, p := range unused {
+		if stale[p.path] {
+			out = append(out, p.path)
 		}
 	}
 	return out

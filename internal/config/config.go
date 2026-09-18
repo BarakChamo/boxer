@@ -66,8 +66,12 @@ type Config struct {
 	// MinFreeGB is the margin boxer refuses to spend on its own cache. Packing writes hundreds of
 	// megabytes; below this the pack is skipped and the image pulled instead, because a full disk
 	// breaks every VM on the host, not only boxer's.
-	MinFreeGB     float64 `toml:"min_free_gb"`
-	ReuseExisting bool    `toml:"reuse_existing"`
+	MinFreeGB float64 `toml:"min_free_gb"`
+	// PacksKeepLast bounds the pack cache by count as well as by age: an environment that changes
+	// often leaves a pack per version, each of them hundreds of megabytes, and all of them younger
+	// than idle_timeout. 0 keeps every pack the idle rule allows.
+	PacksKeepLast int  `toml:"packs_keep_last"`
+	ReuseExisting bool `toml:"reuse_existing"`
 	// WarmOnSessionStart makes the SessionStart hook provision in a detached `boxer up` and
 	// return at once, so the session is never blocked on a VM create.
 	WarmOnSessionStart bool `toml:"warm_on_session_start"`
@@ -135,6 +139,7 @@ func Defaults() Config {
 		AutoReclaim:           true,
 		ReclaimEvery:          "6h",
 		MinFreeGB:             5,
+		PacksKeepLast:         5,
 		ReadyTimeout:          "60s",
 		ReuseExisting:         true,
 		Integration:           "outside",

@@ -389,3 +389,31 @@ func TestWatchStreamsTheLifecycle(t *testing.T) {
 		}
 	}
 }
+
+// --rebuild drops the cached environment, because a cache you cannot drop is a liability: an
+// install that depends on something outside the setup list needs a way to start again.
+func TestUpRebuildDropsTheCachedEnvironment(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo installing\"]\n")
+
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	var r map[string]any
+	call(t, &r, "doctor", "--json")
+	if env, _ := r["environment"].(map[string]any); env["cached"] != true {
+		t.Fatalf("the first sandbox caches its environment: %v", r["environment"])
+	}
+	if code, out := call(t, nil, "up", "--rebuild"); code != 0 || !strings.Contains(out, "dropped the cached environment") {
+		t.Fatalf("--rebuild must drop it and say so: %d %s", code, out)
+	}
+	// It is cached again afterwards, because the rebuild ran setup and packed the result.
+	var after map[string]any
+	call(t, &after, "doctor", "--json")
+	if env, _ := after["environment"].(map[string]any); env["cached"] != true {
+		t.Fatalf("a rebuild leaves a fresh cache: %v", after["environment"])
+	}
+}

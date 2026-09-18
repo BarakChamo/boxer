@@ -2,6 +2,7 @@ package box
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -226,14 +227,14 @@ func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
 	if strings.Count(s, "pack create --from-vm") != 1 || !strings.Contains(s, "--from "+side) || !strings.Contains(s, "--label boxer.pack="+side) {
 		t.Fatalf("want one from-vm pack, the recreate from it with a boxer.pack label, log:\n%s", s)
 	}
-	stale := StalePacks([]vm.Machine{{Labels: map[string]string{"boxer.pack": side}}}, time.Nanosecond)
+	stale := StalePacks([]vm.Machine{{Labels: map[string]string{"boxer.pack": side}}}, time.Nanosecond, 0)
 	if len(stale) != 1 || stale[0] == side {
 		t.Fatalf("referenced pack must survive, the image pack is stale: %v", stale)
 	}
-	if got := StalePacks(nil, 0); got != nil {
+	if got := StalePacks(nil, 0, 0); got != nil {
 		t.Fatalf("idle_timeout never must prune nothing: %v", got)
 	}
-	if got := StalePacks(nil, time.Hour); got != nil {
+	if got := StalePacks(nil, time.Hour, 0); got != nil {
 		t.Fatalf("fresh packs are not stale: %v", got)
 	}
 }
@@ -453,14 +454,14 @@ func TestStalePacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	ms := []vm.Machine{{Labels: map[string]string{vm.LabelPrefix + "pack": used}}}
-	got := StalePacks(ms, time.Minute)
+	got := StalePacks(ms, time.Minute, 0)
 	if len(got) != 1 || got[0] != free {
 		t.Fatalf("only the unreferenced, idle pack is stale: %v", got)
 	}
-	if got := StalePacks(ms, 0); got != nil {
+	if got := StalePacks(ms, 0, 0); got != nil {
 		t.Fatalf(`idle_timeout = "never" prunes nothing: %v`, got)
 	}
-	if got := StalePacks(nil, 2*time.Hour); got != nil {
+	if got := StalePacks(nil, 2*time.Hour, 0); got != nil {
 		t.Fatalf("packs younger than the timeout survive: %v", got)
 	}
 }
@@ -801,5 +802,49 @@ func TestServicesRestartAfterAStopButSetupDoesNot(t *testing.T) {
 	}
 	if n := strings.Count(s, "nohup sh -lc 'echo serving'"); n != 2 {
 		t.Fatalf("services must start again after a restart, started %d times:\n%s", n, s)
+	}
+}
+
+// Age is not the only way a pack cache grows. An environment that changes often leaves one pack
+// per version, every one of them younger than the idle timeout and none of them referenced, so a
+// count bound is what actually holds the cache down.
+func TestStalePacksBoundsTheCacheByCountAsWellAsAge(t *testing.T) {
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	now := time.Now()
+	var paths []string
+	for i := 0; i < 5; i++ {
+		p := filepath.Join(packs, fmt.Sprintf("p%d.smolmachine", i))
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// p0 newest, p4 oldest.
+		age := now.Add(-time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, age, age); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+
+	// Nothing is old enough to be idle-stale, and no count bound: nothing is reclaimed.
+	if got := StalePacks(nil, time.Hour, 0); len(got) != 0 {
+		t.Fatalf("young, unbounded: %v", got)
+	}
+	// Keep the two newest: the other three go, oldest included.
+	got := StalePacks(nil, time.Hour, 2)
+	if len(got) != 3 {
+		t.Fatalf("keep_last = 2 of 5 leaves 3 stale: %v", got)
+	}
+	for _, p := range got {
+		if p == paths[0] || p == paths[1] {
+			t.Fatalf("the newest packs must survive: %v", got)
+		}
+	}
+	// A referenced pack is never stale, whatever the count says.
+	ms := []vm.Machine{{Labels: map[string]string{vm.LabelPrefix + "pack": paths[4]}}}
+	for _, p := range StalePacks(ms, time.Hour, 1) {
+		if p == paths[4] {
+			t.Fatal("a pack a machine is using must never be reclaimed")
+		}
 	}
 }
