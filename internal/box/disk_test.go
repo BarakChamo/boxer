@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/vm"
 )
 
 // The disk guard exists because this machine filled up twice while boxer was being written, both
@@ -164,5 +165,53 @@ func TestReclaimDetachedIsOptIn(t *testing.T) {
 	e2.ReclaimDetached()
 	if ran() {
 		t.Fatal("auto_reclaim = false must turn the sweep off")
+	}
+}
+
+// A machine's disks are sparse: one given 20 GB and using 300 MB is 20 GB long and 300 MB
+// allocated. Reporting the length would tell every user their sandbox costs twenty gigabytes,
+// which is both alarming and false, so this measures blocks the way du does.
+func TestDirSizeCountsAllocatedBlocks(t *testing.T) {
+	dir := t.TempDir()
+	dense := filepath.Join(dir, "dense")
+	if err := os.WriteFile(dense, make([]byte, 64*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sparse := filepath.Join(dir, "sparse")
+	f, err := os.Create(sparse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1 << 30); err != nil { // a gigabyte of nothing
+		t.Fatal(err)
+	}
+	f.Close()
+
+	got, ok := dirSize(dir)
+	if !ok {
+		t.Fatal("a readable directory must measure cleanly")
+	}
+	if got >= 1<<30 {
+		t.Fatalf("a hole is not disk: %d bytes for a sparse gigabyte", got)
+	}
+	if got < 64*1024 {
+		t.Fatalf("the real bytes must still count: %d", got)
+	}
+}
+
+// Resource measurement must degrade rather than fail: a stopped machine has no process, and a
+// data directory that cannot be read is unknown, not zero.
+func TestMachineResourcesDegradeHonestly(t *testing.T) {
+	stopped := MachineResources(vm.Machine{State: "stopped", CPUs: 2, MemoryMiB: 1024}, "")
+	if stopped.CPUs != 2 || stopped.MemoryMiB != 1024 || stopped.RSSMiB != 0 || !stopped.MeasuredAll {
+		t.Fatalf("a stopped machine reports its allocation and nothing else: %+v", stopped)
+	}
+	gone := MachineResources(vm.Machine{State: "running", PID: 1 << 30}, filepath.Join(t.TempDir(), "missing"))
+	if gone.MeasuredAll {
+		t.Fatalf("an unreadable process and directory must be reported as unmeasured: %+v", gone)
+	}
+	live := MachineResources(vm.Machine{State: "running", PID: os.Getpid()}, t.TempDir())
+	if live.RSSMiB <= 0 || !live.MeasuredAll {
+		t.Fatalf("this test's own process is measurable: %+v", live)
 	}
 }

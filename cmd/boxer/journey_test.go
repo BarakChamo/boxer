@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
@@ -273,5 +276,116 @@ func TestDoctorReportsTheEnvironmentCache(t *testing.T) {
 	var plain map[string]any
 	if code, _ := call(t, &plain, "doctor", "--json"); code != 0 || plain["environment"] != nil {
 		t.Fatalf("no setup, no environment row: %v", plain["environment"])
+	}
+}
+
+// A listing that says "sb-4f2a" is a list of hashes; one that says which harness and session it
+// belongs to is something a person can act on. The identity is in the scope key already, but a
+// hash cannot be read back, so it is recorded as labels when the harness says.
+func TestListingNamesWhoASandboxBelongsTo(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+
+	if code, out := call(t, nil, "up", "--harness", "claude-code", "--session", "4f2a9c11"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	var rows []map[string]any
+	if code, out := call(t, &rows, "ls", "--json"); code != 0 || len(rows) != 1 {
+		t.Fatalf("ls: %d %v %s", code, rows, out)
+	}
+	if rows[0]["harness"] != "claude-code" || rows[0]["session"] != "4f2a9c11" {
+		t.Fatalf("the listing must name the harness and session: %v", rows[0])
+	}
+	if code, out := call(t, nil, "ls", "--resources"); code != 0 || !strings.Contains(out, "claude-code/4f2a9c") {
+		t.Fatalf("the human listing shows the attachment: %d %s", code, out)
+	}
+
+	// Resources are measured only when asked for, because measuring costs a process call and a
+	// directory walk per machine.
+	if code, _ := call(t, &rows, "ls", "--json"); code != 0 || rows[0]["resources"] != nil {
+		t.Fatalf("a plain listing must not measure: %v", rows[0]["resources"])
+	}
+	var measured []map[string]any
+	if code, out := call(t, &measured, "ls", "--resources", "--json"); code != 0 || measured[0]["resources"] == nil {
+		t.Fatalf("--resources must measure: %d %s", code, out)
+	}
+	res := measured[0]["resources"].(map[string]any)
+	if res["cpus"].(float64) <= 0 || res["memory_mib"].(float64) <= 0 {
+		t.Fatalf("allocation comes from smolvm: %v", res)
+	}
+}
+
+// watch is the live channel an interface needs: one process to tail rather than a poll loop. It
+// is line-delimited JSON on purpose — a stream has no closing bracket, and a consumer must be able
+// to read each line as it arrives.
+func TestWatchStreamsTheLifecycle(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+
+	r, w := io.Pipe()
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"watch", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard)
+	}()
+	t.Cleanup(func() { _ = r.Close() })
+
+	lines := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+
+	if code, out := call(t, nil, "up", "--harness", "claude-code", "--session", "s1"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	changes := map[string]string{}
+	deadline := time.After(10 * time.Second)
+	for len(changes) < 1 {
+		select {
+		case line := <-lines:
+			var e struct {
+				Change  string `json:"change"`
+				Sandbox struct {
+					Scope   string `json:"scope"`
+					Harness string `json:"harness"`
+				} `json:"sandbox"`
+			}
+			if json.Unmarshal([]byte(line), &e) != nil {
+				t.Fatalf("every line must be its own JSON document: %q", line)
+			}
+			if e.Sandbox.Harness != "claude-code" {
+				t.Fatalf("the stream must name who the sandbox belongs to: %q", line)
+			}
+			changes[e.Change] = e.Sandbox.Scope
+		case <-deadline:
+			t.Fatalf("no change seen; got %v", changes)
+		}
+	}
+	if changes["created"] == "" && changes["present"] == "" && changes["running"] == "" {
+		t.Fatalf("a new sandbox must appear in the stream: %v", changes)
+	}
+	// Deleting it ends in "gone", which is what tells an interface to drop the row.
+	scope := changes["created"]
+	if scope == "" {
+		scope = changes["running"]
+	}
+	if err := client.Delete(scope); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case line := <-lines:
+			if strings.Contains(line, `"change":"gone"`) {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("a deleted sandbox must be reported gone")
+		}
 	}
 }

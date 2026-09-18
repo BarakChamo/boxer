@@ -62,6 +62,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer tasks [--json]             the command lines this repository declares in [tasks]
   boxer run --task <name>          run one of them in the sandbox
   boxer logs [--scope NAME] [-n N] [--json]  read the event log ([telemetry] sink = "file")
+  boxer watch [--json]             stream sandbox state changes as they happen
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
@@ -138,6 +139,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return gcCmd(rest, stdout, stderr)
 	case "logs":
 		return logsCmd(rest, stdout, stderr)
+	case "watch":
+		return watchCmd(rest, stdout, stderr)
 	case "up", "run", "down", "status", "doctor", "brief", "tasks":
 		return scoped(cmd, rest, stdin, stdout, stderr)
 	case "shell", "acp":
@@ -333,12 +336,53 @@ type machineJSON struct {
 	Image       string  `json:"image"`
 	CreatedAt   int64   `json:"created_at"`
 	LastUsed    *string `json:"last_used"`
+	// Who the sandbox belongs to, when the harness said: a listing that can name the session is
+	// the difference between a list of hashes and something a person can act on.
+	Harness string `json:"harness,omitempty"`
+	Session string `json:"session,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	// What it costs, when asked for: allocation, real use, and disk. Measuring means running `ps`
+	// and walking a directory per machine, so a plain listing does not pay for it.
+	Resources *box.Resources `json:"resources,omitempty"`
+}
+
+// withResources measures one machine. Failure to measure is reported in the row rather than as an
+// error, because a listing that dies over a resource number is worse than one that is honest
+// about what it could not read.
+// attachment names who a sandbox belongs to, for the human listing: the harness and the short form
+// of the session, or the isolation when nothing said.
+func attachment(m machineJSON) string {
+	if m.Harness == "" {
+		return m.Isolation
+	}
+	if m.Session == "" {
+		return m.Harness
+	}
+	id := m.Session
+	if len(id) > 6 {
+		id = id[:6]
+	}
+	return m.Harness + "/" + id
+}
+
+func withResources(client vm.Client, m vm.Machine, row machineJSON) machineJSON {
+	dir, err := client.DataDir(m.Name)
+	if err != nil {
+		dir = ""
+	}
+	r := box.MachineResources(m, dir)
+	if err != nil {
+		r.MeasuredAll = false
+	}
+	row.Resources = &r
+	return row
 }
 
 func machineRow(m vm.Machine) machineJSON {
 	return machineJSON{
 		Scope: m.Name, State: m.State, Image: m.Image, CreatedAt: m.CreatedAt,
 		Isolation: m.Labels["boxer.isolation"], Worktree: m.Labels["boxer.root"], Integration: m.Labels["boxer.integration"],
+		Harness: m.Labels["boxer.harness"], Session: m.Labels["boxer.session"], Agent: m.Labels["boxer.agent"],
 		LastUsed: lastUsedJSON(m.Name),
 	}
 }
@@ -688,11 +732,13 @@ func isShim(path string) bool {
 func lsCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print a JSON array")
+	resources := fs.Bool("resources", false, "measure what each sandbox is using: memory, CPU and disk")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	ms, err := vm.New().Owned()
+	client := vm.New()
+	ms, err := client.Owned()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -700,9 +746,29 @@ func lsCmd(args []string, stdout, stderr io.Writer) int {
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
 	rows := make([]machineJSON, 0, len(ms))
 	for _, m := range ms {
-		rows = append(rows, machineRow(m))
+		row := machineRow(m)
+		if *resources {
+			row = withResources(client, m, row)
+		}
+		rows = append(rows, row)
 	}
 	if emit(stdout, rows, *asJSON) {
+		return 0
+	}
+	if *resources {
+		fmt.Fprintf(stdout, "%-16s %-9s %-14s %-9s %-8s %s\n", "SCOPE", "STATE", "ATTACHED", "MEMORY", "DISK", "WORKTREE")
+		for _, m := range rows {
+			mem, disk := "-", "-"
+			if m.Resources != nil {
+				if m.Resources.RSSMiB > 0 {
+					mem = fmt.Sprintf("%d MiB", m.Resources.RSSMiB)
+				}
+				if m.Resources.DiskBytes > 0 {
+					disk = box.HumanBytes(m.Resources.DiskBytes)
+				}
+			}
+			fmt.Fprintf(stdout, "%-16s %-9s %-14s %-9s %-8s %s\n", m.Scope, m.State, attachment(m), mem, disk, m.Worktree)
+		}
 		return 0
 	}
 	fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", "SCOPE", "STATE", "ISOLATION", "WORKTREE")
@@ -1200,4 +1266,65 @@ func tasksOrEmpty(m map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	return m
+}
+
+// watchCmd streams what is happening, so an interface tails one process instead of polling. Two
+// sources, one line-delimited stream: state changes it notices by comparing successive listings,
+// and events from the file sink when telemetry is on. Line-delimited JSON rather than an array,
+// because a stream has no end and a consumer must be able to read it as it arrives.
+func watchCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "one JSON document per line")
+	interval := fs.Duration("interval", time.Second, "how often to look for state changes")
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	client := vm.New()
+	seen := map[string]string{}
+	first := true
+	enc := json.NewEncoder(stdout)
+	for {
+		ms, err := client.Owned()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		now := map[string]string{}
+		for _, m := range ms {
+			now[m.Name] = m.State
+			row := machineRow(m)
+			switch was, had := seen[m.Name]; {
+			case !had && first:
+				emitWatch(enc, stdout, *asJSON, "present", row)
+			case !had:
+				emitWatch(enc, stdout, *asJSON, "created", row)
+			case was != m.State:
+				emitWatch(enc, stdout, *asJSON, m.State, row)
+			}
+		}
+		for name := range seen {
+			if _, still := now[name]; !still {
+				emitWatch(enc, stdout, *asJSON, "gone", machineJSON{Scope: name, State: "gone"})
+			}
+		}
+		seen, first = now, false
+		time.Sleep(*interval)
+	}
+}
+
+// watchEvent is one line of the stream: what happened, to which sandbox, when.
+type watchEvent struct {
+	Time    string      `json:"time"`
+	Change  string      `json:"change"`
+	Sandbox machineJSON `json:"sandbox"`
+}
+
+func emitWatch(enc *json.Encoder, w io.Writer, asJSON bool, change string, row machineJSON) {
+	if asJSON {
+		_ = enc.Encode(watchEvent{Time: time.Now().UTC().Format(time.RFC3339), Change: change, Sandbox: row})
+		return
+	}
+	who := attachment(row)
+	fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", time.Now().Format("15:04:05"), change, row.Scope, who, row.Worktree)
 }

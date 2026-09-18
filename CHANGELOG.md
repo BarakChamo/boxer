@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   environment pack; secrets stay in `secrets` and `env_passthrough`, which are read from the host
   at run time and never snapshotted. `mounts` adds host directories beside the worktree, with `~`
   expanded, usually for a shared dependency cache.
+- **A core a user interface can sit on.** A sandbox now records which harness, session and agent it
+  belongs to, so a listing names "claude-code/4f2a9c" instead of a hash the identity was hashed
+  into. `boxer ls --resources` measures what each one costs: allocation from smolvm, resident
+  memory and CPU from its process, and disk from its data directory in allocated blocks, the way
+  `du` counts, because the disks are sparse and their length is not their cost. `boxer watch`
+  streams state changes as line-delimited JSON, so an interface tails one process instead of
+  polling. No interface ships; these shapes are in `docs/api.md` and stable from 1.1.
 - `boxer doctor` reports the environment's cache key and whether it is cached yet, so "will this
   worktree have to run setup again" is answerable without watching a VM boot.
 

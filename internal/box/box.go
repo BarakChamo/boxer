@@ -316,6 +316,14 @@ func (e *Env) create() error {
 		vm.LabelPrefix + "root":        e.Scope.Root,
 		vm.LabelPrefix + "integration": e.Cfg.Integration,
 	}
+	// Who this sandbox belongs to. The identity is already in the scope key, but a hash cannot be
+	// read back: without these labels a listing can say "sb-4f2a" and not "Claude Code, session
+	// 4f2a", which is the difference between a list and something a person can act on.
+	for k, v := range map[string]string{"harness": e.Harness, "session": e.ID.SessionID, "agent": e.ID.AgentID} {
+		if v != "" {
+			labels[vm.LabelPrefix+k] = v
+		}
+	}
 	volumes := []string{e.Scope.Root + ":" + e.MountAt()}
 	for _, m := range e.Cfg.Mounts {
 		volumes = append(volumes, expandMount(m))

@@ -137,3 +137,21 @@ func TestFakeModelsSeveralMachines(t *testing.T) {
 		t.Fatalf("after delete: %v", owned)
 	}
 }
+
+// DataDir is where a machine's disks live, and it is the only way to measure what a sandbox costs
+// on disk. A machine that does not exist has no directory, which is "unknown" to the caller rather
+// than an empty path it might then walk.
+func TestDataDir(t *testing.T) {
+	vmtest.Install(t)
+	c := vm.New()
+	if err := c.Create(vm.CreateSpec{Name: "sb-data", Labels: map[string]string{"boxer.scope": "sb-data"}}); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := c.DataDir("sb-data")
+	if err != nil || dir == "" {
+		t.Fatalf("a live machine has a data directory: %q %v", dir, err)
+	}
+	if _, err := c.DataDir("sb-nosuchmachine"); err == nil {
+		t.Fatal("a machine that does not exist has no data directory")
+	}
+}

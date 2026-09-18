@@ -85,6 +85,19 @@ type Machine struct {
 	Image     string            `json:"image"`
 	Labels    map[string]string `json:"labels"`
 	CreatedAt int64             `json:"created_at"`
+	// What smolvm allocated and where its process is. A sandbox costs real memory and real disk,
+	// and "what is this costing me" is the first question anyone watching them asks.
+	PID       int `json:"pid"`
+	CPUs      int `json:"cpus"`
+	MemoryMiB int `json:"memory_mib"`
+}
+
+// DataDir is where smolvm keeps a machine's disks. It is the machine's real cost on disk, and it
+// is not derivable from anything else boxer knows, so it is asked for rather than guessed. An
+// error means "unknown", which callers report as unmeasured rather than as zero.
+func (c Client) DataDir(name string) (string, error) {
+	out, err := c.output("machine", "data-dir", "--name", name)
+	return strings.TrimSpace(out), err
 }
 
 // Running reports whether the machine can accept exec.

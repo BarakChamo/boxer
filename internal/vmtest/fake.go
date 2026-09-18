@@ -32,9 +32,12 @@ fail="$faildir/$(echo "$verb" | tr ' /-' '___')"
 if [ -f "$fail" ]; then echo "Error: $(cat "$fail")" >&2; exit 1; fi
 
 machine_json() {
-  n=$(basename "$1"); s=$(sed -n 1p "$1"); root=$(sed -n 2p "$1"); img=$(sed -n 3p "$1"); pack=$(sed -n 4p "$1")
-  printf '{"name":"%s","state":"%s","image":"%s","labels":{"boxer.scope":"%s","boxer.root":"%s","boxer.isolation":"worktree","boxer.pack":"%s"},"created_at":1}' \
-    "$n" "$s" "$img" "$n" "$root" "$pack"
+  n=$(basename "$1"); s=$(sed -n 1p "$1"); img=$(sed -n 3p "$1"); labels=$(sed -n 5p "$1")
+  # Labels are whatever was passed at create time, as smolvm does it: a fake that models a fixed
+  # set silently drops every label added later, and the test that checks for one proves nothing.
+  [ -n "$labels" ] || labels='"boxer.scope":"'"$n"'"'
+  printf '{"name":"%s","state":"%s","image":"%s","labels":{%s},"created_at":1,"pid":%s,"cpus":2,"memory_mib":1024}' \
+    "$n" "$s" "$img" "$labels" "$$"
 }
 
 case "$verb" in
@@ -51,11 +54,15 @@ case "$verb" in
     if [ -f "$dir/$name" ]; then machine_json "$dir/$name"; echo
     else echo "Error: config operation failed: machine status: machine not found" >&2; exit 1; fi ;;
   "machine create")
-    shift 2; name=""; root=""; img="$image"; pack=""
+    shift 2; name=""; root=""; img="$image"; pack=""; labels=""
     while [ $# -gt 0 ]; do
       case "$1" in
         -n|--name) name="$2"; shift;;
-        --label) case "$2" in boxer.root=*) root="${2#boxer.root=}";; boxer.pack=*) pack="${2#boxer.pack=}";; esac; shift;;
+        --label)
+          case "$2" in boxer.root=*) root="${2#boxer.root=}";; boxer.pack=*) pack="${2#boxer.pack=}";; esac
+          k=${2%%=*}; v=${2#*=}
+          labels="$labels${labels:+,}\"$k\":\"$v\""
+          shift;;
         --from) pack="$2"; shift;;
         -I) [ "$2" = "fail-image" ] && { echo "Error: image pull failed" >&2; exit 1; }; [ -n "$2" ] && img="$2"; shift;;
       esac; shift
@@ -66,7 +73,7 @@ case "$verb" in
     if [ -n "$pack" ] && [ -f "$pack" ] && [ "$(cat "$pack")" != "fake-pack" ]; then
       echo "Error: agent operation failed: read checkpoint footer: I/O error: sidecar file too small to contain footer" >&2; exit 1
     fi
-    printf '%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" > "$dir/$name"
+    printf '%s\n%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" "$labels" > "$dir/$name"
     # Restore the guest state the pack carries, so a VM created from it skips what it already has.
     if [ -n "$pack" ]; then
       for m in "$pack".marker-*; do
@@ -133,6 +140,13 @@ case "$verb" in
       esac
     fi
     exec "$@" ;;
+  "machine data-dir")
+    # Real smolvm prints where a machine's disks live; the fake points at its own state, which is
+    # small but real, so a resource measurement has something honest to walk.
+    shift 2; name=""
+    while [ $# -gt 0 ]; do case "$1" in -n|--name) name="$2"; shift;; esac; shift; done
+    [ -f "$dir/$name" ] || { echo "Error: machine not found" >&2; exit 1; }
+    printf '%s\n' "$dir" ;;
   "--version")
     echo "${FAKE_VERSION:-smolvm 0.0.0-fake}" ;;
 esac

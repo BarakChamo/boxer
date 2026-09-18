@@ -234,6 +234,45 @@ on stderr, as `{"error": …}` under `--json`, and as the text of a failed MCP t
 }
 ```
 
+### `boxer ls --resources`
+
+Each row gains a `resources` object. Allocation comes from smolvm; resident memory and CPU are read
+from the machine's own process on the host; disk is the machine's data directory measured in
+allocated blocks, the way `du` counts, because the disks are sparse and their length is not their
+cost. `measured_all` is false when something could not be read, which is the honest answer for a
+stopped machine's process or an unreadable directory.
+
+```json
+[
+  {
+    "scope": "sb-4f2a9c11",
+    "state": "running",
+    "worktree": "/Users/you/project",
+    "harness": "claude-code",
+    "session": "4f2a9c11",
+    "resources": {
+      "cpus": 4, "memory_mib": 4096, "pid": 77467,
+      "rss_mib": 279, "cpu_percent": 4.2, "disk_bytes": 124780544, "measured_all": true
+    }
+  }
+]
+```
+
+`harness`, `session` and `agent` appear on every row when the harness said who it was. They are
+absent, not empty, when it did not.
+
+### `boxer watch --json`
+
+A stream, so **one JSON document per line** rather than an array: it has no end, and a consumer
+reads each line as it arrives. `change` is `present` for what already existed when the watch
+started, then `created`, the machine's state as it changes, and `gone` when it is deleted.
+
+```json
+{"time":"2026-09-19T00:23:13Z","change":"created","sandbox":{"scope":"sb-4f2a9c11","state":"stopped","harness":"claude-code","session":"4f2a9c11","worktree":"/Users/you/project"}}
+{"time":"2026-09-19T00:23:13Z","change":"running","sandbox":{"scope":"sb-4f2a9c11","state":"running","harness":"claude-code","session":"4f2a9c11","worktree":"/Users/you/project"}}
+{"time":"2026-09-19T00:23:15Z","change":"gone","sandbox":{"scope":"sb-4f2a9c11","state":"gone"}}
+```
+
 ## Go: `pkg/boxer`
 
 The only importable package. Thin delegation to the internals; types are aliases

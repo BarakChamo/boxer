@@ -2,7 +2,7 @@
 # A floor never goes down: when a package gains coverage, raise its floor in the same change.
 # internal/eval is the evaluation harness itself; it is proven by running the tiers, not by unit
 # coverage, so its floor is deliberately low and rises as its pure logic gets tests.
-internal/box       80
+internal/box       81
 internal/bundle    87
 internal/config    66
 internal/decide    99
@@ -15,6 +15,6 @@ internal/mcp       94
 internal/obs       81
 internal/scope     87
 internal/shim      67
-internal/vm        75
+internal/vm        78
 pkg/boxer          78
-cmd/boxer          74
+cmd/boxer          75

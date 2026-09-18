@@ -2,9 +2,14 @@ package box
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/BarakChamo/boxer/internal/vm"
 )
 
 // Footprint is what boxer costs this host in bytes, and what can be reclaimed. Storage is the
@@ -107,4 +112,87 @@ func ReclaimDue(every time.Duration) bool {
 	now := time.Now()
 	_ = os.Chtimes(stamp, now, now)
 	return true
+}
+
+// Resources is what one sandbox costs: what smolvm allocated, what its process is actually using,
+// and what it holds on disk. Allocation alone is misleading — a VM given 4 GB may be using 200 MB —
+// and disk is the part that surprises people, because it grows quietly.
+type Resources struct {
+	CPUs        int     `json:"cpus"`                   // allocated
+	MemoryMiB   int     `json:"memory_mib"`             // allocated
+	PID         int     `json:"pid,omitempty"`          // the machine's process on the host
+	RSSMiB      int     `json:"rss_mib,omitempty"`      // actually resident
+	CPUPercent  float64 `json:"cpu_percent,omitempty"`  // as the host sees it
+	DiskBytes   int64   `json:"disk_bytes,omitempty"`   // the machine's data directory
+	MeasuredAll bool    `json:"measured_all,omitempty"` // false when something could not be read
+}
+
+// Usage of one machine. A stopped machine has no process, so only its disk is measurable, and the
+// caller gets zeros rather than an error: a resource report that fails is worse than one that is
+// partial and says so.
+func MachineResources(m vm.Machine, dataDir string) Resources {
+	r := Resources{CPUs: m.CPUs, MemoryMiB: m.MemoryMiB, PID: m.PID, MeasuredAll: true}
+	if m.PID > 0 {
+		if rss, cpu, ok := processUsage(m.PID); ok {
+			r.RSSMiB, r.CPUPercent = rss, cpu
+		} else {
+			r.MeasuredAll = false
+		}
+	}
+	if dataDir != "" {
+		if n, ok := dirSize(dataDir); ok {
+			r.DiskBytes = n
+		} else {
+			r.MeasuredAll = false
+		}
+	}
+	return r
+}
+
+// processUsage reads resident memory and CPU share from the host's own process table. `ps` is the
+// portable answer here: /proc does not exist on macOS and a cgo dependency for two numbers would
+// cost more than it returns.
+func processUsage(pid int) (rssMiB int, cpuPercent float64, ok bool) {
+	out, err := exec.Command("ps", "-o", "rss=,%cpu=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 2 {
+		return 0, 0, false
+	}
+	kb, err1 := strconv.Atoi(f[0])
+	cpu, err2 := strconv.ParseFloat(f[1], 64)
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return kb / 1024, cpu, true
+}
+
+// dirSize sums what a directory tree actually occupies, in allocated blocks rather than apparent
+// size. A machine's disks are sparse files: a VM given a 20 GB disk and using 300 MB reports 20 GB
+// by length and 300 MB by blocks, and only the second is a number anyone can act on. This is what
+// `du` reports and why it disagrees with `ls -l`.
+func dirSize(dir string) (int64, bool) {
+	var total int64
+	ok := true
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			ok = false
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if st, isUnix := info.Sys().(*syscall.Stat_t); isUnix {
+			total += st.Blocks * 512
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		return total, false
+	}
+	return total, ok
 }
