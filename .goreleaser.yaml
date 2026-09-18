@@ -65,10 +65,14 @@ signs:
 # macOS only; Linux users take install.sh or `go install`.
 homebrew_casks:
   - name: boxer
+    # The tap is a separate repository and needs a token this one does not have. Without it the
+    # cask is still built and attached to the release; only the push to the tap is skipped, so a
+    # release never fails for want of a secret.
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}false{{ end }}'
     repository:
       owner: BarakChamo
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     homepage: https://github.com/BarakChamo/boxer
     description: Runs coding-agent shell commands in a smolvm microVM keyed to the git worktree
     directory: Casks
