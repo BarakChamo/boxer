@@ -505,3 +505,26 @@ func TestUnusablePackIsDeletedAndTheImagePulled(t *testing.T) {
 		t.Fatalf("want one create from the pack and a retry without it:\n%s", b)
 	}
 }
+
+// smolvm takes a local image as well as a registry reference: a `docker save` archive, a rootfs
+// directory, or stdin. Nothing is pulled for those, so nothing needs opening in the allowlist —
+// and asking for host "." or for Docker Hub, as this used to, is both useless and wider than the
+// truth.
+func TestLocalImagesNeedNoRegistryHosts(t *testing.T) {
+	for _, img := range []string{"./myapp.tar", "../build/rootfs", "/abs/path/image.tar", "~/img.tar", "-"} {
+		if !IsLocalImage(img) {
+			t.Errorf("%q should be local", img)
+		}
+		if hosts := registryHosts(img); hosts != nil {
+			t.Errorf("%q needs no registry hosts, got %v", img, hosts)
+		}
+	}
+	for _, img := range []string{"alpine", "node:24-bookworm", "ghcr.io/o/i:t", "mirror.gcr.io/library/debian"} {
+		if IsLocalImage(img) {
+			t.Errorf("%q is a registry reference", img)
+		}
+		if len(registryHosts(img)) == 0 {
+			t.Errorf("%q must open its registry: %v", img, registryHosts(img))
+		}
+	}
+}

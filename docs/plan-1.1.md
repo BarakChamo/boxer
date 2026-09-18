@@ -17,6 +17,12 @@ smolvm cannot build images, so boxer takes Vercel's path: pull, run setup in the
 to a pack. That pack is the build artifact, the equivalent of E2B's template id or Vercel's
 snapshot id.
 
+**A local image is the escape hatch for repositories that do build.** smolvm accepts a
+`docker save` archive, a rootfs directory or stdin as the image, so a project with a Dockerfile can
+build it with its own tooling and hand boxer the result. E2B and Modal work the same way: the build
+happens outside the sandbox runtime. This is now documented and the allowlist no longer opens a
+registry for an image it will never pull.
+
 **The devcontainer properties that need no build are exactly the ones worth reading.** `image`,
 `postCreateCommand`, `forwardPorts`, `remoteEnv`, `containerEnv`, `mounts` and `workspaceFolder`
 are runtime-only. `features`, `build.dockerfile` and `dockerComposeFile` all require building or
@@ -57,8 +63,9 @@ backbone of this release.
 from, which is the whole point: a repository stops maintaining two truths.
 
 What boxer refuses, by name, with one line saying why: `features` (OCI artifacts with their own
-install protocol), `build`/`dockerFile` (no image build), `dockerComposeFile` (multi-container
-orchestration). A repository using those gets a clear message and the parts that do map still
+install protocol), `build`/`dockerFile` (no image build — the message points at the local-image
+path: build it yourself, `docker save` it, set `image` to the archive), `dockerComposeFile`
+(multi-container orchestration). A repository using those gets a clear message and the parts that do map still
 work, rather than silence.
 
 JSON with comments is the file's real format, so the parser must handle `//` and trailing commas.

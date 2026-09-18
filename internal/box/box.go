@@ -192,8 +192,23 @@ var detectors = []struct{ file, image string }{
 	{"go.mod", "golang:1-bookworm"},
 }
 
+// IsLocalImage reports whether image names something on this machine rather than a registry: a
+// `docker save` archive, an extracted rootfs directory, or stdin. A repository that builds its own
+// image with its own tooling hands boxer the result this way, which is how E2B and Modal work too:
+// the build happens outside the sandbox runtime.
+func IsLocalImage(image string) bool {
+	return image == "-" || strings.HasPrefix(image, "./") || strings.HasPrefix(image, "../") ||
+		strings.HasPrefix(image, "/") || strings.HasPrefix(image, "~/")
+}
+
 // registryHosts returns the hosts a pull of image needs, since pulls happen in the guest.
 func registryHosts(image string) []string {
+	// A local image is not pulled, so it needs no registry host. smolvm takes a `docker save`
+	// archive, a rootfs directory, or stdin as an image, and opening Docker Hub for one of those
+	// widens the allowlist for a fetch that never happens.
+	if IsLocalImage(image) {
+		return nil
+	}
 	host := "docker.io"
 	if i := strings.Index(image, "/"); i > 0 && strings.ContainsAny(image[:i], ".:") {
 		host = image[:i]

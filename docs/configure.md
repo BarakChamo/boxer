@@ -72,6 +72,12 @@ happened and blocks nothing.
 are deliberately left on the host. `git`, `gh` and `ssh` are on the host by default because they
 need your credentials and your real repository.
 
+**`image`** is any OCI reference — `node:24-bookworm`, `ghcr.io/you/dev:latest`, a private
+registry — and is detected from your lockfile when you leave it empty. It also takes a local
+image: a `docker save` archive (`image = "./dev.tar"`), an extracted rootfs directory, or `-` for
+stdin. That is the path for a repository that builds its own image: build it with your own tooling,
+save it, and point boxer at the file. Nothing is pulled, so no registry host is opened.
+
 **`setup`** runs once when a VM is created — installing dependencies, usually. The result is
 packed, so the next worktree starts from the pack rather than repeating the work.
 
