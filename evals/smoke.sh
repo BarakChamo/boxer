@@ -6,6 +6,9 @@ set -euo pipefail
 BOXER=${1:-"$(cd "$(dirname "$0")/.." && pwd)/bin/boxer"}
 export PATH="$(dirname "$BOXER"):$HOME/.local/bin:$PATH"
 export XDG_CONFIG_HOME
+# The automatic sweep is asynchronous and would race the gc checks below, reaping an orphan before
+# the explicit `boxer gc` sees it. The sweep has its own check at the end of this file.
+export BOXER_NO_RECLAIM=1
 XDG_CONFIG_HOME=$(mktemp -d)
 WORK=$(mktemp -d)
 # one real-smolvm user at a time on this host: re-exec under boxer-eval's host lock
@@ -142,7 +145,25 @@ check "inside guest run executes directly" '[ "$(BOXER_INSIDE=1 boxer run -- una
 
 echo "# gc"
 mkrepo "$WORK/g" "$BASE"; (cd "$WORK/g" && boxer up >/dev/null); rm -rf "$WORK/g"
-check "gc reaps orphan" 'boxer gc | grep -q deleted'
+# Not `boxer gc | grep -q deleted`: grep -q exits at the first match, gc dies of SIGPIPE writing
+# its summary line, and pipefail then fails a check that actually passed.
+check "gc reaps orphan" 'boxer gc > "$WORK/gc.out" 2>&1; grep -q deleted "$WORK/gc.out"'
+check "gc reports what it freed" 'boxer gc --all --dry-run | grep -q "would reclaim"'
+check "doctor reports the footprint" 'cd "$WORK/p2" 2>/dev/null || mkrepo "$WORK/p2" "$BASE"; cd "$WORK/p2"; boxer doctor | grep -q "^storage:"'
+
+# The sweep itself, with the guard lifted: provisioning stamps the state directory and reaps the
+# orphan without anyone asking. This is what keeps a host from filling up.
+echo "# automatic reclaim"
+mkrepo "$WORK/r" "$BASE"; (cd "$WORK/r" && boxer up >/dev/null); rm -rf "$WORK/r"
+mkrepo "$WORK/r2" "$BASE"
+check "provisioning sweeps in the background" '
+  stamp="${XDG_STATE_HOME:-$HOME/.local/state}/boxer/last-reclaim"; rm -f "$stamp"
+  (cd "$WORK/r2" && BOXER_NO_RECLAIM= boxer up >/dev/null)
+  for i in $(seq 1 50); do [ -f "$stamp" ] && break; sleep 0.2; done
+  [ -f "$stamp" ]'
+check "the sweep reaped the orphan" '
+  for i in $(seq 1 50); do boxer ls --json | grep -q "$WORK/r\"" || break; sleep 0.2; done
+  ! boxer ls --json | grep -q "$WORK/r\""'
 
 echo "# performance (numbers printed; the bounds are generous, they catch a regression, not jitter)"
 mkrepo "$WORK/p" "$BASE"
