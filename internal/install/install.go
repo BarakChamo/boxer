@@ -141,6 +141,8 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		r.Notes = append(r.Notes,
 			"DSH has no project-level plugin config: boot it with the patch layer, `dsh --profile headless --patch .dsh/cordis.patch.yml \"<task>\"`, or copy those rows into $DSH_HOME/cordis.patch.yml to apply them to every profile.",
 			"The patch mounts @deepseek-ai/dsh-hooks-claude-code over .dsh/hooks.json; that bridge honours deny and ask but ignores updatedInput, so DSH cannot rewrite a command. Set [harness.dsh] mode = \"tool\" in boxer.toml, or run `boxer shim install` and prepend the directory to PATH.")
+	case "copilot":
+		return *r, fmt.Errorf("copilot has no project-level layer: .github/hooks load only from a trusted directory, which `copilot -p` does not grant; use `boxer install copilot --user`")
 	default:
 		return *r, fmt.Errorf("no project-level install for %q; use `boxer package %s` and follow its README", harness, harness)
 	}
@@ -160,7 +162,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		return Result{}, err
 	}
 	r := &Result{}
-	_, _, hooks, _, _, _ := parts(tmp, harness)
+	_, _, hooks, skill, _, server := parts(tmp, harness)
 	switch harness {
 	case "claude-code":
 		if err := r.mergeJSON(filepath.Join(claudeHome(), "settings.json"), func(m map[string]any) {
@@ -178,8 +180,27 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 			return *r, err
 		}
 		r.Notes = append(r.Notes, "User-level hooks need no project trust and ride along when an orchestrator copies config.toml into a managed CODEX_HOME (Paperclip).")
+	case "copilot":
+		// Copilot CLI loads repository hooks (.github/hooks/) only from a trusted working
+		// directory, which `-p` mode does not grant, so boxer's row is the user layer:
+		// ${COPILOT_HOME:-~/.copilot}/hooks/boxer.json, the skill, and the MCP entry.
+		home := copilotHome()
+		if err := r.mergeJSON(filepath.Join(home, "hooks", "boxer.json"), func(m map[string]any) {
+			mergeHooks(m, hooks["hooks"])
+		}); err != nil {
+			return *r, err
+		}
+		if err := r.mergeJSON(filepath.Join(home, "mcp-config.json"), func(m map[string]any) {
+			setIn(m, "mcpServers", "boxer", server)
+		}); err != nil {
+			return *r, err
+		}
+		r.copyTree(skill, filepath.Join(home, "skills", "boxer"))
+		r.Notes = append(r.Notes,
+			"A Copilot hook that times out fails open and a non-zero exit fails closed; boxer's hook always exits 0.",
+			"Auto-update is on by default: pin COPILOT_AUTO_UPDATE=false when the version matters.")
 	default:
-		return *r, fmt.Errorf("no user-level install for %q; user-level layers exist for claude-code and codex", harness)
+		return *r, fmt.Errorf("no user-level install for %q; user-level layers exist for claude-code, codex and copilot", harness)
 	}
 	return *r, r.err
 }
@@ -207,6 +228,14 @@ func claudeHome() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
+}
+
+func copilotHome() string {
+	if d := os.Getenv("COPILOT_HOME"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".copilot")
 }
 
 func codexHome() string {
@@ -316,8 +345,10 @@ func (r *Result) mergeJSON(path string, edit func(map[string]any)) error {
 	return nil
 }
 
-// mergeHooks adds boxer's hook groups to m["hooks"], event by event, skipping groups that
-// already invoke boxer so a second install changes nothing.
+// mergeHooks adds boxer's hook groups to m["hooks"], event by event, skipping a group when one
+// with the same matcher already invokes boxer, so a second install changes nothing. The matcher is
+// part of the comparison because one event can carry more than one boxer group (Copilot hooks both
+// `bash` and `powershell` on preToolUse).
 func mergeHooks(m map[string]any, ours any) {
 	existing, _ := m["hooks"].(map[string]any)
 	if existing == nil {
@@ -326,7 +357,8 @@ func mergeHooks(m map[string]any, ours any) {
 	for event, groups := range ours.(map[string]any) {
 		cur, _ := existing[event].([]any)
 		for _, g := range groups.([]any) {
-			if !hasBoxer(cur) {
+			matcher, _ := g.(map[string]any)["matcher"].(string)
+			if !hasBoxer(cur, matcher) {
 				cur = append(cur, g)
 			}
 		}
@@ -335,9 +367,18 @@ func mergeHooks(m map[string]any, ours any) {
 	m["hooks"] = existing
 }
 
-func hasBoxer(groups []any) bool {
-	b, _ := json.Marshal(groups)
-	return strings.Contains(string(b), "boxer hook")
+func hasBoxer(groups []any, matcher string) bool {
+	for _, g := range groups {
+		gm, _ := g.(map[string]any)
+		if m, _ := gm["matcher"].(string); m != matcher {
+			continue
+		}
+		b, _ := json.Marshal(g)
+		if strings.Contains(string(b), "boxer hook") {
+			return true
+		}
+	}
+	return false
 }
 
 func setIn(m map[string]any, section, key string, v any) {

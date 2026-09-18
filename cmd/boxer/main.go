@@ -51,6 +51,8 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
                                    (the layer orchestrators like T3 Code and Paperclip also load)
   boxer install git                post-checkout hook: boxer up --detach in every new worktree (not in all)
+  boxer install conductor          .conductor/settings.toml: harness shims + a setup script that warms the sandbox
+  boxer install copilot --user     ~/.copilot hooks, skill and MCP entry (Copilot has no project layer)
   boxer install <harness> --user   write ~/.claude/settings.json or ~/.codex/config.toml hooks
                                    (the files Paperclip seeds its managed harness homes from)
   boxer shell <harness> [-e K=V] [-- args]   run the harness itself inside the sandbox (integration = inside)
@@ -988,6 +990,18 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if pos[0] == "conductor" {
+		r, err := install.Conductor(wt, shim.DefaultDir())
+		if err != nil {
+			fmt.Fprintln(stderr, "boxer install conductor:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "conductor:\n  wrote %s\n", r.Written[0])
+		for _, n := range r.Notes {
+			fmt.Fprintf(stdout, "  note: %s\n", n)
+		}
+		return 0
+	}
 	if pos[0] == "git" {
 		r, err := install.Git(repo)
 		if err != nil {
@@ -1004,7 +1018,7 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	if pos[0] == "all" {
 		names = []string{"claude-code", "codex", "gemini-cli", "opencode", "grok", "kimi", "dsh", "pi"}
 		if *user {
-			names = []string{"claude-code", "codex"}
+			names = []string{"claude-code", "codex", "copilot"}
 		}
 	}
 	code := 0

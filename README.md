@@ -71,6 +71,7 @@ every skip reason: [docs/status.md](docs/status.md).
 | pi | rewrite, tool | `shell` (no ACP server) | T1, T2 live, adherence |
 | Grok | rewrite (recommended), tool | `shell`, ACP | T1, T2 live, adherence |
 | Kimi | tool; shims for the rest | `shell`, ACP | T1, T2 live, adherence |
+| GitHub Copilot CLI | rewrite, tool (user-level hooks) | `shell` (row present, not run) | T1, T2 live |
 | DSH | tool, through the Claude Code hook bridge | — | T1, T2 live |
 
 Orchestrators — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica — have their own verified

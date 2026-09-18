@@ -55,6 +55,7 @@ var views = map[string]view{
 	"gemini-cli": {Namespace: "com.google.gemini-cli", Native: []string{"gemini-extension.json"},
 		Alias: map[string]string{"hooks/hooks.json": "com.google.gemini-cli/hooks/hooks.json"}},
 	"kimi":     {Namespace: "ai.moonshot.kimi-code"},
+	"copilot":  {Namespace: "com.github.copilot"},
 	"dsh":      {Namespace: "com.deepseek.dsh"},
 	"opencode": {Namespace: "ai.opencode"},
 	"pi":       {Namespace: "works.earendil.pi"},

@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "preToolUse": [
+      { "matcher": "bash", "hooks": [{ "type": "command", "command": "boxer hook copilot", "timeout": 30 }] },
+      { "matcher": "powershell", "hooks": [{ "type": "command", "command": "boxer hook copilot", "timeout": 30 }] }
+    ]
+  }
+}

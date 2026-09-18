@@ -62,6 +62,7 @@ var liveModels = map[string]string{
 	"dsh":       "zai/glm-5.3-flash", // verified against dsh 0.1.5-rc.2 on 2026-09-18
 	"grok":      "spacexai/grok-4.1-fast-non-reasoning",
 	"openhands": "openai/gpt-5-mini",
+	"copilot":   "openai/gpt-5-mini",
 }
 
 // LiveModel is the gateway model id a harness runs at t2.

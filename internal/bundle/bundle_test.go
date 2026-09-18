@@ -33,8 +33,8 @@ func read(t *testing.T, p string) string {
 
 func TestEveryHarnessRenders(t *testing.T) {
 	hs := Harnesses()
-	if len(hs) != 8 {
-		t.Fatalf("expected 8 harness views, got %v", hs)
+	if len(hs) != 9 {
+		t.Fatalf("expected 9 harness views, got %v", hs)
 	}
 	for _, h := range hs {
 		dir := filepath.Join(t.TempDir(), h)

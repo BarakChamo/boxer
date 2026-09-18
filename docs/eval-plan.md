@@ -86,6 +86,7 @@ Not every cell is meaningful; the runner declares the matrix per harness in
 | Gemini CLI | extension (`extensions install --consent`) or `.gemini/settings.json`; `BeforeTool` `tool_input`; `excludeTools` in tool mode | `gemini -p --yolo` | `GOOGLE_GEMINI_BASE_URL` (*spike 3*) | Google login or `GEMINI_API_KEY` | installs; no login |
 | OpenCode | `.opencode/plugins/boxer.ts` → `boxer hook opencode`; `tool.execute.before` mutates `args.command` | `opencode run` | `opencode.json` provider with `baseURL` (OpenAI-compatible) | `opencode auth login` | installed; no creds |
 | Grok Build | `$GROK_HOME/hooks/*.json` (user) or `.grok/hooks/*.json` (project, needs folder trust: `--trust` once or `GROK_FOLDER_TRUST=0` headless); Claude-compatible payload with `tool_name: run_terminal_command`; `updatedInput` replaces the whole input, so the rewrite keeps `description`. Plugin hooks do not run headless (1.0.34); the plugin's MCP server does | `grok -p --permission-mode bypassPermissions --output-format streaming-json --leader-socket <private>` | private `GROK_HOME` with `[model.fake] base_url api_backend = "chat_completions" env_key`; no sign-in needed for a BYOK model | `XAI_API_KEY` | T1 5/5; T2 needs `XAI_API_KEY` |
+| **GitHub Copilot CLI** (new 2026-09-18) | `${COPILOT_HOME:-~/.copilot}/hooks/boxer.json` at user scope (repository `.github/hooks/` load only from a trusted directory, which `-p` does not grant unless `COPILOT_ALLOW_ALL` is exactly `true`); event key `preToolUse`, tools `bash` and `powershell`, arguments at `toolArgs`, rewrite through `modifiedArgs`. The payload carries no event name and spells the tool field `toolName` | `copilot -p "…" -s --allow-tool shell --allow-tool boxer --allow-tool write --allow-all-paths --no-ask-user --output-format json --no-auto-update`, with `COPILOT_ALLOW_ALL=true` to trust the fresh working directory | BYOK: `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_BASE_URL=<fakellm>/v1`, `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL` — no GitHub sign-in at all | `AI_GATEWAY_API_KEY` through the same BYOK path, or a Copilot seat (`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`) | t1 4/4, t2 3/3 live (1.0.86, 2026-09-18) |
 | Kimi Code | user `config.toml` `[[hooks]]`, block-only; `.kimi-code/mcp.json`; shims | `kimi -p --auto`, `KIMI_CODE_HOME` for an isolated home | `config.toml` provider `base_url` (*spike 5*) | Kimi login | install verified |
 | **pi** (new) | `.pi/extensions/boxer.ts` or `-e`; `tool_call` with mutable `event.input.command` and `{ block, reason }`; `registerTool` for `boxer_run`; `session_start` for the brief | `pi -p` | `~/.pi/agent/models.json` custom provider (OpenAI/Anthropic API) | `/login` Claude Pro/Max, or key | not integrated; needs dialect + bundle |
 | DSH | `.dsh/cordis.patch.yml` profile patch passed with `--patch`: a `dsh-mcp-client` row for `boxer mcp`, and `dsh-hooks-claude-code` over `.dsh/hooks.json` (Claude Code wire, deny only, no `updatedInput`, no `SessionEnd`, `SessionStart` detached so boxer provisions on `UserPromptSubmit`); shell tool named `bash` | `dsh --profile headless "<task>"` — answer on stdout, reasoning on stderr, exit 0 on a completed turn | second `--patch` with an `llm-pi-ai` `openai-completions` route and an `agent-default-model` row; private `DSH_HOME`, `DSH_TELEMETRY_MODE=DISABLED`, `DSH_PERMISSION_MODE=danger-full-access` | `AI_GATEWAY_API_KEY` | t1 3/3, t2 2/2 live (0.1.5-rc.2, 2026-09-18) |
@@ -133,6 +134,27 @@ repository and VM:
 | claude-code, codex, gemini-cli, pi `rewrite/project/worktree` | pass | regression for the rewrite change (original tool input preserved) |
 | openhands/rewrite/sdk/worktree | see report | real SDK `LocalWorkspace` subclass, no model |
 | paperclip, t3code, multica | skip | checklist drivers; each names its install or account |
+
+## 4c. Cells added 2026-09-18 (stream C: harnesses)
+
+| Cell | T1 | T2 (`AI_GATEWAY_API_KEY`) | Note |
+| --- | --- | --- | --- |
+| copilot/rewrite/user/worktree | pass 8.3 s | pass 16.8 s, $0.0023 | `modifiedArgs` replaced the command; guest ran it, host canary absent |
+| copilot/tool/user/worktree | pass 8.5 s | pass 21.2 s, $0.0045 | `boxer_run` over MCP (`--allow-tool boxer`) |
+| copilot/tool/user/worktree/noncompliant | pass 7.9 s | t1 only | one denial, as designed |
+| copilot/off/user/worktree | pass 8.4 s | pass 18.1 s, $0.0023 | control: ran on the host (`Darwin`) |
+| herdr/rewrite/project/worktree | pass 8.0 s | pass 15.5 s, $0.0039 | real driver over the socket API, replacing the old checklist |
+
+Four facts cost one run each and are encoded in the drivers:
+
+| Fact | Where it is encoded |
+| --- | --- |
+| Copilot's hook payload has no `hook_event_name` (the key it is registered under is the event) and spells the tool field `toolName`, session `sessionId` | `hook.go`: `DefaultEvent`, `ToolNameAlt`, `SessionIDAlt` |
+| `--allow-all-tools` is refused when no GitHub policy can be read (BYOK, no sign-in): "bypass-permissions mode DISABLED by enterprise policy (fail-closed)" | `eval/copilot.go` grants `shell`, `boxer` and `write` instead |
+| An untrusted working directory denies every tool call ("Permission denied and could not request permission from user"); `COPILOT_ALLOW_ALL=true` (exactly) trusts it | `eval/copilot.go` |
+| Copilot verifies the *paths* a shell command touches; the eval canary lives under `/tmp`, so the control cell needs `--allow-all-paths` | `eval/copilot.go` |
+| A herdr pane whose shell has been renamed by another tool is not "an available shell"; `agent start` refuses it | `eval/orch_herdr.go` pins a plain non-login `/bin/sh` |
+| A pane runs the harness interactively, so Claude Code's trust dialog blocks startup | `eval/orch_herdr.go` accepts it in the private config dir |
 
 Tier T2 (`docs/eval-t2.md`, run at the end of this pass with no `evals/.env` present): Claude Code
 **7/7 live** through the Keychain login (rewrite plugin/project/both/repo, tool plugin/project,

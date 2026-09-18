@@ -3,16 +3,15 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/BarakChamo/boxer/internal/box"
-	"github.com/BarakChamo/boxer/internal/config"
-	"github.com/BarakChamo/boxer/internal/scope"
-	"github.com/BarakChamo/boxer/internal/vmtest"
 )
 
 func call(t *testing.T, harness string, in map[string]any) (map[string]any, string, int) {
@@ -289,5 +288,41 @@ func TestTraceFileKeepsItsFormat(t *testing.T) {
 	// The rewrite is also an event, and the command it carries is elided.
 	if !strings.Contains(string(b), `"event":"rewrite"`) || strings.Contains(string(b), `"command":"boxer run -c 'bun test'","tool"`) {
 		t.Fatalf("event line: %s", b)
+	}
+}
+
+// TestCopilotDialect covers the three things unique to Copilot's contract: arguments at toolArgs
+// (as an object and as a JSON string), a second shell tool name, and modifiedArgs as the rewrite.
+func TestCopilotDialect(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	args := map[string]any{"command": "bun test", "description": "tests"}
+	asString, _ := json.Marshal(args)
+	for name, toolArgs := range map[string]any{"object": args, "json string": string(asString)} {
+		for _, tool := range []string{"bash", "powershell"} {
+			// No hook_event_name and no tool_name: Copilot names the event by the key the hook is
+			// registered under and spells the tool field toolName.
+			out, _, code := call(t, "copilot", map[string]any{"toolName": tool, "toolArgs": toolArgs, "cwd": dir, "sessionId": "s"})
+			m, _ := out["modifiedArgs"].(map[string]any)
+			if code != 0 || out["permissionDecision"] != "allow" || m["command"] != "boxer run -c 'bun test'" || m["description"] != "tests" {
+				t.Fatalf("%s/%s: %v", name, tool, out)
+			}
+		}
+	}
+	// Tool mode denies, and the reason carries the fix; the exit code is 0 either way, because a
+	// non-zero exit fails closed in Copilot and would break the session.
+	t.Setenv("BOXER_MODE", "tool")
+	out, _, code := call(t, "copilot", map[string]any{"toolName": "bash", "toolArgs": args, "cwd": dir})
+	if code != 0 || out["permissionDecision"] != "deny" || !strings.Contains(out["permissionDecisionReason"].(string), "boxer run") {
+		t.Fatalf("tool mode: %v (code %d)", out, code)
+	}
+	// An unknown event and a non-shell tool are silent.
+	for _, in := range []map[string]any{
+		{"hook_event_name": "postToolUse", "toolName": "bash", "toolArgs": args, "cwd": dir},
+		{"toolName": "str_replace_editor", "toolArgs": args, "cwd": dir},
+	} {
+		if out, _, code := call(t, "copilot", in); out != nil || code != 0 {
+			t.Fatalf("expected silence: %v %d", out, code)
+		}
 	}
 }

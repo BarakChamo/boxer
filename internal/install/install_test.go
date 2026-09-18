@@ -2,13 +2,12 @@ package install
 
 import (
 	"encoding/json"
+	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BurntSushi/toml"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/BarakChamo/boxer/internal/config"
-	"github.com/BurntSushi/toml"
 )
 
 func readJSONT(t *testing.T, p string) map[string]any {
@@ -276,5 +275,57 @@ func TestInstallReportsWriteFailure(t *testing.T) {
 	r, err := Install("pi", config.Defaults(), "test", other)
 	if err == nil {
 		t.Fatalf("an install that cannot write AGENTS.md must not report success: %v", r.Written)
+	}
+}
+
+func TestCopilotUserInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("COPILOT_HOME", home)
+	cfg := config.Defaults()
+	for i := 0; i < 2; i++ { // idempotent: a second install adds no second hook group
+		if _, err := User("copilot", cfg, "t"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := readJSONT(t, filepath.Join(home, "hooks", "boxer.json"))
+	pre, _ := h["hooks"].(map[string]any)["preToolUse"].([]any)
+	if len(pre) != 2 {
+		t.Fatalf("expected one group per shell tool, got %v", h)
+	}
+	m := readJSONT(t, filepath.Join(home, "mcp-config.json"))
+	if m["mcpServers"].(map[string]any)["boxer"] == nil {
+		t.Fatalf("mcp entry missing: %v", m)
+	}
+	if _, err := os.Stat(filepath.Join(home, "skills", "boxer", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	// Copilot has no project layer, and the error says why.
+	if _, err := Install("copilot", cfg, "t", t.TempDir()); err == nil || !strings.Contains(err.Error(), "--user") {
+		t.Fatalf("project install should refuse and point at --user: %v", err)
+	}
+}
+
+func TestConductorSettings(t *testing.T) {
+	root := t.TempDir()
+	r, err := Conductor(root, "/shims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Written) != 1 || !ConductorInstalled(root) {
+		t.Fatalf("written: %v", r.Written)
+	}
+	var cfg struct {
+		Claude  string `toml:"claude_code_executable_path"`
+		Codex   string `toml:"codex_executable_path"`
+		Scripts struct{ Setup, Run string }
+	}
+	if _, err := toml.DecodeFile(filepath.Join(root, ".conductor", "settings.toml"), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude != "/shims/claude" || cfg.Codex != "/shims/codex" || !strings.Contains(cfg.Scripts.Setup, "boxer up") {
+		t.Fatalf("%+v", cfg)
+	}
+	if _, err := Conductor(root, ""); err == nil {
+		t.Fatal("no shim directory must be an error")
 	}
 }

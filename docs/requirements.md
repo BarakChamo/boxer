@@ -247,6 +247,7 @@ harness**.
 | OpenCode | `tool.execute.before`/`after`, `permission.ask`, `session.*`, `shell.env`, many more | **Yes**, mutate `output.args.command` | TypeScript plugin API rather than stdin JSON |
 | Gemini CLI | Hooks v1, command and plugin hooks | **Unverified** | Explicitly mirrors the Claude Code contract; config at project/user/system/extension scope |
 | Kimi Code | Hooks (Beta) | **Unverified** | JSON on stdin, exit code controls behavior |
+| GitHub Copilot CLI | `preToolUse` (and peers) from `${COPILOT_HOME:-~/.copilot}/hooks/*.json` at user scope, or `.github/hooks/*.json` in a trusted directory | **Yes**, `modifiedArgs` replaces the tool arguments | Arguments at `toolArgs` (object or JSON string); the payload names no event and spells the tool field `toolName`. A hook **timeout fails open**, a **non-zero exit fails closed** |
 | DSH | 7 Claude Code events via the `dsh-hooks-claude-code` bridge; no `SessionEnd` | **No.** `updatedInput` is logged and ignored | Exit 2 or `permissionDecision` denies; `transcript_path` is always empty; `SessionStart` is detached |
 | OpenHands | No hook system; a Runtime abstraction instead | n/a | Integrate as a runtime, not a hook |
 | Paperclip | No hooks; adapter interface | n/a | Integrate as a wrapping adapter |
@@ -587,6 +588,7 @@ How each harness's bundle format carries those four:
 | Gemini CLI | extension | `GEMINI.md` context + skills | hooks | MCP server | **excluded tools** |
 | OpenCode | TypeScript plugin | `AGENTS.md` section | `tool.execute.before` | plugin custom tool | argument mutation |
 | DSH | profile patch layer (`.dsh/cordis.patch.yml`, passed with `--patch`) | `.agents/skills` | `dsh-hooks-claude-code` over `.dsh/hooks.json` | `dsh-mcp-client` row in the patch | none in-harness; external `PATH` shims |
+| GitHub Copilot CLI | user `${COPILOT_HOME:-~/.copilot}`: `hooks/boxer.json`, `skills/boxer/`, `mcp-config.json` (no project layer: `-p` does not trust the directory) | `~/.copilot/skills` | `preToolUse` on `bash` and `powershell` | `mcp-config.json` | hook rewrite (`modifiedArgs`); `--deny-tool` |
 | Kimi Code | user `config.toml` `[[hooks]]` + project `.kimi-code/mcp.json` | `.agents/skills` | hooks, block-only | MCP server | none in-harness; external `PATH` shims |
 
 - **R-PKG-1.** A harness bundle is a *projection* of the four components into that harness's format.
@@ -650,9 +652,15 @@ converge (Codex installs only from marketplaces and does not run Claude plugins;
 | Level | Mechanism | Harnesses | boxer code |
 | --- | --- | --- | --- |
 | **0 Universal** | MCP server + Agent Skill; `mode = "tool"` | all 8 | none per harness |
-| **1 Converged hooks** | one `hooks.json`, one binary; provision, brief, reclaim, optional rewrite or deny | Claude, Codex, Grok, Kimi, DSH; Gemini via aliases | one dialect table |
+| **1 Converged hooks** | one `hooks.json`, one binary; provision, brief, reclaim, optional rewrite or deny | Claude, Codex, Grok, Kimi, DSH, Copilot; Gemini via aliases | one dialect table |
 | **2 Plugin-API shims** | 40-line TS files forwarding to the binary | OpenCode, pi | two templates, optional |
-| **S Shell substitution** | the harness's shell binary is `boxer-bash` | any harness whose shell path is configurable (OpenHands verified) | none per harness |
+| **S Shell substitution** | the harness's shell binary is `boxer-bash` | any harness whose shell path is configurable (OpenHands verified; herdr's `terminal.default_shell` verified) | none per harness |
+
+Copilot sits at level 1 with two hazards of its own, encoded as comments on its dialect row: a hook
+that **times out fails open** while a **non-zero exit fails closed**, so boxer's hook stays fast and
+always exits 0; and auto-update is on by default, so anything that pins a version sets
+`COPILOT_AUTO_UPDATE=false`. Only `preToolUse` is wired — the brief reaches the model through the
+skill and the MCP server rather than a session-start hook.
 
 DSH reaches both levels, but neither by reading a file of its own. It boots a profile — an ordered
 stack of cordis plugin patch layers — and reads no project-level plugin config, so `boxer install
