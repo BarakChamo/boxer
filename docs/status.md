@@ -8,9 +8,13 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 ## Proven
 
 Unit tests green with the race detector and a per-package coverage floor; lint and the
-vulnerability scan clean; smoke **49/49** (which also prints and bounds cold start, warm run and
-hook latency); T1 **67 pass, 0 fail, 1 skip**; T2 live on `zai/glm-5.3-flash` **42 pass, 0 fail,
-14 skip** for $0.19. Every cell is a fresh repository and a fresh VM.
+vulnerability scan clean; smoke **53/53** (which also prints and bounds cold start, warm run and
+hook latency); T1 **67 pass, 0 fail, 1 skip**, run twice with identical per-cell verdicts; T2 live
+on `zai/glm-5.3-flash` **42 pass, 0 fail, 14 skip** for $0.19. Every cell is a fresh repository and
+a fresh VM.
+
+Measured on Apple Silicon with smolvm 1.16.1: cold start 687 ms from a host pack, warm `boxer run`
+60 ms, rewrite hook 10 ms.
 
 The publishing path is proven rather than asserted: `v1.0.0-rc.1` published four platform
 archives, four SBOMs, the plugin and skill tarballs, the npm tarball and a `checksums.txt` signed
@@ -18,10 +22,10 @@ keylessly against the release workflow's OIDC identity. The signature verifies w
 [release.md](release.md), and both download routes install that release on a machine that had no
 boxer: `install.sh` and `npm i -g` each report `boxer 1.0.0-rc.1`.
 
-One cell is not yet deterministic: `acp-codex/inside/acp/worktree` failed once in seven runs, after
-its own retry, with `agent closed: EOF` and an empty stderr. It passed five of five on repeat and
-in the following full run. The driver now carries the agent's last output into the failure, so the
-next occurrence explains itself.
+One cell has failed once in nine runs: `acp-codex/inside/acp/worktree`, after its own retry, with
+`agent closed: EOF` and an empty stderr. It has passed every run since, including both runs of the
+release pair. The driver now carries the agent's last output into the failure, so the next
+occurrence explains itself rather than needing another nine runs.
 
 Added 2026-09-18 (stream C): GitHub Copilot CLI as the ninth harness — **T1 4/4, T2 3/3 live for
 $0.0092** — and a real herdr driver replacing its checklist — **T1 pass, T2 pass for $0.0039**.
@@ -30,9 +34,6 @@ Copilot runs at t2 with no Copilot seat: its BYOK provider variables point it at
 Skips, all of them explained: Gemini CLI and its inside and ACP cells need `GEMINI_API_KEY`
 (the gateway has no Gemini-protocol endpoint), the six noncompliant cells are scripted and run at
 t1 only, and Multica needs an account (`multica setup`).
-
-Measured on Apple Silicon, smolvm 1.16.1: cold start 0.9 s from a host pack, warm `boxer run`
-66 ms, rewrite hook 13 ms.
 
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
