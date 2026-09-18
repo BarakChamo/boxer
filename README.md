@@ -148,7 +148,8 @@ make eval-t2       # the same cells against live models, a few cents
 ```
 
 Last full run on Apple Silicon with smolvm 1.16.1 (2026-09-18): smoke 49/49; T1 67 pass, 0 fail,
-1 skip; T2 live 42 pass, 0 fail, 14 skips for $0.19. One cell, Codex over ACP inside the guest,
+1 skip; T2 live 42 pass, 0 fail, 14 skips for $0.19; adherence 80 of 96 live cells across four
+models, with one harness verdict (Grok, a known finding) and no command reaching the host. One cell, Codex over ACP inside the guest,
 failed once in seven runs and passed on every repeat; it is named in
 [docs/status.md](docs/status.md) along with every skip reason.
 

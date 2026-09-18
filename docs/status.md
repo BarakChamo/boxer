@@ -61,22 +61,33 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 
 ## Adherence
 
-`boxer-eval --tier adherence` (third pass, stream B): does a live model follow the injected brief
-when the prompt never mentions boxer? Full matrix, spend and transcript evidence in
-[eval-adherence.md](eval-adherence.md). Verdict per cell: `harness` only when every model fails it.
+`boxer-eval --tier adherence`: does a live model follow the injected brief when the prompt never
+mentions boxer? Four models, 24 cells each, all 96 run live on 2026-09-18. Full matrix, spend and
+per-cell findings in [eval-adherence.md](eval-adherence.md). A cell is blamed on the **harness**
+only when every model fails it; one failure among passes is that model's adherence.
 
-| Harness | brief (tool) | recovery (tool) | multistep (rewrite) | Verdict |
-| --- | --- | --- | --- | --- |
-| Claude Code | 4/4 | 4/4 | 4/4 | pass |
-| Codex | 4/4 | 3/4 (GLM passed `cwd: /workspace`) | 4/4 | model adherence |
-| OpenCode | 4/4 | 4/4 | 4/4 | pass |
-| pi | 4/4 | 4/4 | 4/4 | pass |
-| Kimi | 2/4 (Haiku, qwen: one denial) | 4/4 | 4/4 (tool mode) | model adherence |
-| Grok | 0/4 (one denial each) | 4/4 | 4/4 | **harness**: Grok does not surface session-start context; tool mode always costs one denial, use rewrite mode |
+| Verdict | Cells |
+| --- | --- |
+| pass | 15 |
+| model adherence | 9 |
+| **harness** | 1 — `grok/tool/user/worktree/brief` |
 
-Models: GLM 5.3 flash 16/18 ($0.11), Haiku 4.5 16/18 ($0.79), qwen3.7 flash 16/18 ($0.03),
-deepseek v4 flash 17/18 ($0.08). No command ran on the host in any of the 72 cells. Recommended
-default: `deepseek/deepseek-v4-flash` (zero denials outside Grok, $0.0046 per cell).
+Grok is the one harness finding, and it is the same one as before: Grok never surfaces
+session-start context to the model, so in tool mode the first shell command always costs one
+denial before the agent learns about `boxer_run`. Rewrite mode is the right Grok default, and its
+dialect records this. Copilot's brief cell fails for three of four models, all with one denial and
+a recovery, which is model adherence rather than a harness limit: its `recovery` cell passes for
+every model.
+
+| Model | Pass | Fail | Spend |
+| --- | --- | --- | --- |
+| zai/glm-5.3-flash | 22 | 2 | $0.11 |
+| anthropic/claude-haiku-4.5 | 19 | 5 | $1.10 |
+| alibaba/qwen3.7-flash | 18 | 6 | $0.03 |
+| deepseek/deepseek-v4-flash | 21 | 3 | $0.10 |
+
+No command reached the host in any of the 96 cells. `make eval-adherence` runs all four models;
+the two-model rule needs more than one, so a single-model run can never reach a verdict.
 
 ## Shipped in this slice
 
