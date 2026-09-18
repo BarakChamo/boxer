@@ -616,3 +616,184 @@ func TestNoSetupMeansNoEnvironmentPack(t *testing.T) {
 		t.Fatalf("no setup, no environment pack: %s", p)
 	}
 }
+
+// `env` is the project's own configuration and reaches every command, including setup, which is
+// where a registry token or a proxy setting is usually needed. `mounts` adds what a project needs
+// beside its worktree, usually a dependency cache. Both shape the guest, so both belong in the
+// environment key: change either and the old pack no longer applies.
+func TestEnvAndMountsReachTheGuestAndTheKey(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	cache := t.TempDir()
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n"+
+		"setup = [\"echo setting-up\"]\n"+
+		"mounts = [\""+cache+":/root/.cache\"]\n"+
+		"[env]\nNODE_ENV = \"test\"\nREGISTRY = \"https://example.invalid\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Run([]string{"true"}, RunOpts{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if !strings.Contains(s, "-v "+cache+":/root/.cache") {
+		t.Fatalf("the extra mount must reach smolvm:\n%s", s)
+	}
+	// Sorted, so the key and the command line are stable rather than map-ordered.
+	if !strings.Contains(s, "-e NODE_ENV=test -e REGISTRY=https://example.invalid") {
+		t.Fatalf("env must reach the guest, in a stable order:\n%s", s)
+	}
+	if !strings.Contains(s, "echo setting-up") || strings.Count(s, "NODE_ENV=test") < 2 {
+		t.Fatalf("setup must see the same environment as every other command:\n%s", s)
+	}
+
+	// Either one changing is a different environment.
+	base := EnvKey("alpine", e.Cfg)
+	withEnv := e.Cfg
+	withEnv.Env = map[string]string{"NODE_ENV": "production", "REGISTRY": "https://example.invalid"}
+	if EnvKey("alpine", withEnv) == base {
+		t.Fatal("changing env must change the key")
+	}
+	withMount := e.Cfg
+	withMount.Mounts = append([]string{"/other:/other"}, e.Cfg.Mounts...)
+	if EnvKey("alpine", withMount) == base {
+		t.Fatal("changing mounts must change the key")
+	}
+	// Order is not meaning: the same mounts listed differently are the same environment.
+	reordered := e.Cfg
+	reordered.Mounts = []string{cache + ":/root/.cache"}
+	if EnvKey("alpine", reordered) != base {
+		t.Fatal("reordering the same mounts must not change the key")
+	}
+}
+
+// A ~ in the host half of a mount is where a dependency cache usually lives, and smolvm does no
+// shell expansion.
+func TestMountsExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	if got := expandMount("~/.cache/pip:/root/.cache/pip"); got != filepath.Join(home, ".cache/pip")+":/root/.cache/pip" {
+		t.Fatalf("got %q", got)
+	}
+	for _, m := range []string{"/abs:/guest", "rel:/guest", "/abs:/guest:ro"} {
+		if got := expandMount(m); got != m {
+			t.Fatalf("%q must be left alone, got %q", m, got)
+		}
+	}
+}
+
+// `start` is how a service runs: setup installs it, start launches it detached, ready waits for
+// it. The start marker lives in memory-backed /tmp on purpose — a restarted VM has no processes
+// and must launch them again — while the setup marker is durable, because what is installed
+// survives.
+func TestStartAndReady(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n"+
+		"start = [\"echo serving\"]\nready = \"true\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if !strings.Contains(s, "nohup sh -lc 'echo serving'") {
+		t.Fatalf("a start command must be launched detached:\n%s", s)
+	}
+	if !strings.Contains(s, startMarker) {
+		t.Fatalf("the start marker must be written:\n%s", s)
+	}
+
+	// A second Ensure on the same running VM starts nothing again.
+	before := strings.Count(s, "nohup")
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(log)
+	if after := strings.Count(string(b), "nohup"); after != before {
+		t.Fatalf("services start once per running VM: %d then %d", before, after)
+	}
+}
+
+// A sandbox that never becomes ready must fail with a reason and somewhere to look, not hang or
+// pretend to be up.
+func TestReadyTimesOutWithSomewhereToLook(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nready = \"false\"\nready_timeout = \"1s\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	_, err = e.Ensure(true, false)
+	be, ok := err.(*Error)
+	if !ok || be.Cause != "NOT_READY" {
+		t.Fatalf("want NOT_READY, got %v", err)
+	}
+	if !strings.Contains(be.Fix, "boxer-start.log") {
+		t.Fatalf("the fix must say where the service's own output is: %q", be.Fix)
+	}
+}
+
+// A start command written by a person will contain quotes.
+func TestShellQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"npm run dev":            "'npm run dev'",
+		"sh -c 'echo hi'":        `'sh -c '\''echo hi'\'''`,
+		"echo \"double quoted\"": "'echo \"double quoted\"'",
+	} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("%q -> %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A restarted VM has no processes: the start marker is in the guest's memory-backed /tmp precisely
+// so that a stop clears it and the services launch again, while the setup marker is durable
+// because what is installed survives.
+func TestServicesRestartAfterAStopButSetupDoesNot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n"+
+		"setup = [\"echo installing\"]\nstart = [\"echo serving\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.VM.Stop(e.Scope.Key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if n := strings.Count(s, "echo installing"); n != 1 {
+		t.Fatalf("setup survives a restart, ran %d times:\n%s", n, s)
+	}
+	if n := strings.Count(s, "nohup sh -lc 'echo serving'"); n != 2 {
+		t.Fatalf("services must start again after a restart, started %d times:\n%s", n, s)
+	}
+}

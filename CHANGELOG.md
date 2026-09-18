@@ -13,6 +13,15 @@ All notable changes to this project are documented here. The format follows
   repository starts with dependencies already installed — measured at 0.7 s against 2.9 s, and the
   saving grows with the size of the install. Changing a setup line changes the key, exactly like a
   Docker layer.
+- **`start` and `ready`.** `setup` installs a service, `start` launches it detached at every VM
+  start, and `ready` is polled until it exits zero before boxer reports the sandbox up. A dev
+  server or a database now runs in the sandbox and answers the host through a forwarded port,
+  verified against a real microVM. No supervision and no dependency graph: a dead process makes the
+  next command fail and says where its output is.
+- **`env` and `mounts`.** `env` reaches every command including setup, and travels into the
+  environment pack; secrets stay in `secrets` and `env_passthrough`, which are read from the host
+  at run time and never snapshotted. `mounts` adds host directories beside the worktree, with `~`
+  expanded, usually for a shared dependency cache.
 - `boxer doctor` reports the environment's cache key and whether it is cached yet, so "will this
   worktree have to run setup again" is answerable without watching a VM boot.
 

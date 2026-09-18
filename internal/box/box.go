@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -286,7 +287,12 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	if ranSetup {
 		e.PackEnv()
 	}
-	return created, nil
+	// Services come after the snapshot: a pack should carry what is installed, not a process that
+	// was running when it was taken.
+	if err := e.startServices(); err != nil {
+		return created, err
+	}
+	return created, e.waitReady()
 }
 
 func (e *Env) create() error {
@@ -311,6 +317,9 @@ func (e *Env) create() error {
 		vm.LabelPrefix + "integration": e.Cfg.Integration,
 	}
 	volumes := []string{e.Scope.Root + ":" + e.MountAt()}
+	for _, m := range e.Cfg.Mounts {
+		volumes = append(volumes, expandMount(m))
+	}
 	if e.Inside() {
 		if InsideHooks.Mounts != nil {
 			volumes = append(volumes, InsideHooks.Mounts()...)
@@ -409,9 +418,41 @@ func PackPath(key string) string {
 func EnvKey(image string, cfg config.Config) string {
 	key := image + "\x00env"
 	for _, c := range cfg.Setup {
-		key += "\x00" + c
+		key += "\x00setup:" + c
+	}
+	for _, k := range sortedKeys(cfg.Env) {
+		key += "\x00env:" + k + "=" + cfg.Env[k]
+	}
+	for _, m := range sortedCopy(cfg.Mounts) {
+		key += "\x00mount:" + m
+	}
+	// `start` and `ready` do not change what is installed, but they do change what a VM made from
+	// the pack is expected to be running, and a pack that disagrees with them is confusing rather
+	// than useful.
+	for _, c := range cfg.Start {
+		key += "\x00start:" + c
+	}
+	if cfg.Ready != "" {
+		key += "\x00ready:" + cfg.Ready
 	}
 	return key
+}
+
+// sortedKeys and sortedCopy keep the key stable: a map has no order, and a mount list reordered by
+// hand is the same environment.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
 }
 
 // envPack returns the pack of image with this repository's setup already run, when one exists.
@@ -611,6 +652,88 @@ func (e *Env) packed(image string) string {
 	return side
 }
 
+// GuestEnv is the repository's own `env` table, as KEY=VALUE. It is configuration, not secrets:
+// it travels into the environment pack, while EnvPassthrough and Secrets are read from the host at
+// run time and never snapshotted.
+func (e *Env) GuestEnv() []string {
+	out := make([]string, 0, len(e.Cfg.Env))
+	for _, k := range sortedKeys(e.Cfg.Env) {
+		out = append(out, k+"="+e.Cfg.Env[k])
+	}
+	return out
+}
+
+// expandMount resolves a leading ~ in the host half of a "host:guest[:ro]" mount, because that is
+// where a dependency cache usually lives and smolvm does no shell expansion.
+func expandMount(m string) string {
+	if !strings.HasPrefix(m, "~/") {
+		return m
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return m
+	}
+	return filepath.Join(home, m[2:])
+}
+
+// startServices runs the `start` list detached, once per running VM. This is how a database or a
+// dev server runs: `setup` installs it, `start` launches it, `ready` waits for it. A marker in
+// memory-backed /tmp is exactly right here, because it must not survive a restart: a restarted VM
+// has no processes and has to start them again.
+const startMarker = "/tmp/boxer-started"
+
+func (e *Env) startServices() error {
+	if len(e.Cfg.Start) == 0 {
+		return nil
+	}
+	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+startMarker)
+	if err != nil || vm.TransportFailure(out) {
+		return e.fail(&Error{Reason: "could not read the start marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+			Fix: "boxer up --recreate"})
+	}
+	if code == 0 {
+		return nil
+	}
+	for _, cmd := range e.Cfg.Start {
+		fmt.Fprintf(e.Stderr, "boxer: start: %s\n", cmd)
+		// Detached and disowned: the command that launches a server must not wait for it.
+		line := "cd " + e.MountAt() + " && nohup sh -lc " + shellQuote(cmd) + " >/tmp/boxer-start.log 2>&1 &"
+		if _, code, err := e.VM.Output(e.Scope.Key, e.MountAt(), "sh", "-c", line); err != nil || code != 0 {
+			return e.fail(&Error{Reason: fmt.Sprintf("start step failed (exit %d): %s", code, cmd), Cause: "START_FAILED", Scope: e.Scope,
+				Fix: "check the `start` list in boxer.toml, then: boxer up"})
+		}
+	}
+	_, _, _ = e.VM.Output(e.Scope.Key, "", "sh", "-c", "touch "+startMarker)
+	return nil
+}
+
+// waitReady polls the `ready` command until it exits zero. A server accepts connections when it
+// accepts them; a fixed sleep is either too short, which fails, or too long, which everyone pays.
+func (e *Env) waitReady() error {
+	if e.Cfg.Ready == "" {
+		return nil
+	}
+	timeout, err := time.ParseDuration(e.Cfg.ReadyTimeout)
+	if err != nil || timeout <= 0 {
+		timeout = time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, code, err := e.VM.Output(e.Scope.Key, e.MountAt(), "sh", "-lc", e.Cfg.Ready); err == nil && code == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return e.fail(&Error{Reason: fmt.Sprintf("the sandbox never became ready: %q did not succeed within %s", e.Cfg.Ready, timeout),
+				Cause: "NOT_READY", Scope: e.Scope, Fix: "check the `start` list and `ready` command, and /tmp/boxer-start.log in the guest"})
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// shellQuote wraps s for `sh -c`, because a start command is written by a person and will contain
+// quotes sooner or later.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
 const setupMarker = "/var/lib/boxer/setup-done"
 
 // setup runs the configured commands once per VM (R-GUEST-2). Failure deletes the VM.
@@ -634,7 +757,10 @@ func (e *Env) setup() (ran bool, err error) {
 	}
 	for _, cmd := range e.Cfg.Setup {
 		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
-		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
+		// Setup sees the same environment as every later command: a build that needs a registry
+		// token or a proxy setting needs it while installing, not only when running.
+		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
+			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
 		if err != nil || code != 0 {
 			_ = e.VM.Delete(e.Scope.Key)
 			return false, e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
@@ -690,7 +816,7 @@ func (e *Env) Run(argv []string, o RunOpts) (int, error) {
 		return 1, err
 	}
 	touchLastUsed(e.Scope.Key)
-	env := []string{}
+	env := e.GuestEnv()
 	for _, k := range e.Cfg.EnvPassthrough {
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)

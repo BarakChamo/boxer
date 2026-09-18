@@ -79,10 +79,26 @@ type Config struct {
 	Intercept            []string `toml:"intercept"`
 	Passthrough          []string `toml:"passthrough"`
 
-	Image          string   `toml:"image"`
-	Smolfile       string   `toml:"smolfile"`
-	Setup          []string `toml:"setup"`
-	MountAt        string   `toml:"mount_at"`
+	Image    string   `toml:"image"`
+	Smolfile string   `toml:"smolfile"`
+	Setup    []string `toml:"setup"`
+	MountAt  string   `toml:"mount_at"`
+	// Env is set in the guest for every command. It is the project's own configuration, so it is
+	// baked into the environment pack; anything secret belongs in Secrets or EnvPassthrough, which
+	// are read from the host at run time and never snapshotted.
+	Env map[string]string `toml:"env"`
+	// Mounts are extra host directories, "host:guest" or "host:guest:ro". The worktree is always
+	// mounted; these are for what a project needs beside it, usually a dependency cache.
+	Mounts []string `toml:"mounts"`
+	// Start runs every time the VM starts, detached, after Setup. This is how a service runs: the
+	// setup list installs it, the start list launches it. There is no supervision and no
+	// dependency graph — if a started process dies, the next command fails and says so.
+	Start []string `toml:"start"`
+	// Ready is polled until it exits zero before boxer reports the sandbox up, because a server
+	// takes a variable time to accept connections and a fixed sleep is always wrong.
+	Ready string `toml:"ready"`
+	// ReadyTimeout bounds that wait.
+	ReadyTimeout   string   `toml:"ready_timeout"`
 	CPUs           int      `toml:"cpus"`
 	Memory         string   `toml:"memory"`
 	EnvPassthrough []string `toml:"env_passthrough"`
@@ -119,6 +135,7 @@ func Defaults() Config {
 		AutoReclaim:           true,
 		ReclaimEvery:          "6h",
 		MinFreeGB:             5,
+		ReadyTimeout:          "60s",
 		ReuseExisting:         true,
 		Integration:           "outside",
 		Mode:                  "rewrite",

@@ -22,6 +22,14 @@ image       = ""                # default: detected from the lockfile, else debi
 setup       = ["bun install"]   # run once per VM, inside the guest
 warm_on_session_start = false   # true: session start launches a detached `boxer up` and returns
 
+start       = ["postgres -D /var/lib/pg"]   # run at every VM start, detached
+ready       = "pg_isready -q"               # polled until it exits zero before boxer reports up
+ready_timeout = "60s"
+mounts      = ["~/.cache/pip:/root/.cache/pip"]   # extra host directories beside the worktree
+
+[env]                           # set in the guest for every command, setup included
+NODE_ENV = "test"
+
 [tasks]                         # named commands: `boxer run --task test`
 test  = "bun test"
 build = "bun run build"
@@ -111,6 +119,21 @@ references. `auto_reclaim = false` turns that off and leaves `boxer gc` to you. 
 refuses to write a pack when free space is below `min_free_gb` and pulls the image instead: a
 cache is worth less than a working disk. `boxer doctor` prints the current footprint, and
 `boxer gc --all` reclaims every pack and every stopped sandbox regardless of age.
+
+**`start` and `ready`** are how a service runs. `setup` installs it once and is snapshotted;
+`start` launches it detached every time the VM starts, and is not snapshotted, because a pack
+should carry what is installed rather than a process that happened to be running. `ready` is then
+polled until it exits zero, so boxer reports the sandbox up when the service actually answers
+rather than after a guessed sleep. There is no supervision and no dependency graph: if a started
+process dies, the next command fails and says so, and its output is in `/tmp/boxer-start.log` in
+the guest.
+
+**`env` and `mounts`** are the project's own configuration. `env` reaches every command including
+setup, which is where a registry token or a proxy setting is usually needed, and it travels into
+the environment pack — so put secrets in `secrets` or `env_passthrough`, which are read from the
+host at run time and never snapshotted. `mounts` adds host directories beside the worktree,
+`"host:guest"` or `"host:guest:ro"`, with `~` expanded; a shared dependency cache is the usual
+reason.
 
 **`network`** is off by default, in keeping with smolvm. `allowlist` opens named hosts; the
 registry hosts your image needs are always allowed, so a package install works without you listing

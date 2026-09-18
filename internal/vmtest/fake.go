@@ -97,9 +97,11 @@ case "$verb" in
     fi ;;
   "machine start"|"machine stop")
     state=running; [ "$2" = stop ] && state=stopped
+    # A stop empties the guest's tmpfs, so the services have to be started again.
     name=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in -n|--name) name="$2"; shift;; esac; shift; done
     [ -f "$dir/$name" ] || { echo "Error: machine not found" >&2; exit 1; }
+    [ "$state" = stopped ] && rm -f "$dir/$name.started"
     sed "1s/.*/$state/" "$dir/$name" > "$dir/$name.tmp" && mv "$dir/$name.tmp" "$dir/$name" ;;
   "machine delete")
     name=""; shift 2
@@ -119,6 +121,10 @@ case "$verb" in
         # Guest marker files decide whether setup and the harness install run again, so the fake
         # models them per machine: without that, "once per VM" cannot be tested at all.
         *"test -f /var/lib/boxer/setup-done"*) [ -f "$dir/$name.setup" ] && exit 0 || exit 1;;
+        # The start marker lives in the guest's memory-backed /tmp: it must not survive a restart,
+        # and it must never touch the host, which is where an unmodelled marker would land.
+        *"test -f /tmp/boxer-started"*) [ -f "$dir/$name.started" ] && exit 0 || exit 1;;
+        *"touch /tmp/boxer-started"*) touch "$dir/$name.started"; exit 0;;
         *"touch /var/lib/boxer/setup-done"*) touch "$dir/$name.setup"; exit 0;;
         *"test -f /var/lib/boxer/harness-"*)
           h=${*##*harness-}; [ -f "$dir/$name.harness-${h%% *}" ] && exit 0 || exit 1;;
