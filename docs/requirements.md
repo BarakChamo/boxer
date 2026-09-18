@@ -653,6 +653,12 @@ available there, so DSH is a tool-mode harness. All of this is **verified 2026-0
   validator with an ECMAScript regex engine, because the spec's `name` pattern uses a lookahead);
   `TestViewsAreSubsetsOfThePackage` proves every per-harness bundle is byte-identical to the
   package's files it selects.
+- **R-CORE-1.** The core names no harness. `internal/{box,vm,scope,config,decide,shim}` and
+  `pkg/boxer` contain no harness identifier in code; every harness fact is a row in
+  `internal/hook`'s dialect table, `internal/inside`'s harness table, or a bundle template.
+  `TestCoreNamesNoHarness` parses those packages and fails when a name appears, so adding a
+  harness cannot grow the core.
+
 - **R-LVL-8.** Level S is shell substitution: `boxer shim install --shell` writes `boxer-bash`
   (`exec boxer run -- bash "$@"`), and any harness that lets its shell binary be configured runs
   every command in the guest with no boxer code for that harness at all. It covers what a hook
