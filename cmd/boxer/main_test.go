@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -121,5 +122,51 @@ func TestDownByScopeNameOutsideAnyRepo(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "machine delete -n sb-deadbeef") {
 		t.Fatalf("smolvm log: %s", b)
+	}
+}
+
+// Telemetry off by default; with the file sink on, a run leaves events that `boxer logs` reads
+// back and `status --json` carries the tail of.
+func TestTelemetryOffByDefaultThenLogs(t *testing.T) {
+	vmtest.Install(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	if _, err := os.Stat(filepath.Join(state, "boxer", "events.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("a default run must write no event log: %v", err)
+	}
+	if code, out := call(t, nil, "logs"); code != 1 || !strings.Contains(out, "telemetry") {
+		t.Fatalf("logs without a stream must say how to turn one on: %d %s", code, out)
+	}
+
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[telemetry]\nenabled = true\n")
+	if code, out := call(t, nil, "run", "-c", "true"); code != 0 {
+		t.Fatal(out)
+	}
+	var events []map[string]any
+	if code, out := call(t, &events, "logs", "--json"); code != 0 || len(events) == 0 {
+		t.Fatalf("logs: %d %s", code, out)
+	}
+	names := map[string]bool{}
+	for _, e := range events {
+		names[e["event"].(string)] = true
+		if p, ok := e["payload"].(map[string]any); ok {
+			if _, leaked := p["command"]; leaked {
+				t.Fatalf("command lines must be elided by default: %v", e)
+			}
+		}
+	}
+	for _, want := range []string{"resolve", "provision", "run"} {
+		if !names[want] {
+			t.Fatalf("missing %s event in %v", want, names)
+		}
+	}
+	var st map[string]any
+	call(t, &st, "status", "--json")
+	if tail, _ := st["events"].([]any); len(tail) == 0 {
+		t.Fatalf("status --json must carry the event tail: %v", st["events"])
 	}
 }

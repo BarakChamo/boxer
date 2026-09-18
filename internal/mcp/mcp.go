@@ -19,6 +19,7 @@ import (
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
 )
 
@@ -183,8 +184,18 @@ func (s *Server) resolve(cwd string) (*box.Env, string, error) {
 	return base, fmt.Sprintf("note: cwd %q is not inside a git worktree; ran in %s\n", cwd, base.CWD), nil
 }
 
-func (s *Server) call(name string, args map[string]any) (string, bool) {
+func (s *Server) call(name string, args map[string]any) (text string, isErr bool) {
 	cwd, _ := args["cwd"].(string)
+	cmd, _ := args["command"].(string)
+	start := time.Now()
+	defer func() {
+		outcome := obs.OK
+		if isErr {
+			outcome = obs.Failed
+		}
+		obs.Emit(obs.Event{Name: obs.MCP, Harness: s.Harness, Outcome: outcome, Duration: time.Since(start),
+			Payload: map[string]any{"tool": name, "command": cmd}})
+	}()
 	e, note, err := s.resolve(cwd)
 	if err != nil {
 		return err.Error(), true
@@ -201,7 +212,6 @@ func (s *Server) call(name string, args map[string]any) (string, bool) {
 		}
 		return note + fmt.Sprintf("scope %s (%s): %s, image %s, worktree %s mounted at %s", e.Scope.Key, e.Scope.Isolation, m.State, m.Image, e.Scope.Root, e.Cfg.MountAt), false
 	case "boxer_run":
-		cmd, _ := args["command"].(string)
 		if strings.TrimSpace(cmd) == "" {
 			return "command is required", true
 		}

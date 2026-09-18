@@ -21,6 +21,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/inside"
 	"github.com/BarakChamo/boxer/internal/install"
 	"github.com/BarakChamo/boxer/internal/mcp"
+	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/shim"
 	"github.com/BarakChamo/boxer/internal/vm"
@@ -39,6 +40,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer ls                         list boxer sandboxes
   boxer gc [--dry-run]             delete sandboxes whose worktree is gone, idle sandboxes and packs
   boxer doctor                     explain the resolved configuration and state
+  boxer logs [--scope NAME] [-n N] [--json]  read the event log ([telemetry] sink = "file")
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
@@ -70,6 +72,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	// BOXER_TRACE turns the file sink on before any configuration is resolved; box.Resolve
+	// reconfigures from the repository's [telemetry] table as soon as it has one.
+	obs.Configure(obs.Config{})
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "version", "--version", "-v":
@@ -106,6 +111,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return lsCmd(rest, stdout, stderr)
 	case "gc":
 		return gcCmd(rest, stdout, stderr)
+	case "logs":
+		return logsCmd(rest, stdout, stderr)
 	case "up", "run", "down", "status", "doctor":
 		return scoped(cmd, rest, stdin, stdout, stderr)
 	case "shell", "acp":
@@ -317,6 +324,9 @@ type statusJSON struct {
 	ImageReason string            `json:"image_reason"`
 	Labels      map[string]string `json:"labels"`
 	LastUsed    *string           `json:"last_used"`
+	// Events is the tail of this scope's event log when telemetry writes one; a dashboard reads
+	// status and wants the last few things that happened without a second command.
+	Events []obs.Event `json:"events,omitempty"`
 }
 
 // Exit codes of `boxer status`.
@@ -336,6 +346,7 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 		Scope: e.Scope.Key, Isolation: e.Scope.Isolation, Worktree: e.Scope.Root, MountAt: e.MountAt(),
 		Exists: ok, State: "absent", Image: img, ImageReason: why, Labels: map[string]string{}, LastUsed: lastUsedJSON(e.Scope.Key),
 	}
+	s.Events, _ = obs.Read(obs.Current().Path, e.Scope.Key, 5)
 	code := exitAbsent
 	if ok {
 		s.State, s.Image, s.ImageReason, s.Labels = m.State, m.Image, "machine", m.Labels
@@ -725,8 +736,55 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "deleted pack %s (%s)\n", p, row.Reason)
 		}
 	}
+	machines, packs := 0, 0
+	for _, r := range rows {
+		if r.Pack != "" {
+			packs++
+		} else {
+			machines++
+		}
+	}
+	obs.Emit(obs.Event{Name: obs.GC, Outcome: obs.OK, Payload: map[string]any{"machines": machines, "packs": packs, "dry_run": *dry}})
 	emit(stdout, rows, *asJSON)
 	return code
+}
+
+// logsCmd reads the file sink back. There is no other reader: the stream is JSON on disk, and a
+// command that pretty-prints it is the difference between telemetry and a file nobody opens.
+func logsCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	scopeName := fs.String("scope", "", "only events for this sandbox (`boxer status` prints the key)")
+	n := fs.Int("n", 0, "print only the last n events")
+	asJSON := fs.Bool("json", false, "print a JSON array of events")
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(cwdRoot())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	obs.ConfigureFrom(cfg.Telemetry)
+	path := obs.Current().Path
+	if path == "" {
+		path = obs.DefaultPath()
+	}
+	events, err := obs.Read(path, *scopeName, *n)
+	if err != nil {
+		fmt.Fprintf(stderr, "boxer: no event log at %s\n  fix:       set [telemetry] enabled = true in boxer.toml, or BOXER_TRACE=<path>\n", path)
+		return 1
+	}
+	if events == nil {
+		events = []obs.Event{}
+	}
+	if emit(stdout, events, *asJSON) {
+		return 0
+	}
+	for _, e := range events {
+		fmt.Fprintln(stdout, e.Line())
+	}
+	return 0
 }
 
 func downAll(client vm.Client, asJSON bool, stdout, stderr io.Writer) int {
