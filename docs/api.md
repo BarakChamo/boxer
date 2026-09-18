@@ -6,7 +6,7 @@ experimental until 1.0. Release rules are in [release.md](release.md).
 
 ## CLI JSON
 
-`--json` on `ls`, `status`, `down`, `gc`, `doctor` prints exactly one JSON document (an object or an
+`--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks` prints exactly one JSON document (an object or an
 array) on stdout, indented, with snake_case fields. Human output is unchanged without the flag.
 When a scoped command (`status`, `down`) is refused before it can act, the refusal is printed as
 `{"error": …}` on stdout (shape under "Errors") and repeated in prose on stderr; exit 1.
@@ -58,6 +58,42 @@ Every boxer-owned machine on the host, sorted by scope. Exit 0.
 
 `created_at` is smolvm's Unix timestamp. `integration` is `inside` for machines created by
 `boxer shell`/`boxer acp`, otherwise the outside integration (empty on older machines).
+
+### `boxer brief [--json]`
+
+The brief the agent is given: the prose every transport carries, plus the facts it states, so a
+harness or a dashboard can present them instead of parsing sentences. Exit 0, or 1 when the scope
+could not be resolved. This is where configuration reaches the agent; published content carries
+none of it.
+
+```json
+{
+  "brief": "This repository runs commands inside a boxer sandbox: …",
+  "scope": { "key": "sb-7e1852e4a3c3", "isolation": "worktree", "worktree": "/Users/me/src/demo", "degraded": false },
+  "isolation": "worktree",
+  "mount_at": "/workspace",
+  "mode": "rewrite",
+  "enforcement": "both",
+  "intercept": ["npm", "go", "make"],
+  "passthrough": ["git", "gh", "ssh", "boxer", "smolvm"],
+  "tasks": { "test": "go test ./...", "build": "make build" }
+}
+```
+
+### `boxer tasks [--json]`
+
+The command lines the repository declares in `[tasks]`, sorted by name; an empty array when it
+declares none. Exit 0.
+
+```json
+[
+  { "name": "build", "command": "make build" },
+  { "name": "test", "command": "go test ./..." }
+]
+```
+
+`boxer run --task <name>` runs one in the sandbox. An unknown name is refused in the standard
+error shape with `cause` `NO_SUCH_TASK` and a `fix:` line listing the names that do exist.
 
 ### `boxer gc [--dry-run] --json`
 
@@ -132,11 +168,11 @@ what those signals can support (`subagent` needs `subagent_start`; `session` nee
 `session_start` or `mcp`; else `worktree`).
 
 Optional fields: `smolvm_error` (smolvm missing), `image_warning` (`network.mode = off`),
-`sandbox_error`, `shims` (only when enforcement uses shims), `installed_versions` (marker file →
-boxer version that wrote it, for project-layer installs under the worktree), `signals` (once the
-scope resolved), `error`. `sandbox`
-is `null` when absent. A project layer written by another boxer version adds a warning naming
-the file and both versions.
+`sandbox_error`, `shims` (only when enforcement uses shims), `drift` (installed files whose bytes
+differ from this binary's copy of the published content), `signals` (once the scope resolved),
+`error`. `sandbox` is `null` when absent. Each drifted file also adds a warning, because installed
+content is copied verbatim and never edited afterwards: a difference means another release wrote
+it, or someone did.
 
 ### Exit codes
 
@@ -209,7 +245,10 @@ is the binary version. Two tools:
 | `boxer_run` | `{command: string, cwd?: string}` | stdout and stderr, then `[exit N]`; `isError` when the exit is non-zero or boxer refused. Under `isolation = "session"` or `"subagent"` the MCP path has no session id (MCP carries none), so it resolves the worktree scope; hooks carry the ids and rewrite to `boxer run --session … --agent …` |
 | `boxer_status` | `{cwd?: string}` | one line: scope, isolation, state, image, worktree and mount |
 
-Both resolve the scope from `cwd` (default: the server's working directory) with the same rules
+One resource, `boxer://brief` (`text/markdown`): the same brief `boxer brief` prints, resolved for
+the server's working directory. `resources/read` on any other URI is an error.
+
+Both tools resolve the scope from `cwd` (default: the server's working directory) with the same rules
 as the CLI, so a refusal is the `box.Error` text. `cwd` is forgiving about which side of the mount
 it names: a host path inside the worktree becomes the matching guest directory; a path under the
 guest mount (`/workspace/...` when `mount_at` is set; the brief tells the model that path) maps back

@@ -44,8 +44,12 @@ eval-adherence: build  ## does a live model follow the brief; four models, repor
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier adherence --out docs/eval-adherence.md
 
-package: build    ## render the published package and every client view into dist/
+package: build    ## render the package and every client view into dist/, and refresh the checked-in plugin/
 	bin/boxer package all --out dist
+	# plugin/ is reviewable published content, so it is rendered by the unstamped binary CI uses;
+	# the release version is stamped into the release artifact, not into the checkout.
+	go run ./cmd/boxer package plugin --out dist/checked
+	rm -rf plugin && mv dist/checked/boxer plugin && rmdir dist/checked
 
 clean:            ## remove build output and coverage
 	rm -rf bin dist coverage.out

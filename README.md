@@ -33,8 +33,9 @@ how releases are cut is in [docs/release.md](docs/release.md).
 
 ## Configuration
 
-`boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins. Unknown keys are
-errors. Every scalar is also `BOXER_<KEY>` in the environment. `boxer doctor` prints each value and
+`boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins. A misspelled
+key is an error; an unknown top-level table is a warning, so a repository that adopts a newer
+boxer's feature still loads in an older one. Every scalar is also `BOXER_<KEY>` in the environment. `boxer doctor` prints each value and
 where it came from.
 
 ```toml
@@ -53,7 +54,16 @@ allow_hosts = ["registry.npmjs.org"]
 manage      = "off"             # detect: a session in the main checkout shares the repository VM until it enters a worktree
 [harness.gemini-cli]
 mode        = "tool"
+[tasks]                         # named command lines: `boxer run --task test`
+test        = "go test ./..."
+build       = "make build"
 ```
+
+Named tasks are the deterministic way in: the agent runs a name the repository declared instead of
+composing a shell line whose sandboxing depends on the intercept list matching it. `boxer tasks`
+lists them; an unknown name is refused with the list. `boxer brief` prints what the agent is told
+about this checkout — mount path, mode, intercepted programs, tasks — and `boxer brief --json` is
+the same as data.
 
 `boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
 `boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
@@ -110,7 +120,7 @@ only `boxer shim install --shell` and `shell_path` on its terminal tool, see
 ## Harness bundles
 
 `boxer package plugin --out dist` renders one [Agent Plugins 1.0.0](https://agent-plugins.org)
-package, `dist/boxer`, valid for every client at once: `plugin.json`, `skills/boxer/SKILL.md`,
+package, `dist/boxer`, valid for every client at once: `plugin.json`, `skills/boxer/`,
 `mcp.json` (the `boxer mcp` server), `AGENTS.md`, and one reverse-domain directory per client
 carrying its hooks and README (`com.anthropic.claude-code/`, `com.openai.codex/`, `ai.x.grok/`,
 `com.google.gemini-cli/`, `ai.moonshot.kimi-code/`, `com.deepseek.dsh/`, `ai.opencode/`,
@@ -124,8 +134,14 @@ grok plugin install dist/boxer
 gemini extensions install dist/gemini-cli                          # Gemini reads hooks from hooks/ only; use its view
 ```
 
-`boxer package <harness>` renders that client's view, the subset of the package it reads, with the
-client's `[harness.<name>]` overrides applied; `boxer package all` renders the package and every
+The skill is spec-complete: `SKILL.md` (with `allowed-tools: Bash(boxer:*)`), `scripts/run`,
+`scripts/task`, `scripts/status` and `scripts/brief` — one-line `sh` wrappers around the installed
+binary — and `references/BRIEF.md`, loaded on demand. None of it is rendered from configuration:
+every published file is identical for every user apart from the release version, and the scripts
+ask the binary, which resolves `boxer.toml` where it runs. The rendered package is checked in at
+[`plugin/`](plugin/) so it is reviewable in a diff.
+
+`boxer package <harness>` renders that client's view, the subset of the package it reads; `boxer package all` renders the package and every
 view. Kimi, DSH, OpenCode and pi have no plugin loader: their namespace README lists the files to
 copy, and `boxer install <harness>` writes them into the repository. DSH also reads no
 project-level plugin config, so its view carries a profile patch layer, `.dsh/cordis.patch.yml`,

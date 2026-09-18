@@ -404,6 +404,17 @@ mode               = "tool"       # block-only hooks; shims installed by `boxer 
 
 - **R-CFG-1.** `boxer doctor` prints the fully resolved configuration and the file each value came
   from. Configuration that cannot be explained is configuration that gets cargo-culted.
+- **R-CFG-4.** `[tasks]` maps a name to a command line. `boxer tasks [--json]` lists them and
+  `boxer run --task <name>` runs one in the sandbox, so the agent invokes a name the repository
+  declared rather than composing a shell line whose sandboxing depends on the intercept list
+  matching it. An unknown name is refused in the §3.6 shape with `cause` `NO_SUCH_TASK` and a
+  `fix:` line listing the declared names.
+- **R-CFG-5.** A `boxer.toml` outlives the binary that reads it, so an unknown top-level *table* is
+  a warning (reported by `doctor`) and the file still loads: a repository that adopts a newer
+  feature stays usable by an older boxer. Every other unknown key remains a hard error, because a
+  silently ignored misspelling of a scalar key would silently change what is enforced. No
+  `config_version` key exists; the rule needs no bookkeeping and covers every future additive
+  table.
 - **R-CFG-2.** Unknown keys are an error, not a warning, so a typo cannot silently disable
   enforcement.
 - **R-GUEST-1.** With neither `image` nor `smolfile` set, the image is chosen from the worktree's
@@ -550,10 +561,10 @@ How each harness's bundle format carries those four:
 - **R-PKG-1.** A harness bundle is a *projection* of the four components into that harness's format.
   Adding a harness means writing a bundle manifest and, where the harness's hook dialect differs, a
   translation table for the shared binary. It never means new decision logic.
-- **R-PKG-2.** The instruction component is one source document rendered into each harness's
-  instruction format (skill, context file, `AGENTS.md` section). Its content states: execution runs
-  in a microVM keyed to the worktree; which commands are intercepted; where the worktree is mounted;
-  and, in `tool` mode, the exact tool or command form to use.
+- **R-PKG-2.** The instruction component is one source document in each harness's instruction
+  format (skill, context file, `AGENTS.md` section). It states that execution runs in a microVM
+  keyed to the worktree and tells the agent how to ask for the rest, because the rest — mount path,
+  intercept list, mode — is a property of the checkout and is resolved at run time (R-PKG-9).
 - **R-PKG-3.** The run tool is one MCP server exposing `boxer_run`, `boxer_status`, and nothing else
   in v1. Every bundle registers the same server.
 - **R-PKG-4.** The gap closer is chosen per harness from what it supports, in this order: remove the
@@ -571,6 +582,28 @@ How each harness's bundle format carries those four:
 - **R-PKG-8.** Two installed layers must not fight: an already-wrapped command is allowed as is,
   provisioning is idempotent, and every guest process carries `BOXER_INSIDE=1`, on which boxer's
   hooks go silent and `boxer run` executes directly.
+- **R-PKG-9.** Published content is static. `bundle.Render(version, dir)` takes a version and
+  nothing else; no configuration value, environment variable or per-harness override reaches a
+  published file, and no file in the package differs between two users of the same release. The
+  package is written into other people's repositories and read by people who never ran the
+  packager, so a rendered `mode` or `mount_at` would be one person's setting presented to everyone
+  as fact. `TestPackageIsConfigIndependent` renders the package under two hostile configurations
+  and a hostile environment and requires byte-identical output.
+- **R-PKG-10.** Configuration reaches the agent at run time through one generator,
+  `box.InstructionsFor`, and three transports: `boxer brief [--json]`, the session-start hooks, and
+  the MCP resource `boxer://brief`. A harness that reads none of them still works, because the
+  skill tells the agent to run `boxer brief`.
+- **R-PKG-11.** The skill is spec-complete (agentskills.io): `SKILL.md` with
+  `allowed-tools: Bash(boxer:*)`, `scripts/{run,task,status,brief}` as POSIX `sh` wrappers that
+  `exec` the installed binary, and `references/BRIEF.md` for the long-form explanation loaded on
+  demand. The scripts carry no policy: they call `boxer`, which resolves `boxer.toml` itself.
+- **R-PKG-12.** `boxer install` copies published content byte-for-byte and never edits it
+  afterwards. It still writes repository *configuration* — hooks, MCP entries, Gemini's
+  `tools.exclude` — which is derived from configuration by definition. `doctor` detects drift by
+  comparing the installed bytes with the binary's embedded copy (`drift` in `doctor --json`); the
+  fix is re-running `boxer install`, never an in-place rewrite.
+- **R-PKG-13.** The rendered package is checked in at `plugin/`, refreshed by `make package`, so
+  published content is reviewable in a diff. CI fails when it is stale.
 - **R-PKG-6.** Where a harness offers a plugin evaluation mechanism, such as `claude plugin eval`,
   the bundle ships an evaluation set that measures whether the agent uses the sandbox correctly on
   standard tasks. This is the empirical form of §12's zero-error criterion.
