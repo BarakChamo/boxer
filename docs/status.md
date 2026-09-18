@@ -21,7 +21,7 @@ and orchestrators). Every cell is a fresh repository and a fresh VM.
 | pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
 | Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
 | Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 3/4 live: tool mode costs one denial (below) |
-| DSH | block-only hooks; shims | bundle only | not in table | none | not installed |
+| DSH | deny-only hooks through the `dsh-hooks-claude-code` bridge; shims | pass | not in table | none | t1 3/3, t2 2/2 live; tool mode only (the bridge ignores `updatedInput`), and boxer provisions on `UserPromptSubmit` because its `SessionStart` is detached |
 
 Inside timings are for a host that already holds the harness pack; the first `boxer shell <h>`
 per host pays the install once (10 s to 11 min depending on npm) and packs the result.
