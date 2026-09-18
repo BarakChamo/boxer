@@ -14,6 +14,7 @@
 - [architecture.md](architecture.md) — the pieces, and the rule that keeps harness names out of the core
 - [requirements.md](requirements.md) — the specification, requirement by requirement, with verification status
 - [eval-plan.md](eval-plan.md) — how boxer's claims are evaluated: the tiers, the oracle, the matrix
+- [plan-1.1.md](plan-1.1.md) — what 1.1 adds and why, with the research behind it
 - [release.md](release.md) — what 1.0 promises, versioning, and the release gate
 - [status.md](status.md) — what the last full evaluation run proved, with dates and skips
 
