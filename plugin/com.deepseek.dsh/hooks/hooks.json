@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "boxer hook dsh", "timeout": 120 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "bash", "hooks": [{ "type": "command", "command": "boxer hook dsh", "timeout": 30 }] }
+    ]
+  }
+}

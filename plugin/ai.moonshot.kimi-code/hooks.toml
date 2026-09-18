@@ -1,0 +1,19 @@
+# boxer hooks for Kimi Code CLI. Append to ~/.kimi-code/config.toml (or $KIMI_CODE_HOME/config.toml).
+# Kimi hooks are block-only (exit 0 allow, exit 2 block, JSON permissionDecision); boxer therefore
+# relies on PATH shims for the bare command and uses PreToolUse only to deny in `tool` mode.
+
+[[hooks]]
+event = "SessionStart"
+command = "boxer hook kimi"
+timeout = 120
+
+[[hooks]]
+event = "SessionEnd"
+command = "boxer hook kimi"
+timeout = 60
+
+[[hooks]]
+event = "PreToolUse"
+matcher = "Bash|Shell"
+command = "boxer hook kimi"
+timeout = 30

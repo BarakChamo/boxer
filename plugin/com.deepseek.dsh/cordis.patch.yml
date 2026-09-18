@@ -1,0 +1,17 @@
+# boxer for DeepSeek Harness dev — a dsh profile patch layer. Do not edit; regenerate.
+#
+# dsh reads no project-level plugin config of its own, so these rows are applied at boot:
+#   dsh --profile headless --patch .dsh/cordis.patch.yml "<task>"
+# Copy them into $DSH_HOME/cordis.patch.yml to apply them to every profile instead.
+- insert:
+    - id: boxer-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: boxer
+        transport: stdio
+        command: boxer
+        args: ['mcp', '--harness', 'dsh']
+    - id: boxer-hooks
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: ./.dsh/hooks.json

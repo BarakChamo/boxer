@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "boxer",
+  "version": "dev",
+  "description": "Runs the agent's shell commands in a smolvm microVM keyed to the git worktree. Portable core: the boxer skill and the boxer MCP server (boxer_run, boxer_status). Client hooks live in the reverse-domain directories.",
+  "homepage": "https://github.com/BarakChamo/boxer",
+  "repository": "https://github.com/BarakChamo/boxer",
+  "keywords": ["sandbox", "microvm", "worktree", "mcp"]
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +65,11 @@ type Config struct {
 	EnvPassthrough []string `toml:"env_passthrough"`
 	Secrets        []string `toml:"secrets"`
 
+	// Tasks are the repository's named command lines: `boxer run --task test`. Naming a task is
+	// how an agent runs the repository's real commands without composing a shell line that the
+	// intercept list may or may not catch (R-CFG-4).
+	Tasks map[string]string `toml:"tasks"`
+
 	Network  Network             `toml:"network"`
 	Worktree Worktree            `toml:"worktree"`
 	Harness  map[string]Override `toml:"harness"`
@@ -72,6 +78,9 @@ type Config struct {
 	Sources map[string]string `toml:"-"`
 	// Files lists the configuration files that were read, lowest priority first.
 	Files []string `toml:"-"`
+	// Warnings records what was read but not understood, so an older binary can still run a
+	// repository whose boxer.toml was written for a newer one.
+	Warnings []string `toml:"-"`
 }
 
 // Defaults are the values with no file present.
@@ -97,6 +106,7 @@ func Defaults() Config {
 		Network:               Network{Mode: "allowlist", AllowHosts: []string{}},
 		Worktree:              Worktree{Manage: "off"},
 		Harness:               map[string]Override{},
+		Tasks:                 map[string]string{},
 		Sources:               map[string]string{},
 		RequireLinkedWorktree: false,
 	}
@@ -148,6 +158,18 @@ func userFile() string {
 	return filepath.Join(dir, "boxer", "boxer.toml")
 }
 
+// knownKeys are the top-level keys this binary understands, from Config's own tags.
+var knownKeys = func() map[string]bool {
+	m := map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		if tag := t.Field(i).Tag.Get("toml"); tag != "" && tag != "-" {
+			m[tag] = true
+		}
+	}
+	return m
+}()
+
 func (c *Config) merge(path string) error {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -160,12 +182,24 @@ func (c *Config) merge(path string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	if und := md.Undecoded(); len(und) > 0 {
-		names := make([]string, len(und))
-		for i, k := range und {
-			names[i] = k.String()
+	// An unknown top-level *table* is how a newer boxer adds a feature, so it is a warning: a
+	// repository that declares one must still be usable by whatever binary is installed. Anything
+	// else unknown is a typo in a key this binary owns, and stays a hard error, because a silently
+	// ignored `mod = "off"` would silently disable enforcement.
+	var unknown []string
+	warned := map[string]bool{}
+	for _, k := range md.Undecoded() {
+		if top := k[0]; !knownKeys[top] && md.Type(top) == "Hash" {
+			if !warned[top] {
+				warned[top] = true
+				c.Warnings = append(c.Warnings, fmt.Sprintf("%s: [%s] is not a table this boxer knows; ignored", path, top))
+			}
+			continue
 		}
-		return fmt.Errorf("%s: unknown key(s): %s", path, strings.Join(names, ", "))
+		unknown = append(unknown, k.String())
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("%s: unknown key(s): %s", path, strings.Join(unknown, ", "))
 	}
 	for _, k := range md.Keys() {
 		if len(k) > 0 {
@@ -276,6 +310,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("harness.%s.mode = %q", name, o.Mode)
 		}
 	}
+	for name, cmd := range c.Tasks {
+		if strings.TrimSpace(cmd) == "" {
+			return fmt.Errorf("tasks.%s is empty; give it a command line", name)
+		}
+	}
 	if _, err := MemoryMiB(c.Memory); err != nil {
 		return err
 	}
@@ -303,4 +342,14 @@ func MemoryMiB(s string) (int, error) {
 // Has reports whether list contains v.
 func Has(list []string, v string) bool {
 	return slices.Contains(list, v)
+}
+
+// TaskNames lists the declared task names, sorted, for listings and error messages.
+func (c Config) TaskNames() []string {
+	out := make([]string, 0, len(c.Tasks))
+	for n := range c.Tasks {
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return out
 }

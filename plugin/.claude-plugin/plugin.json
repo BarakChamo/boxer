@@ -1,0 +1,9 @@
+{
+  "name": "boxer",
+  "displayName": "boxer sandbox",
+  "version": "dev",
+  "description": "Runs shell commands in a smolvm microVM keyed to the git worktree. Hooks provision the sandbox and rewrite commands into it; the boxer_run tool is the explicit path.",
+  "skills": "./skills/",
+  "hooks": "./com.anthropic.claude-code/hooks/hooks.json",
+  "mcpServers": "./mcp.json"
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run a shell line in this repository's boxer sandbox: scripts/run 'npm ci'
+exec boxer run -c "$*"

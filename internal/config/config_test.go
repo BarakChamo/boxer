@@ -173,3 +173,37 @@ func TestLoadWithNoFilesIsDefaults(t *testing.T) {
 		t.Fatalf("%v %+v", err, cfg.Files)
 	}
 }
+
+// A repository's boxer.toml outlives the binary that reads it, so a table this release does not
+// know is a warning rather than a refusal: an older boxer must still run a newer checkout. A
+// misspelled scalar key stays fatal, because silently ignoring `mod = "off"` would silently
+// change what is enforced.
+func TestUnknownTablesWarnAndUnknownKeysFail(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "boxer.toml")
+	if err := os.WriteFile(p, []byte("[tasks]\ntest = \"make test\"\n\n[telemetry]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFiles(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tasks["test"] != "make test" {
+		t.Fatalf("tasks: %v", cfg.Tasks)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "[telemetry]") {
+		t.Fatalf("unknown table must warn: %v", cfg.Warnings)
+	}
+	if err := os.WriteFile(p, []byte("mod = \"off\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("a misspelled key must fail: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("[tasks]\ntest = \"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFiles(p); err == nil {
+		t.Fatal("an empty task command must fail")
+	}
+}
