@@ -87,6 +87,9 @@ homebrew_casks:
           end
 
 release:
+  # A tag that names a candidate is a candidate: it must not become the release install.sh and
+  # Homebrew hand to someone who asked for the latest version.
+  prerelease: auto
   github:
     owner: BarakChamo
     name: boxer
