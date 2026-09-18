@@ -132,7 +132,7 @@ Verified by the evaluation suite; the per-cell results and their dates are in
 | Grok | rewrite (user and project hooks) | yes | yes | yes | T1, T2 live, adherence — use rewrite mode, see below |
 | Kimi | block only, so tool mode | files listed | yes | yes | T1, T2 live, adherence |
 | DSH | deny only, through the Claude Code hook bridge | profile patch layer | — | — | T1, T2 live |
-| GitHub Copilot CLI | rewrite, at user scope only | yes | row present, not run | `copilot --acp` | T1, T2 live |
+| GitHub Copilot CLI | rewrite, at user scope only | yes | yes | `copilot --acp` | T1, T2 live |
 
 Grok does not surface session-start context to the model, so in tool mode its first shell command
 always costs one denial before the agent learns to use `boxer_run`. Rewrite mode is the right
