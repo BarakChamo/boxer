@@ -1,0 +1,31 @@
+name: Harness support
+description: A coding agent or orchestrator boxer should work with
+labels: [harness]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Supporting a harness means a hook dialect row, an install case, a template namespace and an
+        evaluation driver. The core never learns a harness name. What decides how far boxer can go
+        is what the harness itself allows, so the questions below are the ones that matter.
+  - type: input
+    id: harness
+    attributes:
+      label: Which harness, and which version
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: What can a third party do with it
+      description: |
+        Does it have a hook API, and can a hook rewrite a command or only allow and deny it? Does it
+        speak MCP? Does it load Agent Skills? Can its shell binary be configured? Link the
+        documentation if there is any.
+    validations:
+      required: true
+  - type: textarea
+    id: headless
+    attributes:
+      label: How does it run headless
+      description: The command that runs one prompt to completion without a terminal, which is what an evaluation cell needs.

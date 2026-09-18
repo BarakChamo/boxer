@@ -1,0 +1,37 @@
+name: Bug report
+description: Something boxer did that it should not have, or did not do that it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `boxer doctor` prints every resolved value and where it came from. Its output answers most
+        questions about what boxer would do in a repository, so please include it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: boxer doctor
+      description: The output of `boxer doctor` in the repository where this happened.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`boxer --version`, `smolvm --version`, the harness and its version, and your OS."
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Trace, if the problem involves a hook
+      description: "Run again with `BOXER_TRACE=/tmp/boxer.log` and paste the relevant lines. Command lines appear verbatim in it, so redact what you must."
+      render: text
