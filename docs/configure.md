@@ -90,7 +90,7 @@ them.
 `[harness.<name>]` accepts any key above and applies it only when that harness is the one running.
 This is how a harness whose hooks can only block gets `mode = "tool"` while everything else stays
 transparent. Names are the ones `boxer doctor` prints: `claude-code`, `codex`, `gemini-cli`,
-`opencode`, `grok`, `kimi`, `dsh`, `pi`.
+`opencode`, `grok`, `kimi`, `dsh`, `pi`, `copilot`.
 
 ## Placement
 
