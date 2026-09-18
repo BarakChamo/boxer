@@ -55,6 +55,14 @@ func (d InsideACP) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		if f := strings.Fields(lines[len(lines)-1]); len(f) > 0 {
 			tr.Answer = f[0]
 		}
+		// An agent that closes its pipe says nothing useful on its own; what it printed before
+		// dying is the whole diagnosis, and a cell that fails once in a hundred runs is not worth
+		// re-running by hand to find out.
+		if err != nil {
+			if last := lastLines(stderr.String(), 3); last != "" {
+				err = fmt.Errorf("%v: %s", err, last)
+			}
+		}
 		return tr, err
 	case <-time.After(15 * time.Minute):
 		return Transcript{Raw: cl.log.String() + stderr.String()}, fmt.Errorf("acp %s timed out", h)
