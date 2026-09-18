@@ -63,3 +63,10 @@ CI runs vet, lint, race, coverage, package and schema validation on Linux and ma
 ## Security
 
 Please do not open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md).
+
+## What CI enforces
+
+`main` is protected: tests on Linux and macOS, the linter, and package validation must pass before
+anything merges, and the branch must be up to date with main first. Force pushes and deletion are
+refused. Nothing else is required, because a review requirement on a project with one maintainer
+only blocks the maintainer.
