@@ -173,3 +173,32 @@ func TestLoadWithNoFilesIsDefaults(t *testing.T) {
 		t.Fatalf("%v %+v", err, cfg.Files)
 	}
 }
+
+// [telemetry] is off by default, parsed from the file, and overridable from the environment for a
+// harness that offers nothing else. An unknown sink is a configuration error, not a silent "none".
+func TestTelemetryTable(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Telemetry.Enabled || cfg.Telemetry.Sink != "none" {
+		t.Fatalf("telemetry must be off by default: %+v", cfg.Telemetry)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "boxer.toml")
+	os.WriteFile(p, []byte("[telemetry]\nenabled = true\nsink = \"file\"\npath = \"/tmp/e.jsonl\"\nrecord_commands = true\n"), 0o644)
+	cfg, err := LoadFiles(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Telemetry.Enabled || cfg.Telemetry.Sink != "file" || cfg.Telemetry.Path != "/tmp/e.jsonl" || !cfg.Telemetry.RecordCommands {
+		t.Fatalf("parsed: %+v", cfg.Telemetry)
+	}
+	bad := filepath.Join(dir, "bad.toml")
+	os.WriteFile(bad, []byte("[telemetry]\nsink = \"carrier pigeon\"\n"), 0o644)
+	if _, err := LoadFiles(bad); err == nil {
+		t.Fatal("an unknown sink must be rejected")
+	}
+	t.Setenv("BOXER_TELEMETRY_SINK", "stderr")
+	cfg, err = LoadFiles(p)
+	if err != nil || cfg.Telemetry.Sink != "stderr" || cfg.Sources["telemetry_sink"] != "BOXER_TELEMETRY_SINK" {
+		t.Fatalf("environment override: %+v %v", cfg.Telemetry, cfg.Sources)
+	}
+}

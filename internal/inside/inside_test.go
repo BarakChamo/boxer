@@ -123,3 +123,27 @@ func TestLoginHintOnlyWithoutCredentials(t *testing.T) {
 		t.Fatal("codex's auth.json travels with the mount; no hint")
 	}
 }
+
+// The harness marker probe must not read a dropped transport as "not installed": that reinstalls
+// a harness that is already there, which is npm in the guest for minutes.
+func TestHarnessMarkerProbeDistinguishesTransportFailure(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := box.Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = os.Stderr
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	vmtest.FailExecOnce(t, "test -f /var/lib/boxer/harness-x")
+	err = install(e, "x", Harness{Bin: "true", Install: "true"})
+	be, ok := err.(*box.Error)
+	if !ok || be.Cause != "TRANSPORT_FAILED" {
+		t.Fatalf("want TRANSPORT_FAILED, got %v", err)
+	}
+	if b, _ := os.ReadFile(log); strings.Contains(string(b), "npm") {
+		t.Fatalf("no install may run when the probe could not answer:\n%s", b)
+	}
+}

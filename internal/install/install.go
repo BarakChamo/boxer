@@ -20,10 +20,22 @@ import (
 	"github.com/BarakChamo/boxer/internal/config"
 )
 
-// Result reports what Install did.
+// Result reports what Install did. A write failure is kept here rather than returned at every
+// call site: the file writers are a long list of one-liners, and threading an error through each
+// of them buried the shape of the installer. The first failure stops the later writes and is
+// returned by Install, which is what matters — `boxer install` used to report success having
+// written nothing at all.
 type Result struct {
 	Written []string
 	Notes   []string
+	err     error
+}
+
+// keep records the first failure.
+func (r *Result) keep(err error) {
+	if r.err == nil {
+		r.err = err
+	}
 }
 
 // Install writes harness's project-level configuration under root.
@@ -51,20 +63,12 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		if err := r.copy(skill, filepath.Join(root, ".claude", "skills", "boxer", "SKILL.md")); err != nil {
-			return *r, err
-		}
-		if err := r.copy(filepath.Join(tmp, "agents", "boxed.md"), filepath.Join(root, ".claude", "agents", "boxed.md")); err != nil {
-			return *r, err
-		}
+		r.copy(skill, filepath.Join(root, ".claude", "skills", "boxer", "SKILL.md"))
+		r.copy(filepath.Join(tmp, "agents", "boxed.md"), filepath.Join(root, ".claude", "agents", "boxed.md"))
 		r.Notes = append(r.Notes, "PATH shims are not part of project settings; run `boxer shim install` where the agent's shell starts.")
 	case "codex":
-		if err := r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json")); err != nil {
-			return *r, err
-		}
-		if err := r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md")); err != nil {
-			return *r, err
-		}
+		r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes,
 			"Codex loads project hooks only after they are trusted: run /hooks once, or pass --dangerously-bypass-hook-trust to `codex exec`.",
 			"Add the run tool to .codex/config.toml:\n  [mcp_servers.boxer]\n  command = \"boxer\"\n  args = [\"mcp\", \"--harness\", \"codex\"]")
@@ -86,13 +90,9 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		if err := r.appendSection(filepath.Join(root, "GEMINI.md"), agents); err != nil {
-			return *r, err
-		}
+		r.appendSection(filepath.Join(root, "GEMINI.md"), agents)
 	case "opencode":
-		if err := r.copy(filepath.Join(ns, "plugins", "boxer.ts"), filepath.Join(root, ".opencode", "plugins", "boxer.ts")); err != nil {
-			return *r, err
-		}
+		r.copy(filepath.Join(ns, "plugins", "boxer.ts"), filepath.Join(root, ".opencode", "plugins", "boxer.ts"))
 		oc := readJSON(filepath.Join(ns, "opencode.json"))
 		if err := r.mergeJSON(filepath.Join(root, "opencode.json"), func(m map[string]any) {
 			if _, ok := m["$schema"]; !ok {
@@ -104,9 +104,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		if err := r.appendSection(filepath.Join(root, "AGENTS.md"), agents); err != nil {
-			return *r, err
-		}
+		r.appendSection(filepath.Join(root, "AGENTS.md"), agents)
 	case "grok":
 		if err := r.mergeJSON(filepath.Join(root, ".grok", "hooks", "boxer.json"), func(m map[string]any) {
 			mergeHooks(m, hooks["hooks"])
@@ -118,17 +116,11 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		if err := r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md")); err != nil {
-			return *r, err
-		}
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes, "Grok Build runs project hooks only after the folder is trusted: launch with --trust once, or set GROK_FOLDER_TRUST=0 for headless runs.")
 	case "pi":
-		if err := r.copy(filepath.Join(ns, "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts")); err != nil {
-			return *r, err
-		}
-		if err := r.appendSection(filepath.Join(root, "AGENTS.md"), agents); err != nil {
-			return *r, err
-		}
+		r.copy(filepath.Join(ns, "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts"))
+		r.appendSection(filepath.Join(root, "AGENTS.md"), agents)
 		r.Notes = append(r.Notes, "pi loads project extensions after the project is trusted; for a one-off run use `pi -e .pi/extensions/boxer.ts`.")
 	case "kimi":
 		if err := r.mergeJSON(filepath.Join(root, ".kimi-code", "mcp.json"), func(m map[string]any) {
@@ -136,30 +128,22 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		if err := r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md")); err != nil {
-			return *r, err
-		}
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		toml, _ := os.ReadFile(filepath.Join(ns, "hooks.toml"))
 		r.Notes = append(r.Notes,
 			"Kimi hooks live in the user config only; append this to ~/.kimi-code/config.toml:\n"+strings.TrimSpace(string(toml)),
 			"Kimi cannot rewrite tool input and its Bash tool ignores PATH shims: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in.")
 	case "dsh":
-		if err := r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml")); err != nil {
-			return *r, err
-		}
-		if err := r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json")); err != nil {
-			return *r, err
-		}
-		if err := r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md")); err != nil {
-			return *r, err
-		}
+		r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml"))
+		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))
+		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes,
 			"DSH has no project-level plugin config: boot it with the patch layer, `dsh --profile headless --patch .dsh/cordis.patch.yml \"<task>\"`, or copy those rows into $DSH_HOME/cordis.patch.yml to apply them to every profile.",
 			"The patch mounts @deepseek-ai/dsh-hooks-claude-code over .dsh/hooks.json; that bridge honours deny and ask but ignores updatedInput, so DSH cannot rewrite a command. Set [harness.dsh] mode = \"tool\" in boxer.toml, or run `boxer shim install` and prepend the directory to PATH.")
 	default:
 		return *r, fmt.Errorf("no project-level install for %q; use `boxer package %s` and follow its README", harness, harness)
 	}
-	return *r, nil
+	return *r, r.err
 }
 
 // User writes the user-level configuration files that orchestrators seed their managed harness
@@ -196,7 +180,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 	default:
 		return *r, fmt.Errorf("no user-level install for %q; user-level layers exist for claude-code and codex", harness)
 	}
-	return *r, nil
+	return *r, r.err
 }
 
 // parts locates one harness's pieces in its rendered view: the extension directory, its hooks
@@ -367,28 +351,35 @@ func setIn(m map[string]any, section, key string, v any) {
 // copy writes src to dst. It reports failure: an install that cannot write the skill it promised
 // used to print the harness name and nothing else, and the operator learned about it from the
 // agent ignoring a sandbox that was never configured.
-func (r *Result) copy(src, dst string) error {
+func (r *Result) copy(src, dst string) {
+	if r.err != nil {
+		return
+	}
 	b, err := os.ReadFile(src)
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(dst), 0o755)
+	}
+	if err == nil {
+		err = os.WriteFile(dst, b, 0o644)
+	}
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, b, 0o644); err != nil {
-		return err
+		r.keep(err)
+		return
 	}
 	r.Written = append(r.Written, dst)
-	return nil
 }
 
 const sectionMarker = "# boxer sandbox"
 
 // appendSection appends the rendered instruction file to dst unless dst already carries it.
-func (r *Result) appendSection(dst, src string) error {
+func (r *Result) appendSection(dst, src string) {
+	if r.err != nil {
+		return
+	}
 	body, err := os.ReadFile(src)
 	if err != nil {
-		return err
+		r.keep(err)
+		return
 	}
 	cur, _ := os.ReadFile(dst)
 	if strings.Contains(string(cur), sectionMarker) {
@@ -397,22 +388,23 @@ func (r *Result) appendSection(dst, src string) error {
 			if fresh, ok := versionMarker(string(body)); ok && old != fresh {
 				updated := strings.Replace(string(cur), versionPrefix+old, versionPrefix+fresh, 1)
 				if err := os.WriteFile(dst, []byte(updated), 0o644); err != nil {
-					return err
+					r.keep(err)
+					return
 				}
 				r.Written = append(r.Written, dst)
 			}
 		}
-		return nil
+		return
 	}
 	sep := ""
 	if len(cur) > 0 && !strings.HasSuffix(string(cur), "\n\n") {
 		sep = "\n\n"
 	}
 	if err := os.WriteFile(dst, append(append(cur, []byte(sep)...), body...), 0o644); err != nil {
-		return err
+		r.keep(err)
+		return
 	}
 	r.Written = append(r.Written, dst)
-	return nil
 }
 
 const versionPrefix = "boxer_version: "

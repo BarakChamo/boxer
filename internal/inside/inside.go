@@ -181,18 +181,18 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 
 // install runs the harness's install line once per VM, recorded by a marker file. The marker
 // travels in the harness pack, so VMs created from it skip this.
-func transportError(stderr string) bool {
-	return strings.Contains(stderr, "connection closed") || strings.Contains(stderr, "agent response frame")
-}
+func transportError(stderr string) bool { return vm.TransportFailure(stderr) }
 
 func install(e *box.Env, name string, h Harness) error {
 	marker := "/var/lib/boxer/harness-" + name
 	// A dropped transport is not an absent marker: read as one, it reinstalled the harness over an
 	// install that was already there, which is npm in the guest for minutes.
-	if _, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker); err != nil {
-		return &box.Error{Reason: "could not read the harness marker: " + err.Error(), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker)
+	if err != nil || transportError(out) {
+		return &box.Error{Reason: "could not read the harness marker: " + strings.TrimSpace(out), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate, then: boxer shell " + name}
-	} else if code == 0 {
+	}
+	if code == 0 {
 		return nil
 	}
 	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per host)\n", name)

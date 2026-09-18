@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
 
@@ -168,5 +170,70 @@ func TestTelemetryOffByDefaultThenLogs(t *testing.T) {
 	call(t, &st, "status", "--json")
 	if tail, _ := st["events"].([]any); len(tail) == 0 {
 		t.Fatalf("status --json must carry the event tail: %v", st["events"])
+	}
+}
+
+// `down --all` and `gc` are the two sweeps, and both need more than one machine to mean anything.
+func TestDownAllAndGCSweeps(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	// A second machine whose worktree is gone: what gc exists for.
+	gone := filepath.Join(t.TempDir(), "removed")
+	if err := client.Create(vm.CreateSpec{Name: "sb-orphan", Labels: map[string]string{"boxer.scope": "sb-orphan", "boxer.root": gone}}); err != nil {
+		t.Fatal(err)
+	}
+	// And a pack nothing references, older than the idle timeout.
+	pack := filepath.Join(packs, "stale.smolmachine")
+	if err := os.WriteFile(pack, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(pack, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 {
+		t.Fatalf("gc: %d %s", code, out)
+	}
+	var deletedMachine, deletedPack bool
+	for _, r := range rows {
+		if r["deleted"] != true {
+			t.Fatalf("gc row not deleted: %v", r)
+		}
+		if r["pack"] == pack {
+			deletedPack = true
+		}
+		if r["scope"] == "sb-orphan" {
+			deletedMachine = true
+		}
+	}
+	if !deletedMachine || !deletedPack {
+		t.Fatalf("gc must sweep the orphaned machine and the unreferenced pack: %v", rows)
+	}
+	if _, err := os.Stat(pack); !os.IsNotExist(err) {
+		t.Fatalf("pack survived gc: %v", err)
+	}
+
+	var down []map[string]any
+	if code, out := call(t, &down, "down", "--all", "--json"); code != 0 || len(down) != 1 {
+		t.Fatalf("down --all: %d %v %s", code, down, out)
+	}
+	var ls []map[string]any
+	if code, _ := call(t, &ls, "ls", "--json"); code != 0 || len(ls) != 0 {
+		t.Fatalf("nothing should be left: %v", ls)
+	}
+	// A smolvm that refuses the delete must fail the command rather than report a clean sweep.
+	if err := client.Create(vm.CreateSpec{Name: "sb-stuck", Labels: map[string]string{"boxer.scope": "sb-stuck"}}); err != nil {
+		t.Fatal(err)
+	}
+	vmtest.FailVerb(t, "machine delete", "machine is busy")
+	if code, out := call(t, nil, "down", "--all"); code != 1 || !strings.Contains(out, "busy") {
+		t.Fatalf("down --all with a refusing smolvm: %d %s", code, out)
 	}
 }

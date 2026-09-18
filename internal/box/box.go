@@ -486,10 +486,12 @@ func (e *Env) setup() error {
 	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
 	// a VM that had already run them, which for a repository whose setup installs dependencies is
 	// minutes, not milliseconds.
-	if _, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker); err != nil {
-		return e.fail(&Error{Reason: "could not read the setup marker: " + err.Error(), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker)
+	if err != nil || vm.TransportFailure(out) {
+		return e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
-	} else if code == 0 {
+	}
+	if code == 0 {
 		return nil
 	}
 	for _, cmd := range e.Cfg.Setup {
@@ -501,11 +503,25 @@ func (e *Env) setup() error {
 				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
 		}
 	}
-	_, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	_, code, err = e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
 	if err == nil && code != 0 {
 		err = fmt.Errorf("writing the setup marker exited %d", code)
 	}
 	return err
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // GuestWorkdir maps the host cwd into the mount.

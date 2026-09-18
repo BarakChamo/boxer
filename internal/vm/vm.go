@@ -54,6 +54,14 @@ func IsAlreadyExists(err error) bool { return said(err, "already exists") }
 // IsNotRunning reports an operation refused because the machine is stopped.
 func IsNotRunning(err error) bool { return said(err, "not running") }
 
+// TransportFailure reports whether output carries smolvm's own failure to reach the guest, rather
+// than something the guest said. An exec that never reached the guest exits non-zero exactly like
+// a command that ran and failed, so the text is the only signal there is: a probe that cannot tell
+// the two apart reads "the marker is missing" from "I could not look".
+func TransportFailure(output string) bool {
+	return strings.Contains(output, "connection closed") || strings.Contains(output, "agent response frame")
+}
+
 // Client shells out to smolvm. Bin is looked up on PATH when it has no slash.
 type Client struct {
 	Bin string

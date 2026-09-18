@@ -150,3 +150,51 @@ func text(r map[string]any) string {
 	c := r["result"].(map[string]any)["content"].([]any)[0].(map[string]any)
 	return c["text"].(string)
 }
+
+// The model is the one who hits these: a tool that does not exist, a command that is empty, a
+// sandbox policy that refuses, and a smolvm that is broken. Each has to come back as an MCP error
+// result rather than as a dead server, because a crashed stdio server ends the session.
+func TestErrorPaths(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"create_on = [\"session_start\"]\n")
+	call := func(body string) map[string]any {
+		var r map[string]any
+		json.Unmarshal([]byte(serve(t, body)[0]), &r)
+		return r
+	}
+	for _, tc := range []struct{ name, body, want string }{
+		{"unknown tool", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope","arguments":{}}}`, "unknown tool"},
+		{"empty command", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"  "}}}`, "command is required"},
+		{"run refused", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"` + dir + `"}}}`, "NO_SANDBOX"},
+	} {
+		r := call(tc.body)
+		res := r["result"].(map[string]any)
+		if res["isError"] != true || !strings.Contains(text(r), tc.want) {
+			t.Errorf("%s: %v", tc.name, r["result"])
+		}
+	}
+	// Malformed JSON-RPC: a parse error and an invalid params error, neither of them fatal.
+	lines := serve(t, `{not json`, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":7}`)
+	if len(lines) != 2 || !strings.Contains(lines[0], "parse error") || !strings.Contains(lines[1], "invalid params") {
+		t.Fatalf("malformed input: %v", lines)
+	}
+	// smolvm itself failing is reported through the tool result, not by dying.
+	vmtest.FailVerb(t, "machine status", "daemon not reachable")
+	r := call(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_status","arguments":{"cwd":"` + dir + `"}}}`)
+	if r["result"].(map[string]any)["isError"] != true || !strings.Contains(text(r), "daemon not reachable") {
+		t.Fatalf("status with a broken smolvm: %v", r["result"])
+	}
+}
+
+// A cwd that is not a worktree and a server whose own directory is not one either: there is no
+// scope to fall back to, so the call reports the resolution failure.
+func TestResolveFailureOutsideAnyRepository(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.Repo(t, vmtest.NoWorktreeCheck) // sets XDG isolation
+	t.Chdir(t.TempDir())
+	var r map[string]any
+	json.Unmarshal([]byte(serve(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_status","arguments":{"cwd":"/nowhere"}}}`)[0]), &r)
+	if r["result"].(map[string]any)["isError"] != true || !strings.Contains(text(r), "git repository") {
+		t.Fatalf("outside any repository: %v", r["result"])
+	}
+}

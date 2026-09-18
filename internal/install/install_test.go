@@ -256,4 +256,13 @@ func TestInstallReportsWriteFailure(t *testing.T) {
 	if _, err := Install("claude-code", config.Defaults(), "test", root); err == nil {
 		t.Fatal("an install that cannot write its skill must not report success")
 	}
+	// The same for the instruction section: a directory where AGENTS.md belongs.
+	other := t.TempDir()
+	if err := os.Mkdir(filepath.Join(other, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Install("pi", config.Defaults(), "test", other)
+	if err == nil {
+		t.Fatalf("an install that cannot write AGENTS.md must not report success: %v", r.Written)
+	}
 }
