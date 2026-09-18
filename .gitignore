@@ -5,3 +5,4 @@ build/
 evals/.env
 __pycache__/
 .env
+coverage.out
