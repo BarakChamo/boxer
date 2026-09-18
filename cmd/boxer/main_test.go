@@ -125,3 +125,21 @@ func TestDoctorWarnsOnInstalledVersionMismatch(t *testing.T) {
 		t.Fatalf("installed_versions: %v", doc["installed_versions"])
 	}
 }
+
+// A dashboard has machine names from `ls`, not worktrees: `down --scope` must work from a
+// directory that is not a repository at all.
+func TestDownByScopeNameOutsideAnyRepo(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := t.TempDir() // no git repository here
+	t.Chdir(dir)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"down", "--scope", "sb-deadbeef", "--json"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"scope": "sb-deadbeef"`) || !strings.Contains(out.String(), `"removed": true`) {
+		t.Fatalf("json: %s", out.String())
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "machine delete -n sb-deadbeef") {
+		t.Fatalf("smolvm log: %s", b)
+	}
+}

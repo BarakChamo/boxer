@@ -82,7 +82,11 @@ and harness packs appear as rows with `pack` (the file path) instead of machine 
 ]
 ```
 
-### `boxer down [--all] --json`
+### `boxer down [--all | --scope NAME] --json`
+
+`--scope NAME` deletes one sandbox by the name `ls` reports, from any directory and even when its
+worktree is gone: what a dashboard built on this API needs to stop a box.
+
 
 ```json
 { "scope": "sb-7e1852e4a3c3", "removed": true }

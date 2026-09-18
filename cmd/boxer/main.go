@@ -34,7 +34,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer up [--recreate|--detach]   create and start the sandbox for this scope (--detach: in the background)
   boxer run -c '<shell>'           run a shell line in the sandbox
   boxer run -- <prog> [args]       run a program in the sandbox
-  boxer down [--all]               delete this scope's sandbox (or every boxer sandbox)
+  boxer down [--all|--scope NAME]  delete this scope's sandbox, every one, or one by name
   boxer status                     this scope's sandbox; exit 0 running, 3 stopped, 4 absent
   boxer ls                         list boxer sandboxes
   boxer gc [--dry-run]             delete sandboxes whose worktree is gone, idle sandboxes and packs
@@ -131,11 +131,25 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
 	detach := fs.Bool("detach", false, "start the sandbox in a background boxer and return at once (up)")
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
+	scopeName := fs.String("scope", "", "sandbox name from `boxer ls` (down): act on it without resolving a worktree")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	// A sandbox can be taken down by name, from anywhere: a dashboard built on `ls --json` has
+	// machine names, not worktrees, and the worktree may be gone.
+	if cmd == "down" && *scopeName != "" {
+		if err := vm.New().Delete(*scopeName); err != nil {
+			emit(stdout, errorRow(err), *asJSON)
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if !emit(stdout, []downJSON{{Scope: *scopeName, Removed: true}}, *asJSON) {
+			fmt.Fprintf(stdout, "boxer: %s removed\n", *scopeName)
+		}
+		return 0
 	}
 	e, err := box.Resolve("", *harness, *id)
 	if cmd == "doctor" {
