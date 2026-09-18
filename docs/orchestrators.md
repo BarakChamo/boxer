@@ -310,9 +310,37 @@ path is set in the app's preferences, so treat it as inert until verified), an
 the shim runs `boxer shell <harness>`, and the harness itself runs in the VM keyed to the
 workspace — no hook path at all.
 
-It stays a checklist, because Conductor's public API drives cloud workspaces only: create one
-local workspace by hand in `~/conductor/workspaces/<repo>/<ws>`, read the setup script's output in
-the app, and assert `Linux` from `boxer run -c 'uname -a'` and one VM keyed to the workspace path.
+It stays a checklist, because Conductor's public API drives cloud workspaces only.
+
+**There are two ways in, and the cheap one probably already works.** Conductor runs each harness's
+real binary against an ordinary git worktree, and its own documentation says a repository's
+`.mcp.json` is inherited by the Claude Code sessions it launches. If that is true of hooks as well
+— which its documentation does not say either way — then `boxer install claude-code` is the whole
+integration and the shims are only for people who want the harness itself in the VM.
+
+Ten minutes settles it:
+
+```sh
+cd your-repository
+boxer install claude-code          # the project layer: .claude/settings.json + .mcp.json
+boxer down --all && boxer ls       # start from nothing
+
+# In Conductor: create a workspace on this repository, then ask the agent to run `uname -a`.
+
+boxer ls                           # expect exactly one VM, keyed to Conductor's worktree
+#   ~/conductor/workspaces/<repo>/<workspace>
+```
+
+Three outcomes, and each means something different:
+
+| What you see | What it means |
+| --- | --- |
+| The agent answers `Linux`, and `boxer ls` shows a VM for Conductor's worktree | Hooks fire. The project layer is the integration; nothing else is needed |
+| The agent answers `Darwin`, and `boxer ls` is empty | Conductor's sessions do not load project hooks. Use the executable-path shims above instead |
+| The agent answers `Linux` but `boxer ls` is empty | Something else sandboxed it, not boxer. Worth a closer look before believing either row |
+
+Whichever it is, the status table should say which one was seen and on what date, rather than
+carrying an inference.
 
 ## Verified and not
 
