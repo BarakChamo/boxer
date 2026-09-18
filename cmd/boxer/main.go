@@ -942,7 +942,7 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	if pos[0] == "all" {
 		names = []string{"claude-code", "codex", "gemini-cli", "opencode", "grok", "kimi", "dsh", "pi"}
 		if *user {
-			names = []string{"claude-code", "codex"}
+			names = []string{"claude-code", "codex", "copilot"}
 		}
 	}
 	code := 0
