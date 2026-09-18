@@ -390,12 +390,16 @@ start              = []                    # every VM start, detached: this is h
 ready              = ""                    # polled until it exits zero before the sandbox counts as up
 ready_timeout      = "60s"
 mounts             = []                    # extra host dirs, "host:guest[:ro]"
-[env]                                      # set in the guest for every command, setup included
 mount_at           = "/workspace"
 cpus               = 4
 memory             = "4G"
 env_passthrough    = ["CI", "NODE_ENV"]   # names only; never values in config
 secrets            = []                   # host-resolved references, per smolvm's secret model
+
+# Set in the guest for every command, setup included. Secrets belong in env_passthrough or
+# secrets, which are read from the host at run time and never enter an environment pack.
+[env]
+NODE_ENV           = "test"
 
 # Network: off by default, matching smolvm
 [network]
