@@ -1,157 +1,123 @@
 # boxer
 
-Runs agent shell commands inside a [smolvm](https://github.com/smol-machines/smolvm) microVM keyed
-to the git worktree, and makes every coding harness use it without the agent ever having to make a
-mistake first. One Go binary; smolvm is the only state.
+Coding agents run shell commands. boxer makes those commands run in a
+[smolvm](https://smolmachines.com) microVM instead of on your machine — one VM per git worktree,
+started automatically, with your worktree mounted at the same path it has on the host.
+
+The agent does not have to know. It types `npm test`, the command runs in the sandbox, the output
+comes back looking exactly as it would have. Nothing on your machine is at risk, and nothing about
+the agent's experience changes.
+
+One Go binary. smolvm holds the only state.
+
+## Two minutes
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh   # release binary into ~/.local/bin
-npm i -g boxer-cli                                     # the same binary, fetched by npm
-go install github.com/BarakChamo/boxer/cmd/boxer@latest   # from source
-curl -sSL https://smolmachines.com/install.sh | bash   # smolvm, if missing
-boxer doctor                          # what would happen here, and why
-boxer run -c 'bun test'               # first call provisions the VM (~20s), then ~50ms per command
+curl -sSL https://smolmachines.com/install.sh | bash                                  # smolvm
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
+
+cd your-repository
+boxer doctor                    # what would happen here, and why
+boxer run -c 'uname -a'         # Linux … — that ran in the VM, not on your Mac
+boxer install all               # your harnesses now use it, without being told
 ```
 
-Releases carry darwin/arm64, linux/amd64 and linux/arm64 binaries plus `boxer-plugins-<version>.tar.gz`.
-The JSON output, Go facade (`pkg/boxer`, experimental) and MCP tools are in [docs/api.md](docs/api.md);
-how releases are cut is in [docs/release.md](docs/release.md).
+The first command in a worktree provisions its VM, which takes about a second from a warm host
+pack and about twenty seconds the very first time. After that every command is about fifty
+milliseconds of overhead.
 
-## How it works
+`brew install BarakChamo/tap/boxer`, `npm i -g boxer-cli` and
+`go install github.com/BarakChamo/boxer/cmd/boxer@latest` are the other three routes;
+[docs/install.md](docs/install.md) has the details.
 
-- **Scope.** `sha256(worktree path)` names one VM per worktree. `isolation` can widen to `repo`
-  or narrow to `session` / `subagent` when the harness supplies ids; missing ids degrade one level
-  or fail, per `on_missing_id`.
-- **Hooks first, errors last.** `boxer hook <harness>` is one binary speaking every harness's hook
-  dialect. At session start it provisions the VM and injects the agent brief; on each shell call it
-  rewrites intercepted commands to `boxer run` (Claude Code, Codex, Grok Build, Gemini CLI,
-  OpenCode) or, where a harness can only block, stays silent and lets PATH shims do the same job.
-- **Three modes.** `rewrite` (transparent), `tool` (shell denied, `boxer_run` MCP tool is the way),
-  `off`. Per-harness overrides in `[harness.<name>]`.
-- **Errors are instructions.** Every refusal is `boxer: <reason>` plus `scope`, `worktree`,
-  `cause`, and a runnable `fix:` line.
+## How an agent ends up in the sandbox
 
-## Configuration
+Harnesses differ in what they let a third party do, so boxer has five ways in. They stack:
+whichever ones your harness supports are active at once, and `boxer install <harness>` picks the
+strongest without being asked.
 
-`boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins. Unknown keys are
-errors. Every scalar is also `BOXER_<KEY>` in the environment. `boxer doctor` prints each value and
-where it came from.
+1. **MCP and a skill — everywhere.** An MCP server (`boxer_run`, `boxer_status`) and an Agent
+   Skill that tells the agent what this repository expects. Works on any harness that speaks MCP,
+   including one nobody has integrated. It asks rather than enforces.
+2. **Hooks — enforcement.** One binary, `boxer hook <harness>`, speaks every harness's hook
+   dialect. It provisions the VM at session start and rewrites intercepted commands on every tool
+   call, so the agent never sees a refusal. Where a harness can only allow or deny, it denies with
+   an error naming `boxer_run`, and the agent uses the tool.
+3. **The plugin package.** `boxer package plugin` renders one
+   [Agent Plugins 1.0.0](https://agent-plugins.org) package valid for every client at once, with
+   the native manifests today's loaders read, so it installs everywhere now.
+4. **Shell substitution — no integration at all.** `boxer shim install --shell` writes a shell
+   binary that is really the sandbox. Point a harness's `shell_path` at it and its entire
+   interactive shell runs in the guest — pipelines, compound lines and all. Nothing is recognised
+   or rewritten, so nothing is missed.
+5. **Inside mode.** `boxer shell claude`, `boxer acp gemini`: the harness itself runs in the VM.
+   There is nothing to hook, because the agent is not on your machine.
+
+Each one is explained, with the commands, in [docs/integrate.md](docs/integrate.md).
+
+## Where each harness is verified
+
+Every row below was run, not reasoned about: T1 is the real harness CLI against a scripted model
+and a real VM, T2 is the same cells against live models, and adherence measures whether a live
+model follows the brief when the prompt never mentions boxer. Full matrices, dates, costs and
+every skip reason: [docs/status.md](docs/status.md).
+
+| Harness | Outside | Inside | Verified at |
+| --- | --- | --- | --- |
+| Claude Code | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
+| Codex | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
+| Gemini CLI | rewrite, tool | `shell`, ACP | T1; T2 needs `GEMINI_API_KEY` |
+| OpenCode | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
+| pi | rewrite, tool | `shell` (no ACP server) | T1, T2 live, adherence |
+| Grok | rewrite (recommended), tool | `shell`, ACP | T1, T2 live, adherence |
+| Kimi | tool; shims for the rest | `shell`, ACP | T1, T2 live, adherence |
+| DSH | tool, through the Claude Code hook bridge | — | T1, T2 live |
+
+Orchestrators — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica — have their own verified
+paths in [docs/orchestrators.md](docs/orchestrators.md).
+
+## Configuration, briefly
+
+`boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins; unknown keys
+are an error. Every scalar is also `BOXER_<KEY>` in the environment.
 
 ```toml
-isolation   = "worktree"        # repo | worktree | session | subagent
-warm_on_session_start = false   # true: SessionStart starts the VM in a detached `boxer up` and never blocks the session
-mode        = "rewrite"         # rewrite | tool | off
-enforcement = "both"            # hook | shim | both | audit
+isolation   = "worktree"   # one VM per worktree; repo is wider, session and subagent narrower
+mode        = "rewrite"    # rewrite | tool | off
 intercept   = ["npm", "bun", "node", "python", "go", "make"]
 passthrough = ["git", "gh", "ssh", "boxer"]
-image       = ""                # default: detected from the lockfile, else debian:bookworm-slim
-setup       = ["bun install"]   # once per VM, inside the guest
-[network]
-mode        = "allowlist"       # registry hosts for the image are always allowed
-allow_hosts = ["registry.npmjs.org"]
-[worktree]
-manage      = "off"             # detect: a session in the main checkout shares the repository VM until it enters a worktree
-[harness.gemini-cli]
-mode        = "tool"
+setup       = ["bun install"]
 ```
 
-`boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
-`boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
-agent opens it. Opt-in; `boxer install all` leaves git configuration alone.
+`boxer doctor` prints every resolved value and where it came from. The rest of the keys, and what
+each one changes, are in [docs/configure.md](docs/configure.md).
 
-## Two placements
+## Documentation
 
-```toml
-integration = "outside"   # default: your harness runs on the host; boxer sandboxes the commands it runs
-integration = "inside"    # your harness runs inside the VM; nothing to hook or rewrite
-```
+**Using boxer:** [install](docs/install.md) · [configure](docs/configure.md) ·
+[integrate](docs/integrate.md) · [troubleshoot](docs/troubleshooting.md) · [API](docs/api.md)
 
-**Outside** is everything below: the Agent Plugins package, optional hooks, `install`. **Inside** is
-how Docker Sandboxes, dev containers, and cloud sessions do it, on smolvm:
-
-```sh
-boxer shell claude                   # VM for this worktree, claude installed in it once, claude runs inside
-boxer shell codex -- exec "fix the tests"
-boxer acp gemini                     # the harness's ACP server inside the VM, stdio piped: point T3 Code,
-                                     # Paperclip, Zed, or JetBrains at this command
-boxer shim install --harness claude  # a `claude` on PATH that is really `boxer shell claude`, for orchestrators
-```
-
-The worktree and each harness's config directory (`~/.claude`, `~/.codex`, `~/.gemini`, …) are
-mounted at their host paths, so sessions and logins are shared; Claude Code's macOS Keychain login
-does not travel, pass `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. Harnesses without an ACP
-server (pi, Grok) have `shell` only.
-
-## The shell route (no integration at all)
-
-A harness whose shell binary is configurable needs no plugin, hook, or tool:
-
-```sh
-boxer shim install --shell    # writes boxer-bash: exec boxer run -- bash "$@"
-```
-
-Point the harness at it (OpenHands: `TerminalTool` `shell_path`) and its whole interactive shell,
-prompt markers and compound lines included, runs in the guest. PATH shims (`boxer shim install`)
-are the same trick for a harness that resolves programs by name.
-
-## Installing into a repository
-
-```sh
-boxer install all      # .claude/settings.json + .mcp.json, .codex/hooks.json, .gemini/settings.json,
-                       # .opencode/plugins/boxer.ts + opencode.json, .grok/hooks/boxer.json — merged, idempotent
-```
-
-This project layer is what orchestrators load: T3 Code and Paperclip launch harnesses with their
-own config directories, so a user-level plugin never reaches those sessions. Having both layers is
-harmless — see [docs/orchestrators.md](docs/orchestrators.md). OpenHands needs
-only `boxer shim install --shell` and `shell_path` on its terminal tool, see
-[adapters/openhands](adapters/openhands/).
-
-## Harness bundles
-
-`boxer package plugin --out dist` renders one [Agent Plugins 1.0.0](https://agent-plugins.org)
-package, `dist/boxer`, valid for every client at once: `plugin.json`, `skills/boxer/SKILL.md`,
-`mcp.json` (the `boxer mcp` server), `AGENTS.md`, and one reverse-domain directory per client
-carrying its hooks and README (`com.anthropic.claude-code/`, `com.openai.codex/`, `ai.x.grok/`,
-`com.google.gemini-cli/`, `ai.moonshot.kimi-code/`, `com.deepseek.dsh/`, `ai.opencode/`,
-`works.earendil.pi/`). The same directory carries the native manifests each loader reads today,
-so it installs everywhere now:
-
-```sh
-claude plugin install dist/boxer                                   # or: claude --plugin-dir dist/boxer
-codex plugin marketplace add dist/boxer && codex plugin add boxer@boxer
-grok plugin install dist/boxer
-gemini extensions install dist/gemini-cli                          # Gemini reads hooks from hooks/ only; use its view
-```
-
-`boxer package <harness>` renders that client's view, the subset of the package it reads, with the
-client's `[harness.<name>]` overrides applied; `boxer package all` renders the package and every
-view. Kimi, DSH, OpenCode and pi have no plugin loader: their namespace README lists the files to
-copy, and `boxer install <harness>` writes them into the repository. DSH also reads no
-project-level plugin config, so its view carries a profile patch layer, `.dsh/cordis.patch.yml`,
-that mounts boxer's MCP server and the `dsh-hooks-claude-code` bridge over `.dsh/hooks.json`; boot
-it with `dsh --profile headless --patch .dsh/cordis.patch.yml "<task>"`. `plugin.json` and `mcp.json`
-are validated against the spec's schemas in `go test`.
+**Working on boxer:** [architecture](docs/architecture.md) ·
+[evaluation plan](docs/eval-plan.md) · [requirements](docs/requirements.md) ·
+[releasing and the stability contract](docs/release.md) · [CONTRIBUTING](CONTRIBUTING.md)
 
 ## Verification
 
+boxer's claims are evaluated rather than asserted.
+
 ```sh
-go test ./...          # unit: config, scope, decide, hook dialects, mcp lifecycle, shims, package + schema conformance, inside (fake smolvm)
-evals/smoke.sh         # real smolvm: every config path, every hook dialect, mcp, shims, gc   (46 checks)
-boxer-eval --tier t1   # real harness + scripted model + real smolvm; --tier t2 live; --tier adherence live brief-following
-cmd/boxer-eval/        # eval matrix: --tier t1 (fake model) or --tier t2 (live credentials from evals/.env)
+make test          # unit tests, race detector, coverage floor; a fake smolvm, safe any time
+make smoke         # every configuration path against a real microVM, no model
+make eval-t1       # every harness CLI against a scripted model and a real VM
+make eval-t2       # the same cells against live models, a few cents
 ```
 
-The T1 tier (`cmd/boxer-eval`) starts a fake model server that always answers a shell tool call
-with `uname -a`, launches the real harness CLI against it, and checks one oracle: the command ran
-in the guest (`Linux`), a host canary was not written, no denials, and the VM has the right scope.
-Inside cells run the same through `boxer shell <harness>` and `boxer acp <harness>`. Plan and
-findings: [docs/eval-plan.md](docs/eval-plan.md).
+Last full run on Apple Silicon with smolvm 1.16.1 (2026-09-18): smoke 49/49; T1 61 pass, 0 fail,
+2 skips, with two consecutive runs giving identical per-cell verdicts; T2 live 38 pass, 0 fail,
+14 skips for $0.20; adherence 16 to 17 of 18 across four models, with no command reaching the host
+in any of the 72 cells. Details and skip reasons: [docs/status.md](docs/status.md).
 
-Last run on Apple Silicon, smolvm 1.16.1 (2026-09-18): smoke 46/46; T1 55 pass, 0 fail, 4 skips
-(orchestrators needing an install or account); T2 live on `zai/glm-5.3-flash` 31 pass, 1 fail
-(Grok tool mode costs one denial), 16 skips (Gemini needs its own key); adherence tier 16 to 17 of
-18 on four models with no command ever reaching the host. Full matrices and skip reasons:
-[docs/status.md](docs/status.md).
+## Licence
 
-Requirements: [docs/requirements.md](docs/requirements.md). Plan: [docs/plan.md](docs/plan.md).
+Apache-2.0. See [LICENSE](LICENSE), [SECURITY.md](SECURITY.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
