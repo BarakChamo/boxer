@@ -118,8 +118,8 @@ check "bare command via shim runs in guest" '[ "$(PATH="$SH:$PATH" uname -s 2>/d
 
 echo "# package"
 D=$(mktemp -d); boxer package all --out "$D" >/dev/null
-check "one package plus eight views" '[ -f "$D/boxer/plugin.json" ] && [ -f "$D/boxer/mcp.json" ] && [ "$(ls "$D" | wc -l | tr -d " ")" = "9" ]'
-check "views are subsets of the package" 'for h in claude-code codex grok gemini-cli kimi dsh opencode pi; do [ -f "$D/$h/plugin.json" ] || exit 1; done'
+check "one package plus nine views" '[ -f "$D/boxer/plugin.json" ] && [ -f "$D/boxer/mcp.json" ] && [ "$(ls "$D" | wc -l | tr -d " ")" = "10" ]'
+check "views are subsets of the package" 'for h in claude-code codex grok gemini-cli kimi dsh opencode pi copilot; do [ -f "$D/$h/plugin.json" ] || exit 1; done'
 check "package has no root hooks dir" '[ ! -d "$D/boxer/hooks" ]'
 check "all json valid" 'for f in $(find "$D" -name "*.json"); do python3 -m json.tool "$f" >/dev/null || exit 1; done'
 # Published content is static: shims are written by `boxer shim install` into the machine that
