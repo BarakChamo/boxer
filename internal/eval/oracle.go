@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/hook"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vm"
 )
@@ -164,6 +165,13 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 		maxDenies = 1
 	case "multistep":
 		maxDenies = -1
+	}
+	// A harness that never shows session-start context to the model costs exactly one denial in
+	// tool mode: the model cannot read the brief before its first command, so it tries the shell,
+	// is denied once, and recovers. Measured across four models (eval-adherence.md) and recorded
+	// in the dialect, so it is a known harness fact rather than a permanently red cell.
+	if maxDenies == 0 && c.Mode == "tool" && hook.Dialects[c.Harness].NoSessionContext {
+		maxDenies = 1
 	}
 	if !expectDeny && maxDenies >= 0 && t.denies > maxDenies {
 		add("deny", "%d denial(s): the agent had to be corrected", t.denies)

@@ -34,6 +34,11 @@ type Dialect struct {
 	// RunToolHint names the MCP run tool the way this harness shows it to the model; "" means the
 	// tool is visible as boxer_run. Grok lists MCP tools only through its dispatcher.
 	RunToolHint string
+	// NoSessionContext marks a harness that accepts a session-start hook but never shows its
+	// context to the model. The brief then arrives only through the skill, which the model reads
+	// after it has already tried the shell, so in tool mode its first command is denied once and
+	// it recovers. Measured, not assumed: eval-adherence.md, four models, Grok 1.0.34.
+	NoSessionContext bool
 }
 
 var claudeEvents = map[string]string{
@@ -62,7 +67,7 @@ var Dialects = map[string]Dialect{
 	"codex":       {Name: "codex", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	// Grok sends Claude-compatible field names but its own tool name (verified 2026-09-17).
 	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents,
-		RunToolHint: "the boxer_run tool: find it with search_tool, then call it with use_tool"},
+		RunToolHint: "the boxer_run tool: find it with search_tool, then call it with use_tool", NoSessionContext: true},
 	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
 	// DSH has no hooks of its own; the shipped @deepseek-ai/dsh-hooks-claude-code bridge runs a
 	// Claude Code hooks.json, so the payloads and the output shape are Claude Code's. It honours

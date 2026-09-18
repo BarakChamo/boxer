@@ -270,3 +270,13 @@ func TestGrokBriefNamesTheDispatcher(t *testing.T) {
 		t.Fatalf("default brief changed:\n%s", plain)
 	}
 }
+
+// Grok accepts a session-start hook but never shows its context to the model, so tool mode there
+// costs one denial. The fact lives in the dialect, and only there.
+func TestOnlyGrokLacksSessionContext(t *testing.T) {
+	for name, d := range Dialects {
+		if d.NoSessionContext != (name == "grok") {
+			t.Errorf("%s: NoSessionContext=%v", name, d.NoSessionContext)
+		}
+	}
+}
