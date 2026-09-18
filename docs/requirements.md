@@ -644,10 +644,10 @@ How each harness's bundle format carries those four:
 ## 7.6 Integration model, revised 2026-09-17
 
 After running every harness end to end, the integration surface is organised by **category**, not
-by harness. The evidence: MCP is answered by all eight harnesses; the Agent Skills standard is
-adopted by all eight; the hook protocol converged on one JSON wire for six (Gemini differs by three
-strings, OpenCode and pi expose a TypeScript plugin API instead); plugin *packaging* did not
-converge (Codex installs only from marketplaces and does not run Claude plugins; Grok reads both).
+by harness. The evidence: MCP is answered by all nine harnesses; the Agent Skills standard is
+adopted by all nine; the hook protocol converged on one JSON wire for seven (Gemini differs by
+three strings, Copilot names no event and spells its fields differently, OpenCode and pi expose a
+TypeScript plugin API instead); plugin *packaging* did not converge (Codex installs only from marketplaces and does not run Claude plugins; Grok reads both).
 
 | Level | Mechanism | Harnesses | boxer code |
 | --- | --- | --- | --- |
