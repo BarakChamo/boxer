@@ -193,7 +193,15 @@ func install(e *box.Env, name string, h Harness) error {
 	// npm exits 0 when an optional platform package fails to download, which leaves a harness
 	// that cannot start; the check catches that before the marker is written and the VM packed.
 	check := h.Bin + " --version >/dev/null 2>&1"
-	line := "export NPM_CONFIG_FETCH_TIMEOUT=600000 NPM_CONFIG_FETCH_RETRIES=5 NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 DEBIAN_FRONTEND=noninteractive; " +
+	if h.ACP != nil {
+		// The ACP server has its own dependencies (Claude's native binary is an optional package);
+		// `command -v` proves the entry point exists before the VM is packed and reused.
+		check += " && command -v " + h.ACP[0] + " >/dev/null 2>&1"
+	}
+	// NPM_CONFIG_OMIT= keeps optional platform packages: a harness whose native binary is an
+	// optional dependency (Claude's agent SDK, Codex's linux-arm64 build) installs with exit 0
+	// without it and fails only when the model asks it to work, which a pack then preserves.
+	line := "export NPM_CONFIG_FETCH_TIMEOUT=600000 NPM_CONFIG_FETCH_RETRIES=5 NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 NPM_CONFIG_OMIT= DEBIAN_FRONTEND=noninteractive; " +
 		"{ " + h.Install + " && " + check + "; } || { " + h.Install + " && " + check + "; }"
 	run := func() (int, string, error) {
 		var msg bytes.Buffer
