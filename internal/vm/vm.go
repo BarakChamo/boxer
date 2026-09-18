@@ -28,6 +28,32 @@ const InsideEnv = "BOXER_INSIDE"
 // Inside reports whether this process is already running in a boxer guest.
 func Inside() bool { return os.Getenv(InsideEnv) != "" }
 
+// Error is a failed smolvm invocation. It carries the verb, the exit code and what smolvm said,
+// because callers need to tell "this machine already exists" from "smolvm is not installed" and
+// were reduced to matching substrings of a flattened message to do it. Use the predicates below
+// rather than reading Stderr: the strings smolvm chooses are this package's business.
+type Error struct {
+	Verb   string // the smolvm subcommand: "machine", "pack", "--version"
+	Code   int    // its exit code, -1 when it never ran
+	Stderr string // what it printed, stderr preferred
+}
+
+func (e *Error) Error() string { return fmt.Sprintf("smolvm %s: %s", e.Verb, e.Stderr) }
+
+func said(err error, text string) bool {
+	var e *Error
+	return errors.As(err, &e) && strings.Contains(e.Stderr, text)
+}
+
+// IsNotFound reports a machine smolvm does not have.
+func IsNotFound(err error) bool { return said(err, "not found") }
+
+// IsAlreadyExists reports a create refused because the name is taken or is being taken.
+func IsAlreadyExists(err error) bool { return said(err, "already exists") }
+
+// IsNotRunning reports an operation refused because the machine is stopped.
+func IsNotRunning(err error) bool { return said(err, "not running") }
+
 // Client shells out to smolvm. Bin is looked up on PATH when it has no slash.
 type Client struct {
 	Bin string
@@ -94,7 +120,7 @@ func (c Client) Owned() ([]Machine, error) {
 func (c Client) Status(name string) (Machine, bool, error) {
 	out, err := c.output("machine", "status", "-n", name, "--json")
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if IsNotFound(err) {
 			return Machine{}, false, nil
 		}
 		return Machine{}, false, err
@@ -189,7 +215,7 @@ func (c Client) Start(name string) error {
 // Stop halts a machine; stopping a stopped machine is not an error.
 func (c Client) Stop(name string) error {
 	_, err := c.output("machine", "stop", "-n", name)
-	if err != nil && strings.Contains(err.Error(), "not running") {
+	if err != nil && IsNotRunning(err) {
 		return nil
 	}
 	return err
@@ -274,10 +300,18 @@ func (c Client) output(args ...string) (string, error) {
 		if msg == "" {
 			msg = strings.TrimSpace(out.String())
 		}
-		if msg == "" {
-			return "", c.wrap(err)
+		code := -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
 		}
-		return "", fmt.Errorf("smolvm %s: %s", args[0], msg)
+		if msg == "" {
+			if code == -1 {
+				return "", c.wrap(err) // smolvm never ran: a missing binary, not a refusal
+			}
+			msg = err.Error()
+		}
+		return "", &Error{Verb: args[0], Code: code, Stderr: msg}
 	}
 	return out.String(), nil
 }

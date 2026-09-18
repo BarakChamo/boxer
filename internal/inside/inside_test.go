@@ -82,7 +82,10 @@ func TestGuestEnv(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/Users/x/codex-home")
 	t.Setenv("OPENAI_API_KEY", "k")
 	t.Setenv("OPENAI_BASE_URL", "")
-	env := guestEnv(Harnesses["codex"], []string{"EXTRA=1"})
+	env, err := guestEnv(Harnesses["codex"], []string{"EXTRA=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	joined := strings.Join(env, "\n")
 	for _, want := range []string{"HOME=/Users/x", "CODEX_HOME=/Users/x/codex-home", "OPENAI_API_KEY=k", "OPENAI_BASE_URL=", "EXTRA=1", `CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`} {
 		if !strings.Contains(joined, want) {
@@ -94,6 +97,11 @@ func TestGuestEnv(t *testing.T) {
 	}
 	if a := Harnesses["codex"].Args; len(a) != 2 || a[0] != "-c" {
 		t.Fatalf("codex shell args must turn its nested sandbox off: %v", a)
+	}
+	// An empty HOME would reach the guest and break every mounted config path, so it is refused.
+	t.Setenv("HOME", "")
+	if _, err := guestEnv(Harnesses["codex"], nil); err == nil {
+		t.Fatal("an unresolvable home directory must be an error, not HOME=")
 	}
 }
 

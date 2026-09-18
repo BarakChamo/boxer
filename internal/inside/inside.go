@@ -167,7 +167,10 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 		return 1, err
 	}
 	e.PackHarness()
-	env := guestEnv(h, o.Env)
+	env, err := guestEnv(h, o.Env)
+	if err != nil {
+		return 1, err
+	}
 	argv := append(append([]string{h.Bin}, h.Args...), args...)
 	if acp {
 		argv = append(append([]string{}, h.ACP...), args...)
@@ -184,7 +187,12 @@ func transportError(stderr string) bool {
 
 func install(e *box.Env, name string, h Harness) error {
 	marker := "/var/lib/boxer/harness-" + name
-	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker); code == 0 {
+	// A dropped transport is not an absent marker: read as one, it reinstalled the harness over an
+	// install that was already there, which is npm in the guest for minutes.
+	if _, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker); err != nil {
+		return &box.Error{Reason: "could not read the harness marker: " + err.Error(), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+			Fix: "boxer up --recreate, then: boxer shell " + name}
+	} else if code == 0 {
 		return nil
 	}
 	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per host)\n", name)
@@ -242,8 +250,13 @@ func loginHint(h Harness, extra []string) string {
 
 // guestEnv builds the guest environment: host HOME so mounted config paths resolve, the harness's
 // config variable, passthrough of its keys when set on the host, and caller extras last.
-func guestEnv(h Harness, extra []string) []string {
-	home, _ := os.UserHomeDir()
+func guestEnv(h Harness, extra []string) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		// HOME=<empty> reaches the guest and every mounted config path resolves to "/", so the
+		// harness starts with no login and no settings and says nothing useful about why.
+		return nil, fmt.Errorf("no home directory on the host, so the guest would get HOME=: %v", err)
+	}
 	env := []string{"HOME=" + home, "TERM=" + firstNonEmpty(os.Getenv("TERM"), "xterm-256color"), "LANG=C.UTF-8"}
 	if h.ConfigVar != "" {
 		env = append(env, h.ConfigVar+"="+configDir(h))
@@ -254,7 +267,7 @@ func guestEnv(h Harness, extra []string) []string {
 			env = append(env, k+"="+v)
 		}
 	}
-	return append(env, extra...)
+	return append(env, extra...), nil
 }
 
 func firstNonEmpty(a, b string) string {

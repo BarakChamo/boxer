@@ -268,8 +268,16 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 }
 
 func (e *Env) create() error {
-	image, _ := e.Image()
-	mem, _ := config.MemoryMiB(e.Cfg.Memory)
+	image, why := e.Image()
+	if image == "" && e.Cfg.Smolfile == "" {
+		return e.fail(&Error{Reason: "no guest image could be chosen (" + why + ")", Cause: "NO_IMAGE", Scope: e.Scope,
+			Fix: "set image = \"debian:bookworm-slim\" in boxer.toml"})
+	}
+	mem, err := config.MemoryMiB(e.Cfg.Memory)
+	if err != nil {
+		return e.fail(&Error{Reason: err.Error(), Cause: "CONFIG_INVALID", Scope: e.Scope,
+			Fix: "set memory = \"4G\" in boxer.toml"})
+	}
 	hosts := append([]string{}, e.Cfg.Network.AllowHosts...)
 	if e.Cfg.Network.Mode == "allowlist" && image != "" {
 		hosts = append(hosts, registryHosts(image)...)
@@ -313,8 +321,8 @@ func (e *Env) create() error {
 		AllowHosts: hosts,
 		Ports:      e.Cfg.Network.Ports,
 	}
-	if err := e.VM.Create(spec); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+	if err = e.VM.Create(spec); err != nil {
+		if vm.IsAlreadyExists(err) {
 			// Another boxer (a hook, a detached warm-up, an MCP server) is creating this scope
 			// under a different lock directory (a harness that strips XDG_STATE_HOME from its
 			// shell environment, for one). Wait for it rather than fail the command.
@@ -475,7 +483,13 @@ func (e *Env) setup() error {
 	if len(e.Cfg.Setup) == 0 {
 		return nil
 	}
-	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker); code == 0 {
+	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
+	// a VM that had already run them, which for a repository whose setup installs dependencies is
+	// minutes, not milliseconds.
+	if _, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker); err != nil {
+		return e.fail(&Error{Reason: "could not read the setup marker: " + err.Error(), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+			Fix: "boxer up --recreate"})
+	} else if code == 0 {
 		return nil
 	}
 	for _, cmd := range e.Cfg.Setup {
@@ -487,7 +501,10 @@ func (e *Env) setup() error {
 				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
 		}
 	}
-	_, _, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	_, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	if err == nil && code != 0 {
+		err = fmt.Errorf("writing the setup marker exited %d", code)
+	}
 	return err
 }
 
