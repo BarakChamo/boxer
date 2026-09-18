@@ -80,6 +80,20 @@ every skip reason: [docs/status.md](docs/status.md).
 Orchestrators — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica — have their own verified
 paths in [docs/orchestrators.md](docs/orchestrators.md).
 
+## Watching what is running
+
+```sh
+boxer ls --resources     # every sandbox: who it belongs to, what it costs in memory and disk
+boxer watch              # a live stream: created, running, stopped, gone, and events as they happen
+boxer doctor             # this worktree: what is resolved, what is cached, what is free
+boxer gc --all           # reclaim every stopped sandbox and unreferenced pack
+```
+
+A sandbox is about half a gigabyte, so boxer reclaims after itself: any command that provisions one
+starts a background sweep, at most every six hours, and refuses to cache an image when free space
+is under five gigabytes. `boxer watch --json` is one JSON document per line, which is what a
+dashboard would read.
+
 ## Configuration, briefly
 
 `boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins. A misspelled
