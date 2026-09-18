@@ -105,7 +105,18 @@ not passed the gate.
 
 Then: regenerate `docs/status.md`, `docs/eval-t1.md`, `docs/eval-t2.md` and
 `docs/eval-adherence.md` from those runs, commit them, update `CHANGELOG.md`, tag, and let the
-workflow publish. `npm publish` and the agentskills.io listing are manual steps afterwards.
+workflow publish. Two steps stay manual because they need an account the workflow does not hold:
+
+```sh
+npm login && cd npm && npm publish      # boxer-cli; the tarball is already on the release
+```
+
+and the agentskills.io listing. The Homebrew tap is automatic when `HOMEBREW_TAP_TOKEN` exists as
+a repository secret; without it the cask is still built and attached to the release, and only the
+push to the tap is skipped, so a release never fails for a missing secret.
+
+A tag naming a candidate (`v1.0.0-rc.1`) publishes as a prerelease, so `install.sh` and Homebrew
+keep handing out the last stable version.
 
 ## Cutting a release
 
