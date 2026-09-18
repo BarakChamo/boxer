@@ -101,6 +101,10 @@ key is an error, because silently ignoring one silently changes what is enforced
 top-level table is only a warning, so a repository that adopts a newer boxer's feature still loads
 in an older one. Every scalar is also `BOXER_<KEY>` in the environment.
 
+A `.devcontainer/devcontainer.json`, if the repository already has one, supplies the image,
+lifecycle commands, ports, environment and bind mounts; `boxer.toml` overrides it and `boxer doctor`
+says which file each value came from.
+
 ```toml
 isolation   = "worktree"   # one VM per worktree; repo is wider, session and subagent narrower
 mode        = "rewrite"    # rewrite | tool | off
