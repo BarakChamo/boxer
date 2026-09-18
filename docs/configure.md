@@ -1,8 +1,9 @@
 # Configuring boxer
 
 boxer reads `boxer.toml` from three places and takes the first value it finds: the worktree, then
-the repository root, then `~/.config/boxer/`. Unknown keys are an error rather than a shrug, so a
-typo is caught immediately. Every scalar can also be set in the environment as `BOXER_<KEY>` —
+the repository root, then `~/.config/boxer/`. An unknown key is an error rather than a shrug, so a
+typo is caught immediately; an unknown top-level table is only a warning, so a repository that
+adopts a newer boxer's table still loads under an older binary. Every scalar can also be set in the environment as `BOXER_<KEY>` —
 `BOXER_MODE=off`, `BOXER_ISOLATION=repo` — which is how a one-off run or an orchestrator overrides
 a repository's choice.
 
@@ -21,6 +22,10 @@ image       = ""                # default: detected from the lockfile, else debi
 setup       = ["bun install"]   # run once per VM, inside the guest
 warm_on_session_start = false   # true: session start launches a detached `boxer up` and returns
 
+[tasks]                         # named commands: `boxer run --task test`
+test  = "bun test"
+build = "bun run build"
+
 [network]
 mode        = "allowlist"       # the registry hosts your image needs are always allowed
 allow_hosts = ["registry.npmjs.org"]
@@ -28,6 +33,13 @@ allow_hosts = ["registry.npmjs.org"]
 [worktree]
 manage      = "off"             # detect: a session in the main checkout shares the repository
                                 # VM until it moves into a worktree
+
+[telemetry]
+enabled     = false             # the event stream, off by default
+sink        = "none"            # none | file | stderr | otel (otel needs a -tags otel build)
+path        = ""                # file sink; default $XDG_STATE_HOME/boxer/events.jsonl
+record_commands = false         # true: command lines appear in events verbatim
+endpoint    = ""                # otel sink only; nothing leaves the machine without it
 
 [harness.gemini-cli]            # any key above, for one harness only
 mode        = "tool"
@@ -57,6 +69,17 @@ need your credentials and your real repository.
 
 **`setup`** runs once when a VM is created — installing dependencies, usually. The result is
 packed, so the next worktree starts from the pack rather than repeating the work.
+
+**`tasks`** is how a repository names the commands it actually wants run: `test = "bun test"` makes
+`boxer run --task test` work, `boxer tasks` lists them, and an unknown name is refused with the
+real ones. This is the deterministic path, because the agent invokes a name the repository
+declared instead of composing a shell line the intercept list may or may not catch. The skill boxer
+ships calls tasks first, and `boxer brief` tells the agent which ones exist.
+
+**`telemetry`** is off by default: with no table, boxer writes no log and nothing to the network.
+`enabled = true` with `sink = "file"` writes one JSON event per line, which `boxer logs` reads back
+and `boxer status --json` carries the tail of. Command lines are elided unless `record_commands`
+says otherwise. The schema and the redaction rules are in [events.md](events.md).
 
 **`network`** is off by default, in keeping with smolvm. `allowlist` opens named hosts; the
 registry hosts your image needs are always allowed, so a package install works without you listing
