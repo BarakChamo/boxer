@@ -43,7 +43,7 @@ t1 only, and Multica needs an account (`multica setup`).
 | OpenCode | pass | pass | pass 11 s | pass 11 s | 3/3 live |
 | pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
 | Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
-| GitHub Copilot CLI | pass (user hooks; `modifiedArgs`) | pass | in the inside cells since 1.1 | `copilot --acp` | 3/3 live for $0.0092 through BYOK on the gateway — no Copilot seat needed |
+| GitHub Copilot CLI | pass (user hooks; `modifiedArgs`) | pass | pass (1.1; its guest needs CA certificates, like Codex) | `copilot --acp` | 3/3 live for $0.0092 through BYOK on the gateway — no Copilot seat needed |
 | Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 4/4 live |
 | DSH | deny-only hooks through the `dsh-hooks-claude-code` bridge; shims | pass | not in table | none | t1 3/3, t2 2/2 live; tool mode only (the bridge ignores `updatedInput`), and boxer provisions on `UserPromptSubmit` because its `SessionStart` is detached |
 

@@ -76,6 +76,10 @@ exercised against the published release.
   that verifies against the release workflow's OIDC identity.
 
 ### Fixed
+- Copilot CLI could not reach any model from inside a sandbox: its model client reads the system
+  trust store rather than node's bundled one, and a slim image has no CA certificates. Its guest
+  install now adds them, as Codex's already did. Found by running the inside cell that the harness
+  table had claimed for a release without ever exercising.
 - A release could not have succeeded: the Homebrew cask named a tap token this repository does not
   have, so the first tag would have failed with every artifact already built. The tap push is now
   skipped when the token is absent.
