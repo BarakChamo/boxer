@@ -6,10 +6,10 @@ internal/box       80
 internal/bundle    87
 internal/config    66
 internal/decide    99
-internal/eval      12
+internal/eval      14
 internal/fakellm   81
 internal/hook      88
-internal/inside    71
+internal/inside    73
 internal/install   84
 internal/mcp       94
 internal/obs       81
