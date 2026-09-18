@@ -10,6 +10,7 @@ import (
 // Drivers lists every harness and orchestrator driver in report order.
 func Drivers() []Driver {
 	return []Driver{
+		Flow{},
 		Claude{},
 		Codex{},
 		Gemini{},

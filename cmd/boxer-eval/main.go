@@ -23,7 +23,7 @@ import (
 )
 
 func main() {
-	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live) or adherence (live; brief, recovery, multistep per harness)")
+	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live), adherence (live; brief, recovery, multistep per harness), or flow (one real development session; slow, network-heavy, on demand)")
 	models := flag.String("models", "", "adherence: comma-separated gateway model ids to run every cell on; default BOXER_EVAL_MODEL")
 	jsonl := flag.String("jsonl", "", "adherence: append each result here and render the report from the whole file, so cells can run one at a time")
 	harness := flag.String("harness", "", "comma-separated driver names; default all")

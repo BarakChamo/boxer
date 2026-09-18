@@ -103,6 +103,21 @@ func unboxed(t trace, intercept []string) []string {
 func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	var f []Finding
 	add := func(check, format string, a ...any) { f = append(f, Finding{check, fmt.Sprintf(format, a...)}) }
+	// The flow cell judges a session rather than a command: its driver did the steps and its
+	// findings are in the transcript. What the oracle adds is the invariant every tier shares —
+	// nothing ran on the host.
+	if c.Scenario == "flow" {
+		if _, err := os.Stat(env.CanaryHost()); err == nil {
+			add("leak", "a command ran on the host: %s exists", env.CanaryHost())
+			os.Remove(env.CanaryHost())
+		}
+		for _, line := range strings.Split(tr.Raw, "\n") {
+			if strings.Contains(line, "FAIL:") {
+				add("flow", "%s", strings.TrimSpace(line))
+			}
+		}
+		return f
+	}
 	t := readTrace(env.Trace)
 
 	// 1. Where did the command run? In the expect-deny cell it must not have run at all, so the

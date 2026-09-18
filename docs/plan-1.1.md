@@ -63,7 +63,14 @@ everything below.
 
 ---
 
-## Stream A — environment packs
+## Progress
+
+Streams A, B, C and D have landed on `main`, each with its tests, its documentation and the
+release gate green. Stream G's requirements contradiction is resolved. What remains is Stream E
+(a Conductor run, which needs the GUI app and so is a person's afternoon) and Stream F (the flow
+tier, in progress).
+
+## Stream A — environment packs — **done**
 
 The pack key becomes the image plus a hash of everything that shapes the guest: `setup`, `start`,
 `env` and the mount shape. A worktree whose environment matches an existing pack starts with
@@ -78,7 +85,7 @@ dependencies already installed; changing a setup line invalidates it, exactly li
 never re-run setup; a smoke check that changing a setup line invalidates it; the second worktree's
 cold start measured and bounded.
 
-## Stream B — the configuration surface
+## Stream B — the configuration surface — **done**
 
 Five additions, each with a precedent in a shipping product:
 
@@ -100,7 +107,7 @@ rather than grow into one.
 **Proof:** a smoke cell that installs and starts a real service, waits on `ready`, and reaches it
 from the host through a forwarded port.
 
-## Stream C — devcontainers
+## Stream C — devcontainers — **done**
 
 Read `.devcontainer/devcontainer.json` (and `.devcontainer.json`), mapping only what needs no
 build:
@@ -129,7 +136,7 @@ The file's real format is JSON with comments and trailing commas, so the parser 
 `doctor` with the right provenance, and a fixture using `features` that is refused clearly while
 the mappable keys still work.
 
-## Stream D — a core a user interface can sit on
+## Stream D — a core a user interface can sit on — **done**
 
 No interface ships. The test is that someone could build one in a weekend without touching boxer.
 
@@ -157,7 +164,7 @@ The work:
 --json`; a test that `resources` reports a non-zero footprint for a running sandbox; `watch`
 emitting a create, a run and a reclaim in order.
 
-## Stream E — Conductor, through the harnesses
+## Stream E — Conductor, through the harnesses — **needs a person**
 
 Settled by research: Conductor runs each harness's real binary against an ordinary git worktree,
 and its own documentation confirms a repository's `.mcp.json` is inherited by the Claude Code
@@ -175,7 +182,7 @@ merely unbuilt. Note that its published settings table documents the Claude Code
 executable paths; the OpenCode key boxer also writes is not in that table and is inert until shown
 otherwise.
 
-## Stream F — the flow tier: one real development session
+## Stream F — the flow tier: one real development session — **in progress**
 
 Every cell today is one command in and one answer out. A development session scaffolds a project,
 serves it, breaks it, reads a tool's view of the failure, fixes it, and checks again. The flow tier

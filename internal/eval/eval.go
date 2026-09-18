@@ -287,6 +287,18 @@ isolation = %q
 }
 
 // boxer runs the boxer binary in dir with the eval's isolated config home.
+// boxerStdin is boxer with something on stdin: an MCP server in the guest is addressed this way,
+// and so is anything else that speaks a line protocol through the sandbox.
+func (e *Env) boxerStdin(dir, stdin string, args ...string) (string, error) {
+	cmd := exec.Command(e.Boxer, args...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(e.Work, "xdg"), "XDG_STATE_HOME="+filepath.Join(e.Work, "xdg-state"),
+		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"))
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func (e *Env) boxer(dir string, args ...string) (string, error) {
 	cmd := exec.Command(e.Boxer, args...)
 	cmd.Dir = dir
@@ -382,6 +394,12 @@ func Run(drivers []Driver, tier, boxerBin string, only func(Cell) bool, keep boo
 	spent, budget := 0.0, budgetUSD()
 	pace, _ := time.ParseDuration(os.Getenv("BOXER_EVAL_PACE") + "s")
 	for _, d := range drivers {
+		// The flow tier is one driver's tier: every other driver builds its cells from the matrix
+		// regardless of the tier name, and running the whole matrix here would be an accident
+		// rather than a tier.
+		if (tier == "flow") != (d.Name() == "flow") {
+			continue
+		}
 		ok, why := d.Available(tier)
 		cells := d.Cells(tier)
 		for _, c := range cells {
