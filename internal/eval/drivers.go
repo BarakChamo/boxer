@@ -9,6 +9,7 @@ func Drivers() []Driver {
 		OpenCode{},
 		Pi{},
 		Kimi{},
+		DSH{},
 		Grok{},
 		Inside{},
 		InsideACP{},

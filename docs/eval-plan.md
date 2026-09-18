@@ -71,7 +71,7 @@ Axes, applied per harness where the harness supports them:
 - **Entry**: plugin/extension bundle (`boxer package`) · project layer (`boxer install`) · user layer (`--user`, Claude and Codex) · both plugin and project
 - **Isolation**: `worktree` · `session` (harnesses that send `session_id`) · `subagent` (Claude Code, Codex, Grok with `SubagentStart`) · `repo`
 - **Failure policy**: `create_on = [session_start]` without `run` → NO_SANDBOX error contract · `on_sandbox_unavailable = passthrough` · failing `setup` → SETUP_FAILED and VM deleted
-- **Block-only harnesses** (DSH, Kimi): `enforcement = both` with shims → guest; `enforcement = hook` → deny with fix
+- **Block-only harnesses** (DSH, Kimi): `enforcement = both` with shims → guest; `enforcement = hook` → deny with fix. DSH is driven headless and is tool-mode only.
 
 Not every cell is meaningful; the runner declares the matrix per harness in
 `evals/matrix.yaml` and reports the cells it ran. The full matrix runs in T1; T2 runs `rewrite` and
@@ -88,7 +88,7 @@ Not every cell is meaningful; the runner declares the matrix per harness in
 | Grok Build | `$GROK_HOME/hooks/*.json` (user) or `.grok/hooks/*.json` (project, needs folder trust: `--trust` once or `GROK_FOLDER_TRUST=0` headless); Claude-compatible payload with `tool_name: run_terminal_command`; `updatedInput` replaces the whole input, so the rewrite keeps `description`. Plugin hooks do not run headless (1.0.34); the plugin's MCP server does | `grok -p --permission-mode bypassPermissions --output-format streaming-json --leader-socket <private>` | private `GROK_HOME` with `[model.fake] base_url api_backend = "chat_completions" env_key`; no sign-in needed for a BYOK model | `XAI_API_KEY` | T1 5/5; T2 needs `XAI_API_KEY` |
 | Kimi Code | user `config.toml` `[[hooks]]`, block-only; `.kimi-code/mcp.json`; shims | `kimi -p --auto`, `KIMI_CODE_HOME` for an isolated home | `config.toml` provider `base_url` (*spike 5*) | Kimi login | install verified |
 | **pi** (new) | `.pi/extensions/boxer.ts` or `-e`; `tool_call` with mutable `event.input.command` and `{ block, reason }`; `registerTool` for `boxer_run`; `session_start` for the brief | `pi -p` | `~/.pi/agent/models.json` custom provider (OpenAI/Anthropic API) | `/login` Claude Pro/Max, or key | not integrated; needs dialect + bundle |
-| DSH | hooks plugin reading `.dsh/hooks.json`, block-only; shims | `npx @deepseek-ai/dsh` (*spike 6*: headless flag) | unknown | DeepSeek key | bundle from docs only |
+| DSH | `.dsh/cordis.patch.yml` profile patch passed with `--patch`: a `dsh-mcp-client` row for `boxer mcp`, and `dsh-hooks-claude-code` over `.dsh/hooks.json` (Claude Code wire, deny only, no `updatedInput`, no `SessionEnd`, `SessionStart` detached so boxer provisions on `UserPromptSubmit`); shell tool named `bash` | `dsh --profile headless "<task>"` — answer on stdout, reasoning on stderr, exit 0 on a completed turn | second `--patch` with an `llm-pi-ai` `openai-completions` route and an `agent-default-model` row; private `DSH_HOME`, `DSH_TELEMETRY_MODE=DISABLED`, `DSH_PERMISSION_MODE=danger-full-access` | `AI_GATEWAY_API_KEY` | t1 3/3, t2 2/2 live (0.1.5-rc.2, 2026-09-18) |
 
 Sources: pi `packages/coding-agent/docs/extensions.md`; Kimi hooks and MCP docs; Codex hooks
 reference; Gemini extension reference; Grok `grok --help`/`plugin validate`; Claude hooks and
@@ -330,7 +330,7 @@ runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.
 | 3 | Gemini CLI custom API base env name and whether tool calling works against it | Gemini T1 |
 | 4 | Grok Build `XAI_BASE_URL` or equivalent. **Answered**: `[model.<id>] base_url` + `api_backend = "chat_completions"` + `env_key` in a private `GROK_HOME` | Grok T1 |
 | 5 | Kimi provider `base_url` with an isolated `KIMI_CODE_HOME`; exact shell `tool_name` for the hook matcher | Kimi T1 + dialect correctness |
-| 6 | DSH headless mode and the hooks plugin's actual event/decision shape | whether DSH gets a T1 lane or stays "bundle only" |
+| 6 | ~~DSH headless mode and the hooks plugin's actual event/decision shape~~ **Closed 2026-09-18** against 0.1.5-rc.2: headless is `dsh --profile headless`, there is no hooks plugin, and the `dsh-hooks-claude-code` bridge carries the Claude Code wire | DSH has a T1 and a T2 lane |
 | 7 | Paperclip `claude_local` adapter `env` passes `ANTHROPIC_BASE_URL` to `claude-agent-acp`. **Answered from source**: yes (allowlisted); `PATH`/`BOXER_TRACE` are not | Paperclip T1 possible; not automated |
 | 8 | T3: minimal WS sequence to create a project, thread with worktree, and dispatch a prompt; does the ACP subprocess inherit env for a base URL. **Answered from source**: `project.create` + `thread.turn.start` with `bootstrap`; env inherits from the server process | T3 T1 possible; `t3` not installed |
 | 9 | Multica daemon env inheritance (`ANTHROPIC_BASE_URL`), `MULTICA_CLAUDE_ARGS` accepts `--plugin-dir`. **Partly answered**: the variables exist in the binary; inheritance needs a configured server | Multica T2-only |
@@ -340,7 +340,7 @@ runner subsumes it), `BOXER_TRACE`, `vmtest.Install`, `bundle.Render`, `install.
 
 **Installs I will do**: `pi` (`@earendil-works/pi-coding-agent`), `herdr` (`brew`), `multica` CLI
 (`brew multica-ai/tap/multica`), `t3` (`npx t3@latest`), `paperclipai` (npx, isolated by
-`test-drive`), `openhands-sdk` (pip, in a venv), `@deepseek-ai/dsh` (npx).
+`test-drive`), `openhands-sdk` (pip, in a venv), `@deepseek-ai/dsh` (npm global; `dsh` on PATH).
 
 **Logins/keys, only when T2 for that row matters** (T1 needs none):
 

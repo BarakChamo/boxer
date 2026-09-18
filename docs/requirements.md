@@ -24,7 +24,7 @@ This document separates what was checked from what was assumed. Every requiremen
 | Codex CLI: `PreToolUse` rewrite via `permissionDecision: "allow"` + `updatedInput`, `SessionStart` `additionalContext`, `session_id`/`agent_id` | Verified against its hooks reference |
 | Grok Build: `PreToolUse` can rewrite a tool's input; native worktrees and up to eight parallel subagents | Verified against xAI documentation and launch material |
 | OpenCode: `tool.execute.before` can mutate `output.args.command` | Verified against its plugin docs |
-| DSH: eight Claude-Code-protocol events, non-zero exit denies; **no rewrite** | Verified against `dsh-plugin-hooks` |
+| DSH: hooks exist only through `@deepseek-ai/dsh-hooks-claude-code`, a bridge over a **Claude Code** `hooks.json`; `PreToolUse` deny and ask work, `updatedInput` is ignored, `SessionEnd` is unimplemented, `SessionStart` runs detached and is aborted at dispose; the shell tool is named `bash` | Verified 2026-09-18 by running `@deepseek-ai/dsh` 0.1.5-rc.2 (there is no `dsh-plugin-hooks` and no `.dsh/hooks.json`) |
 | Gemini CLI hooks: `BeforeTool`/`AfterTool`/`SessionStart`/`SessionEnd`; rewrite via `hookSpecificOutput.tool_input`; deny is top-level `decision`/`reason`; `excludeTools: ["run_shell_command"]` exact-name | Verified against hooks and extension references |
 | Kimi Code hooks (Beta): JSON on stdin, exit code controls behavior | Verified; **rewrite support UNVERIFIED** |
 | Claude Code plugins bundle `skills/`, `agents/`, `hooks/`, `.mcp.json`, `bin/`, `settings.json` | Verified against the plugin authoring docs |
@@ -44,7 +44,7 @@ This document separates what was checked from what was assumed. Every requiremen
 | `boxer install all` on a repository with existing `.claude/settings.json`: existing keys kept, hooks merged, second run adds nothing; `BOXER_INSIDE=1` makes hooks silent and `run` direct | Verified by `evals/smoke.sh` (44 checks) |
 | Gemini CLI 0.60: `gemini extensions install --consent <path>` installs the rendered extension; `extensions list` shows the context file and the `boxer` MCP server | Verified by running it (no login for a live turn) |
 | Kimi Code CLI 0.43: hooks are `[[hooks]]` tables (`event`, `matcher`, `command`, `timeout`) in `~/.kimi-code/config.toml`, user level only; exit 0 allow / 2 block, JSON `permissionDecision`; no rewrite documented; MCP in `.kimi-code/mcp.json` (`mcpServers`) | Verified against docs; live turn needs a Kimi login |
-| DSH is `@deepseek-ai/dsh` (the npm `dsh` package is an unrelated JS shell); hooks via a plugin reading `.dsh/hooks.json`, block-only (exit 2 or `decision: "block"`) | Verified against repository and plugin READMEs; not run |
+| DSH is `@deepseek-ai/dsh` (the npm `dsh` package is an unrelated JS shell). It boots a *profile*: an ordered stack of cordis plugin patch layers, dumped by `--dump-default-config` and extended by `--patch <path>` or `$DSH_HOME/cordis.patch.yml`. There is no project-level plugin config. `dsh --profile headless "<task>"` is the one-shot mode: final answer on stdout, reasoning on stderr, exit 0 on a completed turn. `@deepseek-ai/dsh-mcp-client` takes one entry per server and exposes `mcp__<serverName>__<tool>`. `.agents/skills` is a default project skill root | Verified 2026-09-18 by running 0.1.5-rc.2: headless turns through the Vercel AI Gateway, `mcp__boxer__boxer_run` and `mcp__boxer__boxer_status` listed, a `PreToolUse` hook blocking `bash` |
 | PATH shims must strip their own directory from `PATH`: the smolvm launcher runs `uname -s`, and a shimmed `uname` recursed until the host ran out of processes | Verified the hard way |
 | smolvm 1.16.1 on Apple Silicon: exec exit code, stderr, stdin, two-way `--volume`, labels via `ls --json`, `status --json` `state`, exec 33ms, warm start 351ms, cold start with pull 24s | Verified by running it |
 | smolvm pulls images inside the guest: a machine with no network can never pull; `--allow-host` implies `--net` | Verified by running it |
@@ -247,7 +247,7 @@ harness**.
 | OpenCode | `tool.execute.before`/`after`, `permission.ask`, `session.*`, `shell.env`, many more | **Yes**, mutate `output.args.command` | TypeScript plugin API rather than stdin JSON |
 | Gemini CLI | Hooks v1, command and plugin hooks | **Unverified** | Explicitly mirrors the Claude Code contract; config at project/user/system/extension scope |
 | Kimi Code | Hooks (Beta) | **Unverified** | JSON on stdin, exit code controls behavior |
-| DSH | 8 events via `dsh-plugin-hooks` | **No.** Block only | Non-zero exit denies; env vars carry session id |
+| DSH | 7 Claude Code events via the `dsh-hooks-claude-code` bridge; no `SessionEnd` | **No.** `updatedInput` is logged and ignored | Exit 2 or `permissionDecision` denies; `transcript_path` is always empty; `SessionStart` is detached |
 | OpenHands | No hook system; a Runtime abstraction instead | n/a | Integrate as a runtime, not a hook |
 | Paperclip | No hooks; adapter interface | n/a | Integrate as a wrapping adapter |
 
@@ -513,7 +513,10 @@ Events are named in the Claude Code dialect; the adapter maps equivalents.
 - **OpenCode.** TypeScript plugin mutating `output.args.command`, marshalled through the shared
   binary per R-HK-2.
 - **Gemini CLI, Kimi Code.** Treated as Tier 2 until rewrite support is verified (R-TIER-4).
-- **DSH.** Tier 2 permanently: its hooks block but cannot rewrite. Context injection plus shims.
+- **DSH.** Tier 2 permanently: the Claude Code hook bridge blocks but ignores `updatedInput`.
+  Context injection plus shims. It provisions on `UserPromptSubmit`, the one awaited waterfall,
+  because `SessionStart` is detached and a hook still waiting on a sandbox is aborted when the
+  harness disposes.
 
 ### 7.4 Agent Client Protocol
 
@@ -547,7 +550,7 @@ How each harness's bundle format carries those four:
 | Grok Build | plugin, marketplace | skills | hooks | MCP server | hook rewrite; tool restriction **UNVERIFIED** |
 | Gemini CLI | extension | `GEMINI.md` context + skills | hooks | MCP server | **excluded tools** |
 | OpenCode | TypeScript plugin | `AGENTS.md` section | `tool.execute.before` | plugin custom tool | argument mutation |
-| DSH | plugin (`.dsh/hooks.json` via hooks plugin) | `.agents/skills` | `dsh-plugin-hooks` | MCP server | none in-harness; external `PATH` shims |
+| DSH | profile patch layer (`.dsh/cordis.patch.yml`, passed with `--patch`) | `.agents/skills` | `dsh-hooks-claude-code` over `.dsh/hooks.json` | `dsh-mcp-client` row in the patch | none in-harness; external `PATH` shims |
 | Kimi Code | user `config.toml` `[[hooks]]` + project `.kimi-code/mcp.json` | `.agents/skills` | hooks, block-only | MCP server | none in-harness; external `PATH` shims |
 
 - **R-PKG-1.** A harness bundle is a *projection* of the four components into that harness's format.
@@ -593,12 +596,27 @@ converge (Codex installs only from marketplaces and does not run Claude plugins;
 | **2 Plugin-API shims** | 40-line TS files forwarding to the binary | OpenCode, pi | two templates, optional |
 | **S Shell substitution** | the harness's shell binary is `boxer-bash` | any harness whose shell path is configurable (OpenHands verified) | none per harness |
 
+DSH reaches both levels, but neither by reading a file of its own. It boots a profile — an ordered
+stack of cordis plugin patch layers — and reads no project-level plugin config, so `boxer install
+dsh` writes `.dsh/cordis.patch.yml` and the harness is booted with it
+(`dsh --profile headless --patch .dsh/cordis.patch.yml "<task>"`); the same rows can live in
+`$DSH_HOME/cordis.patch.yml` to cover every profile. Level 0 is a `@deepseek-ai/dsh-mcp-client` row
+(`command: boxer`, `args: ["mcp", "--harness", "dsh"]`), whose tools reach the model as
+`mcp__boxer__boxer_run` and `mcp__boxer__boxer_status`, plus the skill at
+`.agents/skills/boxer/SKILL.md`, which is a default DSH project skill root. Level 1 is a
+`@deepseek-ai/dsh-hooks-claude-code` row over `.dsh/hooks.json`: DSH ships no hooks plugin of its
+own, only that Claude Code compatibility bridge, so the wire is the Claude Code one. Rewrite is not
+available there, so DSH is a tool-mode harness. All of this is **verified 2026-09-18** against
+`@deepseek-ai/dsh` 0.1.5-rc.2, live through the Vercel AI Gateway, and both levels are covered by
+`boxer-eval` at t1 and t2.
+
 - **R-LVL-1.** Level 0 is the default integration and `tool` the default mode. A repository that
   installs nothing but the MCP server and the skill is fully supported on every harness.
 - **R-LVL-2.** Command rewrite is opt-in (`mode = "rewrite"`), available where verified: Claude
   Code, Codex, Gemini CLI, OpenCode, pi. Kimi ignores `updatedInput` and its shell ignores PATH
-  shims (verified 0.43.1); DSH is block-only. Both are Level 0 only, and their hook bundles are
-  dropped.
+  shims (verified 0.43.1); DSH's hook bridge logs and ignores `updatedInput` (verified 0.1.5-rc.2,
+  2026-09-18). Both are tool-mode harnesses. DSH keeps its hook bundle — the bridge's deny and its
+  `UserPromptSubmit` provisioning are real — while Kimi's is dropped.
 - **R-LVL-3.** Gap closure in tool mode prefers the harness's native shell-tool removal (Claude
   `disallowedTools`, Gemini `excludeTools`, Kimi `tools.disabled`, OpenCode `permission.bash`, Grok
   `--disallowedTools`); the hook deny is the fallback for Codex and pi.
@@ -717,7 +735,7 @@ correctness, and none is removed from the product.
 | git `post-checkout` (flag 1) | a worktree just appeared at this path | universal, repo opt-in | warm the new scope before an agent touches it |
 | MCP `initialize` | a session started in this cwd | universal | warm the current scope; session identity of last resort |
 | MCP EOF | the session process ended | universal | reclaim per `destroy_on` |
-| `SessionStart` hook | session start, `session_id`, `source` | Claude, Codex, Grok, Kimi, DSH, Gemini | brief injection, real session id |
+| `SessionStart` hook | session start, `session_id`, `source` | Claude, Codex, Grok, Kimi, Gemini (DSH uses `UserPromptSubmit`: its `SessionStart` is detached and aborted at dispose) | brief injection, real session id |
 | `SubagentStart/Stop` | an agent id is born or dies | Claude, Codex, Grok | the only source of `subagent` isolation |
 | `PreToolUse` rewrite | a shell command is about to run | Claude, Codex, Gemini, OpenCode, pi | transparent interception, opt-in |
 | `SessionEnd` | the harness says it is done | six harnesses | earlier reclaim than EOF |
@@ -750,9 +768,12 @@ correctness, and none is removed from the product.
   default) provisions the cwd scope in a detached `boxer up` at session start. Creating the
   worktree at the earliest session signal (`manage = create`) is deferred. **Verified** on real
   smolvm: the `warm` timing cell (hook returns in 9 ms, VM present before the first tool call).
-- **R-SIG-6.** Block-only hook families (Kimi, DSH) keep their `SessionStart`/`SessionEnd` hooks:
-  precision is a signal even where rewrite is not available. Rewrite remains opt-in
-  (`mode = "rewrite"`) where verified.
+- **R-SIG-6.** Block-only hook families (Kimi, DSH) keep their session hooks: precision is a signal
+  even where rewrite is not available. Rewrite remains opt-in (`mode = "rewrite"`) where verified.
+  DSH has neither event under that name — its bridge does not implement `SessionEnd`, and its
+  `SessionStart` is detached and aborted when the harness disposes — so boxer provisions and briefs
+  on `UserPromptSubmit`, which the harness awaits, and reclaims on MCP EOF (verified 0.1.5-rc.2,
+  2026-09-18).
 - **R-SIG-7.** The core with no signals (Agent Plugins package, lazy provisioning, `install`
   shell-disable settings, git hook, `gc`, `BOXER_INSIDE`) is correct on every harness. Signals are
   measured by the timing matrix in the eval plan, not assumed.

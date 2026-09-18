@@ -123,7 +123,8 @@ func TestToolModeDenies(t *testing.T) {
 
 func TestBlockOnlyHarness(t *testing.T) {
 	vmtest.Install(t)
-	in := map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}}
+	// DSH's shell tool is named `bash`, lowercase (verified 2026-09-18 against 0.1.5-rc.2).
+	in := map[string]any{"hook_event_name": "PreToolUse", "tool_name": "bash", "tool_input": map[string]any{"command": "npm test"}}
 	in["cwd"] = repo(t, "") // enforcement=both: shims cover it, so allow
 	if out, _, _ := call(t, "dsh", in); out != nil {
 		t.Fatalf("dsh with shims must allow: %v", out)

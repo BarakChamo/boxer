@@ -129,12 +129,32 @@ func TestKimiAndDSH(t *testing.T) {
 	if !strings.Contains(strings.Join(r.Notes, "\n"), "[[hooks]]") {
 		t.Fatal("kimi install must hand over the TOML hooks snippet")
 	}
+	// DSH reads no project plugin config, so the patch layer carries boxer's MCP row and mounts
+	// the Claude Code hook bridge over .dsh/hooks.json.
 	if _, err := Install("dsh", config.Defaults(), "t", root); err != nil {
 		t.Fatal(err)
+	}
+	patch := readT(t, filepath.Join(root, ".dsh", "cordis.patch.yml"))
+	for _, want := range []string{"@deepseek-ai/dsh-mcp-client", "serverName: boxer", "@deepseek-ai/dsh-hooks-claude-code", "configPath: ./.dsh/hooks.json"} {
+		if !strings.Contains(patch, want) {
+			t.Fatalf("dsh patch missing %q:\n%s", want, patch)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, ".dsh", "hooks.json")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readT(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestUserLevelInstall(t *testing.T) {

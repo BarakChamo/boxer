@@ -127,7 +127,10 @@ gemini extensions install dist/gemini-cli                          # Gemini read
 `boxer package <harness>` renders that client's view, the subset of the package it reads, with the
 client's `[harness.<name>]` overrides applied; `boxer package all` renders the package and every
 view. Kimi, DSH, OpenCode and pi have no plugin loader: their namespace README lists the files to
-copy, and `boxer install <harness>` writes them into the repository. `plugin.json` and `mcp.json`
+copy, and `boxer install <harness>` writes them into the repository. DSH also reads no
+project-level plugin config, so its view carries a profile patch layer, `.dsh/cordis.patch.yml`,
+that mounts boxer's MCP server and the `dsh-hooks-claude-code` bridge over `.dsh/hooks.json`; boot
+it with `dsh --profile headless --patch .dsh/cordis.patch.yml "<task>"`. `plugin.json` and `mcp.json`
 are validated against the spec's schemas in `go test`.
 
 ## Verification
