@@ -147,10 +147,10 @@ make eval-t1       # every harness CLI against a scripted model and a real VM
 make eval-t2       # the same cells against live models, a few cents
 ```
 
-Last full run on Apple Silicon with smolvm 1.16.1 (2026-09-18): smoke 49/49; T1 61 pass, 0 fail,
-2 skips, with two consecutive runs giving identical per-cell verdicts; T2 live 38 pass, 0 fail,
-14 skips for $0.20; adherence 16 to 17 of 18 across four models, with no command reaching the host
-in any of the 72 cells. Details and skip reasons: [docs/status.md](docs/status.md).
+Last full run on Apple Silicon with smolvm 1.16.1 (2026-09-18): smoke 49/49; T1 67 pass, 0 fail,
+1 skip; T2 live 42 pass, 0 fail, 14 skips for $0.19. One cell, Codex over ACP inside the guest,
+failed once in seven runs and passed on every repeat; it is named in
+[docs/status.md](docs/status.md) along with every skip reason.
 
 ## Licence
 

@@ -319,8 +319,11 @@ cells are unchanged.
 ### Determinism
 
 T1 is deterministic by construction: a scripted model, a fresh repository and a fresh VM per cell,
-one oracle. It is also checked rather than assumed. Two consecutive full runs on 2026-09-18 gave
-identical per-cell verdicts (61 pass, 0 fail, 2 skip both times):
+one oracle. It is also checked rather than assumed, by running the whole tier twice and diffing the
+verdicts. On 2026-09-18 two consecutive runs of 68 cells differed in exactly one:
+`acp-codex/inside/acp/worktree` failed once, after its own retry, and passed in the second run and
+in five repeats. That is the standard this check exists to hold: a difference of one cell is a
+finding, not a rounding error.
 
 ```sh
 boxer-eval --tier t1 --out a.md && boxer-eval --tier t1 --out b.md
