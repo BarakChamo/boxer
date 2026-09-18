@@ -390,7 +390,7 @@ start              = []                    # every VM start, detached: this is h
 ready              = ""                    # polled until it exits zero before the sandbox counts as up
 ready_timeout      = "60s"
 mounts             = []                    # extra host dirs, "host:guest[:ro]"
-[env]                                      # set in the guest for every command, setup included           # run once in guest after first boot, cwd = mount_at
+[env]                                      # set in the guest for every command, setup included
 mount_at           = "/workspace"
 cpus               = 4
 memory             = "4G"
