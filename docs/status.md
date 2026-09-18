@@ -12,6 +12,10 @@ latency); T1 **61 pass, 0 fail, 2 skip**, and two consecutive full runs gave ide
 verdicts; T2 live on `zai/glm-5.3-flash` **38 pass, 0 fail, 14 skip** for $0.20. Every cell is a
 fresh repository and a fresh VM.
 
+Added 2026-09-18 (stream C): GitHub Copilot CLI as the ninth harness — **T1 4/4, T2 3/3 live for
+$0.0092** — and a real herdr driver replacing its checklist — **T1 pass, T2 pass for $0.0039**.
+Copilot runs at t2 with no Copilot seat: its BYOK provider variables point it at the gateway.
+
 Skips, all of them explained: Gemini CLI and its inside and ACP cells need `GEMINI_API_KEY`
 (the gateway has no Gemini-protocol endpoint), the six noncompliant cells are scripted and run at
 t1 only, and Multica needs an account (`multica setup`).
