@@ -170,6 +170,19 @@ func Load(worktreeRoot, repoRoot string) (Config, error) {
 	if worktreeRoot != "" && worktreeRoot != repoRoot {
 		paths = append(paths, filepath.Join(worktreeRoot, "boxer.toml"))
 	}
+	// The devcontainer file is read first and overridden by everything: it is where a repository
+	// already wrote its environment down, and boxer.toml is how you disagree with it.
+	for _, root := range []string{repoRoot, worktreeRoot} {
+		if root == "" {
+			continue
+		}
+		if dc := findDevcontainer(root); dc != "" {
+			if err := cfg.mergeDevcontainer(dc); err != nil {
+				return cfg, err
+			}
+			break
+		}
+	}
 	for _, p := range paths {
 		if err := cfg.merge(p); err != nil {
 			return cfg, err

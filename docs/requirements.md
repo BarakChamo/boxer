@@ -881,12 +881,16 @@ orchestrator that creates worktrees.
 
 ### Environment specification
 
-smolvm speaks Smolfile only; Docker Compose support is an open request (smolvm #1307) and there is
-no devcontainer support.
+smolvm speaks Smolfile only; Docker Compose support is an open request (smolvm #1307). boxer reads
+the runtime-only part of a `devcontainer.json` itself, since 1.1.
 
 - **R-ENV-1.** boxer reads a `devcontainer.json` subset when present: `image`, `postCreateCommand`
-  (→ `setup`), `forwardPorts` (→ `network.ports`), `remoteEnv` (→ `env_passthrough` names).
-  `boxer.toml` keys override it; `doctor` prints which file each value came from.
+  (→ `setup`), `postStartCommand` (→ `start`), `forwardPorts` (→ `network.ports`), `containerEnv`
+  and `remoteEnv` (→ `env`, with `remoteEnv` winning), bind `mounts` (→ `mounts`) and
+  `workspaceFolder` (→ `mount_at`). `boxer.toml` overrides it; `doctor` prints which file each
+  value came from. What needs an image build — `features`, `build`/`dockerFile` — and what needs
+  multi-container orchestration — `dockerComposeFile` — is refused by name, with what to do
+  instead, rather than ignored.
 - **R-ENV-2.** Smolfile passthrough stays as the escape hatch. Dockerfile builds and Compose are out
   of scope until smolvm or a Docker backend supports them; Compose can run inside the guest via
   smolvm's docker-in-machine.
@@ -961,7 +965,8 @@ Deferred, and gated on one fact.
 - File-level isolation of the agent's own read and write tools, per §2.2. Running the whole harness
   inside the guest is the only way to get it and is a separate project.
 - A hosted or multi-tenant control plane.
-- Replacing devcontainers, or consuming `devcontainer.json`.
+- Replacing devcontainers. (Consuming the runtime-only part of `devcontainer.json` **is** in scope
+  and shipped in 1.1, per R-ENV-1; this list previously contradicted that requirement.)
 - Windows support in v1, since branching is unavailable there.
 
 ## 11.1 Release

@@ -139,6 +139,30 @@ reason.
 registry hosts your image needs are always allowed, so a package install works without you listing
 them.
 
+## A devcontainer, if you already have one
+
+If the repository has `.devcontainer/devcontainer.json` (or `.devcontainer.json`), boxer reads the
+part of it that needs no image build, so you are not keeping the same facts in two files:
+
+| devcontainer | boxer |
+| --- | --- |
+| `image` | `image` |
+| `postCreateCommand` | `setup` |
+| `postStartCommand` | `start` |
+| `forwardPorts` | `network.ports` |
+| `containerEnv`, `remoteEnv` | `env` (`remoteEnv` wins where both name a variable) |
+| `mounts` (bind only) | `mounts` |
+| `workspaceFolder` | `mount_at` |
+
+`boxer.toml` overrides anything the devcontainer says, which is how you disagree with it, and
+`boxer doctor` prints which file each value came from.
+
+Three things are refused rather than ignored, because a sandbox that looks configured and is
+missing half its tools is worse than one that says so: `features` and `build`/`dockerFile` need an
+image build, which smolvm cannot do, and `dockerComposeFile` orchestrates several containers, which
+boxer does not. If your image is built from a Dockerfile, build it with your own tooling,
+`docker save` it, and point `image` at the archive.
+
 ## Per-harness overrides
 
 `[harness.<name>]` accepts any key above and applies it only when that harness is the one running.

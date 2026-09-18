@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
   environment pack; secrets stay in `secrets` and `env_passthrough`, which are read from the host
   at run time and never snapshotted. `mounts` adds host directories beside the worktree, with `~`
   expanded, usually for a shared dependency cache.
+- **Devcontainers are read.** A repository with `.devcontainer/devcontainer.json` gets its image,
+  lifecycle commands, ports, environment, bind mounts and workspace folder without restating any of
+  it, and `doctor` says which file each value came from. What needs an image build (`features`,
+  `build`/`dockerFile`) or multi-container orchestration (`dockerComposeFile`) is refused by name
+  with what to do instead. The file is parsed as the JSON-with-comments it actually is.
 - **A core a user interface can sit on.** A sandbox now records which harness, session and agent it
   belongs to, so a listing names "claude-code/4f2a9c" instead of a hash the identity was hashed
   into. `boxer ls --resources` measures what each one costs: allocation from smolvm, resident
