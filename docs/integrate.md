@@ -34,6 +34,24 @@ Its limit is that it asks rather than enforces: an agent that ignores the skill 
 shell tool is not sandboxed. The `adherence` evaluation tier measures exactly how often that
 happens — see [status.md](status.md).
 
+### 1b. Someone else's MCP server, running in the sandbox
+
+Some MCP servers have to run next to the code: `next-devtools-mcp` discovers a running Next.js dev
+server and forwards calls to its `/_next/mcp` endpoint, so it must be where that server is. If the
+code runs in the sandbox, so must the tool.
+
+`boxer run` is a clean stdio pipe, which is all an MCP client needs, so an ordinary entry reaches
+it:
+
+```json
+{ "mcpServers": { "next-devtools": {
+    "command": "boxer", "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"] } } }
+```
+
+The harness stays on the host and talks to a tool inside the guest, with no bridge to write and
+nothing for the tool to know about boxer. The flow evaluation tier exercises exactly this, so it is
+a claim with a run behind it rather than a plausible-sounding one.
+
 ### 2. Hooks — enforcement, where the harness has them
 
 `boxer hook <harness>` is one binary that speaks every harness's hook dialect. At session start it

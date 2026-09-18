@@ -39,6 +39,9 @@ strongest without being asked.
 1. **MCP and a skill — everywhere.** An MCP server (`boxer_run`, `boxer_status`) and an Agent
    Skill that tells the agent what this repository expects. Works on any harness that speaks MCP,
    including one nobody has integrated. It asks rather than enforces.
+   An MCP server that must run beside the code — a dev server's own tools, say — runs *in* the
+   sandbox, addressed by an ordinary entry: `"command": "boxer", "args": ["run", "--", "npx", "-y",
+   "next-devtools-mcp@latest"]`. The harness stays on the host; nothing needs a bridge.
 2. **Hooks — enforcement.** One binary, `boxer hook <harness>`, speaks every harness's hook
    dialect. It provisions the VM at session start and rewrites intercepted commands on every tool
    call, so the agent never sees a refusal. Where a harness can only allow or deny, it denies with
