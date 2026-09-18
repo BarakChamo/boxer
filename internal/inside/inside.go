@@ -73,6 +73,16 @@ var Harnesses = map[string]Harness{
 		ConfigVar: "", ConfigDir: "~/.pi",
 		Env:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "PI_SKIP_VERSION_CHECK", "PI_TELEMETRY"},
 		Hosts: []string{"api.anthropic.com", "api.openai.com"}},
+	// Copilot CLI verified 2026-09-18 against 1.0.86: `--acp` starts an ACP server, COPILOT_HOME
+	// holds config and state, and the BYOK variables run it with no GitHub sign-in at all.
+	"copilot": {Bin: "copilot", Install: "npm i -g @github/copilot",
+		ACP: []string{"copilot", "--acp"}, ConfigVar: "COPILOT_HOME", ConfigDir: "~/.copilot",
+		Env: []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_MODEL", "COPILOT_AUTO_UPDATE",
+			"COPILOT_PROVIDER_TYPE", "COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_API_KEY", "COPILOT_PROVIDER_WIRE_API"},
+		Creds:     []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_PROVIDER_API_KEY"},
+		LoginHint: "Copilot CLI's device login is stored under ~/.copilot, which is mounted, so it travels; otherwise export GH_TOKEN, or the BYOK trio COPILOT_PROVIDER_TYPE/BASE_URL/API_KEY",
+		GuestEnv:  []string{"COPILOT_AUTO_UPDATE=false"},
+		Hosts:     []string{"api.githubcopilot.com", "api.github.com", "github.com", "copilot-proxy.githubusercontent.com", "api.enterprise.githubcopilot.com"}},
 	"grok": {Bin: "grok", Install: "npm i -g @xai-official/grok",
 		ACP: []string{"grok", "agent", "stdio"}, ConfigVar: "GROK_HOME", ConfigDir: "~/.grok",
 		Env:   []string{"XAI_API_KEY", "GROK_MODELS_BASE_URL"},
@@ -88,7 +98,7 @@ func init() {
 
 // Names lists the harnesses in stable order.
 func Names() []string {
-	return []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok"}
+	return []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok", "copilot"}
 }
 
 // DefaultImage is the guest image when the configuration names none: node for the npm harnesses,

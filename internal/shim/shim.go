@@ -37,8 +37,14 @@ func Install(dir string, programs []string) ([]string, error) {
 	return written, nil
 }
 
+// harnessTemplate also declares the agent kind for a multiplexer that classifies a pane by the
+// program it started: the wrapper replaces the agent binary, so the kind is announced rather than
+// inferred. herdr 0.9.1 classifies panes from the screen buffer instead and ignores this, so it
+// costs one line and is right when a pane manager asks for it.
 const harnessTemplate = `#!/bin/sh
 # boxer harness shim: %[1]s runs inside the sandbox for this worktree (boxer shell).
+HERDR_AGENT=%[1]s
+export HERDR_AGENT
 d=$(cd "$(dirname "$0")" && pwd)
 new=; IFS=:; for p in $PATH; do [ "$p" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS
 PATH=$new

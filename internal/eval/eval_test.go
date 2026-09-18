@@ -2,6 +2,7 @@ package eval
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,20 @@ func TestSessionRootPrefersOrchestratorWorktree(t *testing.T) {
 		if got := e.SessionRoot(c); got != e.Root {
 			t.Errorf("Env.Root set: got %q, want %q", got, e.Root)
 		}
+	}
+}
+
+// TestParseCopilotJSON uses lines captured from copilot 1.0.86 `--output-format json`.
+func TestParseCopilotJSON(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"session.mcp_servers_loaded","data":{"servers":[{"name":"boxer"}]}}`,
+		`{"type":"tool.execution_start","data":{"toolCallId":"call_0","toolName":"bash","arguments":{"command":"uname -a"}}}`,
+		`{"type":"tool.execution_complete","data":{"toolCallId":"call_0","success":true}}`,
+		`{"type":"assistant.message","data":{"text":"Linux\n"}}`,
+		`{"type":"result","exitCode":0}`,
+	}, "\n")
+	tr := parseCopilotJSON(raw)
+	if tr.Answer != "Linux" || len(tr.Tools) != 1 || tr.Tools[0] != "bash" {
+		t.Fatalf("%+v", tr)
 	}
 }

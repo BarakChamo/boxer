@@ -1,0 +1,34 @@
+# boxer plugin for herdr. Link it with `herdr plugin link adapters/herdr`.
+#
+# Schema derived by validating against herdr 0.9.1 (`herdr plugin link` rejects unknown shapes and
+# names the field): `id`, `name`, `version`, `min_herdr_version` are required; `platforms` is
+# optional but warned about when absent; every `command` is an argv sequence; `[[actions]]` takes
+# `id`, `title`, and optional `contexts` (global|workspace|tab|pane|selection); `[[panes]]` takes
+# `id`, `title`, `command`, and `placement` (overlay|popup|split|tab|zoomed, default overlay);
+# `[[events]]` takes `on` and `command`, and an unknown event name links with a warning.
+id = "boxer"
+name = "boxer"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+platforms = ["macos", "linux"]
+
+# A pane running the harness itself inside the worktree's microVM. The worktree is already local,
+# so unlike the Vercel sandbox plugin there is nothing to sync: `boxer shell` starts the VM keyed
+# to the pane's cwd and runs the harness in it.
+[[panes]]
+id = "agent"
+title = "boxer: claude"
+placement = "split"
+command = ["boxer", "shell", "claude"]
+
+[[actions]]
+id = "start-agent"
+title = "Start a boxed agent"
+contexts = ["workspace", "pane"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "boxer", "--entrypoint", "agent", "--placement", "split"]
+
+# herdr creates the worktree; boxer provisions its VM in the background so the first command does
+# not wait for a cold start.
+[[events]]
+on = "worktree.created"
+command = ["boxer", "up", "--detach"]

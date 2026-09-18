@@ -22,6 +22,15 @@ import (
 type Dialect struct {
 	Name      string
 	ShellTool string // tool_name for the shell tool
+	// ShellTool2 is a second shell tool name when the harness has one (Copilot: bash and powershell).
+	ShellTool2 string
+	// ArgsField is the JSON field carrying the tool's arguments; "" means tool_input.
+	ArgsField string
+	// DefaultEvent is the purpose to assume when the payload carries no event name: Copilot
+	// identifies the event by the key the hook is registered under and does not repeat it on the
+	// wire (verified 2026-09-18 against 1.0.86, whose preToolUse payload is
+	// {sessionId, timestamp, cwd, toolName, toolArgs}).
+	DefaultEvent string
 	// Rewrite is false for harnesses whose hooks can only allow or block.
 	Rewrite bool
 	// Family selects the output JSON shape: "claude" (Claude Code, Codex, Grok, Kimi, DSH) or "gemini".
@@ -87,6 +96,16 @@ var Dialects = map[string]Dialect{
 	}},
 	// pi's extension API: tool_call with a mutable event.input and { block } — the rendered
 	// extension forwards to this dialect, same wire as OpenCode.
+	// GitHub Copilot CLI (verified 2026-09-18 against 1.0.86: `copilot help config` documents
+	// `hooks` keyed by event name with the schema of .github/hooks/*.json, `copilot help
+	// environment` documents COPILOT_HOME and COPILOT_AUTO_UPDATE). Two hazards shape this row:
+	// a hook that times out fails OPEN while a non-zero exit fails CLOSED, so boxer's hook must
+	// stay fast and always exit 0 (Run only returns non-zero for an unknown harness name, which
+	// cannot happen from an installed hooks file); and its rewrite is `modifiedArgs`, which
+	// replaces the tool arguments wholesale, not Claude's hookSpecificOutput.updatedInput.
+	// Only preToolUse is wired: the brief reaches the model through the skill and the MCP server.
+	"copilot": {Name: "copilot", MCP: true, ShellTool: "bash", ShellTool2: "powershell", ArgsField: "toolArgs",
+		Rewrite: true, Family: "copilot", DefaultEvent: "preToolUse", Events: map[string]string{"preToolUse": "intercept"}},
 	"pi": {Name: "pi", ShellTool: "bash", Rewrite: true, Family: "opencode", Events: map[string]string{
 		"tool_call":     "intercept",
 		"session_start": "session_start",
@@ -96,14 +115,40 @@ var Dialects = map[string]Dialect{
 
 // Input is the union of fields boxer reads from any harness.
 type Input struct {
-	HookEventName string         `json:"hook_event_name"`
-	ToolName      string         `json:"tool_name"`
-	ToolInput     map[string]any `json:"tool_input"`
-	SessionID     string         `json:"session_id"`
-	AgentID       string         `json:"agent_id"`
-	CWD           string         `json:"cwd"`
-	Source        string         `json:"source"`
-	Reason        string         `json:"reason"`
+	HookEventName string `json:"hook_event_name"`
+	ToolName      string `json:"tool_name"`
+	// ToolNameAlt is the same field in Copilot's spelling.
+	ToolNameAlt string         `json:"toolName"`
+	ToolInput   map[string]any `json:"tool_input"`
+	SessionID   string         `json:"session_id"`
+	// SessionIDAlt is the same field in Copilot's spelling.
+	SessionIDAlt string `json:"sessionId"`
+	AgentID      string `json:"agent_id"`
+	// ToolArgs is Copilot's argument field: an object, or a JSON string holding one.
+	ToolArgs json.RawMessage `json:"toolArgs"`
+	CWD      string          `json:"cwd"`
+	Source   string          `json:"source"`
+	Reason   string          `json:"reason"`
+}
+
+// toolArgs returns the tool's arguments in the dialect's field. Copilot puts them at toolArgs,
+// which the documented contract allows to be either an object or a JSON string holding one.
+func toolArgs(d Dialect, in Input) map[string]any {
+	if d.ArgsField != "toolArgs" {
+		return in.ToolInput
+	}
+	m := map[string]any{}
+	if len(in.ToolArgs) == 0 {
+		return m
+	}
+	if json.Unmarshal(in.ToolArgs, &m) == nil {
+		return m
+	}
+	var s string
+	if json.Unmarshal(in.ToolArgs, &s) == nil {
+		_ = json.Unmarshal([]byte(s), &m)
+	}
+	return m
 }
 
 // Resolver lets tests substitute box.Resolve.
@@ -132,6 +177,15 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 	if err := json.Unmarshal(raw, &in); err != nil {
 		fmt.Fprintf(stderr, "boxer: hook input is not JSON: %v\n", err)
 		return 0 // never break a session over our own parse failure
+	}
+	if in.HookEventName == "" {
+		in.HookEventName = d.DefaultEvent
+	}
+	if in.SessionID == "" {
+		in.SessionID = in.SessionIDAlt
+	}
+	if in.ToolName == "" {
+		in.ToolName = in.ToolNameAlt
 	}
 	purpose := d.Events[in.HookEventName]
 	if purpose == "" {
@@ -165,10 +219,11 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 }
 
 func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
-	if in.ToolName != d.ShellTool {
+	if in.ToolName != d.ShellTool && (d.ShellTool2 == "" || in.ToolName != d.ShellTool2) {
 		return 0
 	}
-	cmd, _ := in.ToolInput["command"].(string)
+	args := toolArgs(d, in)
+	cmd, _ := args["command"].(string)
 	dec := decide.Decide(decide.Input{Command: cmd, Mode: e.Cfg.Mode, Intercept: e.Cfg.Intercept, Passthrough: e.Cfg.Passthrough})
 	if e.Cfg.Enforcement == "audit" && dec.Action != decide.Allow {
 		fmt.Fprintf(stderr, "boxer: audit: would %s: %s\n", []string{"allow", "rewrite", "block"}[dec.Action], cmd)
@@ -185,7 +240,7 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 			}
 			return deny(d, stdout, "this repository runs commands in a sandbox", withIdentity(dec.Command, e))
 		}
-		return rewrite(d, stdout, withIdentity(dec.Command, e), in.ToolInput)
+		return rewrite(d, stdout, withIdentity(dec.Command, e), args)
 	default:
 		return deny(d, stdout, dec.Reason, withIdentity(dec.Fix, e))
 	}
@@ -238,6 +293,9 @@ func rewrite(d Dialect, w io.Writer, cmd string, original map[string]any) int {
 	switch d.Family {
 	case "opencode":
 		return emit(w, map[string]any{"command": cmd})
+	case "copilot":
+		// modifiedArgs replaces the tool arguments; permissionDecision must still be allow.
+		return emit(w, map[string]any{"permissionDecision": "allow", "modifiedArgs": input})
 	case "gemini":
 		return emit(w, map[string]any{"hookSpecificOutput": map[string]any{
 			"hookEventName": "BeforeTool", "tool_input": input}})
@@ -255,6 +313,8 @@ func deny(d Dialect, w io.Writer, reason, fix string) int {
 	switch d.Family {
 	case "opencode":
 		return emit(w, map[string]any{"deny": msg})
+	case "copilot":
+		return emit(w, map[string]any{"permissionDecision": "deny", "permissionDecisionReason": msg})
 	case "gemini":
 		return emit(w, map[string]any{"decision": "deny", "reason": msg})
 	default:

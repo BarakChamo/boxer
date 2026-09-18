@@ -11,11 +11,13 @@ func Drivers() []Driver {
 		Kimi{},
 		DSH{},
 		Grok{},
+		Copilot{},
 		Inside{},
 		InsideACP{},
 		OpenHands{},
 		&Paperclip{},
 		&T3{},
+		&Herdr{},
 		Multica,
 	}
 }
