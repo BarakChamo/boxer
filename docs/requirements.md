@@ -369,6 +369,10 @@ require_linked_worktree = false
 create_on          = ["session_start", "run"]   # run = provision lazily on first sandboxed command
 destroy_on         = []                    # session_end | subagent_stop | never; gc reaps orphaned worktrees
 idle_timeout       = "2h"                  # gc reaps beyond this; "never" to disable
+auto_reclaim       = true                  # an ordinary command sweeps in the background, at most every…
+reclaim_every      = "6h"
+min_free_gb        = 5                     # below this, pull the image rather than caching it
+packs_keep_last    = 5                     # unreferenced packs kept, newest first
 reuse_existing     = true
 
 # Enforcement
@@ -381,7 +385,12 @@ passthrough        = ["git", "gh", "ssh", "boxer"]
 # Guest
 image              = ""           # OCI ref; default detected from lockfile, else boxer base
 smolfile           = ""           # path; wins over image
-setup              = []           # run once in guest after first boot, cwd = mount_at
+setup              = []                    # once per VM; the result is cached as an environment pack
+start              = []                    # every VM start, detached: this is how a service runs
+ready              = ""                    # polled until it exits zero before the sandbox counts as up
+ready_timeout      = "60s"
+mounts             = []                    # extra host dirs, "host:guest[:ro]"
+[env]                                      # set in the guest for every command, setup included           # run once in guest after first boot, cwd = mount_at
 mount_at           = "/workspace"
 cpus               = 4
 memory             = "4G"
