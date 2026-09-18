@@ -690,6 +690,9 @@ func expandMount(m string) string {
 // has no processes and has to start them again.
 const startMarker = "/tmp/boxer-started"
 
+// startLog is where a started service's own output goes, so a readiness failure can show it.
+const startLog = "/tmp/boxer-start.log"
+
 func (e *Env) startServices() error {
 	if len(e.Cfg.Start) == 0 {
 		return nil
@@ -705,7 +708,7 @@ func (e *Env) startServices() error {
 	for _, cmd := range e.Cfg.Start {
 		fmt.Fprintf(e.Stderr, "boxer: start: %s\n", cmd)
 		// Detached and disowned: the command that launches a server must not wait for it.
-		line := "cd " + e.MountAt() + " && nohup sh -lc " + shellQuote(cmd) + " >/tmp/boxer-start.log 2>&1 &"
+		line := "cd " + e.MountAt() + " && nohup sh -lc " + shellQuote(cmd) + " >>" + startLog + " 2>&1 &"
 		if _, code, err := e.VM.Output(e.Scope.Key, e.MountAt(), "sh", "-c", line); err != nil || code != 0 {
 			return e.fail(&Error{Reason: fmt.Sprintf("start step failed (exit %d): %s", code, cmd), Cause: "START_FAILED", Scope: e.Scope,
 				Fix: "check the `start` list in boxer.toml, then: boxer up"})
@@ -731,8 +734,14 @@ func (e *Env) waitReady() error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return e.fail(&Error{Reason: fmt.Sprintf("the sandbox never became ready: %q did not succeed within %s", e.Cfg.Ready, timeout),
-				Cause: "NOT_READY", Scope: e.Scope, Fix: "check the `start` list and `ready` command, and /tmp/boxer-start.log in the guest"})
+			// Show the service's own last words rather than telling the reader where to find
+			// them: by the time this fails, whatever the server printed is the whole diagnosis.
+			reason := fmt.Sprintf("the sandbox never became ready: %q did not succeed within %s", e.Cfg.Ready, timeout)
+			if out, _, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "tail -n 5 "+startLog); err == nil && strings.TrimSpace(out) != "" {
+				reason += "\n  service:   " + strings.ReplaceAll(strings.TrimSpace(out), "\n", "\n             ")
+			}
+			return e.fail(&Error{Reason: reason, Cause: "NOT_READY", Scope: e.Scope,
+				Fix: "check the `start` list and the `ready` command in boxer.toml"})
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

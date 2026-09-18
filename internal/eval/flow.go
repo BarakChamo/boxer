@@ -57,7 +57,9 @@ setup = [
   "cd app && npm install --no-audit --no-fund",
 ]
 start = ["cd app && npx next dev -p %d -H 0.0.0.0"]
-ready = "curl -sf http://127.0.0.1:%d/ >/dev/null"
+# curl is not in a slim image, so the probe uses the runtime that certainly is: single quotes in
+# the JavaScript, escaped double quotes in the TOML.
+ready = "node -e \"fetch('http://127.0.0.1:%d/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
 ready_timeout = "180s"
 
 [network]

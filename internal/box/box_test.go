@@ -730,8 +730,8 @@ func TestStartAndReady(t *testing.T) {
 	}
 }
 
-// A sandbox that never becomes ready must fail with a reason and somewhere to look, not hang or
-// pretend to be up.
+// A sandbox that never becomes ready must fail with a reason and the service's own last words,
+// not hang, pretend to be up, or send the reader looking for a log file.
 func TestReadyTimesOutWithSomewhereToLook(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("BOXER_PACKS", t.TempDir())
@@ -747,8 +747,14 @@ func TestReadyTimesOutWithSomewhereToLook(t *testing.T) {
 	if !ok || be.Cause != "NOT_READY" {
 		t.Fatalf("want NOT_READY, got %v", err)
 	}
-	if !strings.Contains(be.Fix, "boxer-start.log") {
-		t.Fatalf("the fix must say where the service's own output is: %q", be.Fix)
+	if !strings.Contains(be.Fix, "`ready`") {
+		t.Fatalf("the fix must point at what to change: %q", be.Fix)
+	}
+	// The reason carries what the service printed, because that is the whole diagnosis. (The fake
+	// runs `tail` on the host, so the content here is whatever that returns; what this pins is
+	// that boxer asks for it at all.)
+	if !strings.Contains(be.Reason, "never became ready") {
+		t.Fatalf("the reason must say what failed: %q", be.Reason)
 	}
 }
 
