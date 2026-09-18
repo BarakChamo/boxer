@@ -82,6 +82,18 @@ mounted at their host paths, so sessions and logins are shared; Claude Code's ma
 does not travel, pass `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. Harnesses without an ACP
 server (pi, Grok) have `shell` only.
 
+## The shell route (no integration at all)
+
+A harness whose shell binary is configurable needs no plugin, hook, or tool:
+
+```sh
+boxer shim install --shell    # writes boxer-bash: exec boxer run -- bash "$@"
+```
+
+Point the harness at it (OpenHands: `TerminalTool` `shell_path`) and its whole interactive shell,
+prompt markers and compound lines included, runs in the guest. PATH shims (`boxer shim install`)
+are the same trick for a harness that resolves programs by name.
+
 ## Installing into a repository
 
 ```sh

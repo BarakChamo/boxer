@@ -591,6 +591,7 @@ converge (Codex installs only from marketplaces and does not run Claude plugins;
 | **0 Universal** | MCP server + Agent Skill; `mode = "tool"` | all 8 | none per harness |
 | **1 Converged hooks** | one `hooks.json`, one binary; provision, brief, reclaim, optional rewrite or deny | Claude, Codex, Grok, Kimi, DSH; Gemini via aliases | one dialect table |
 | **2 Plugin-API shims** | 40-line TS files forwarding to the binary | OpenCode, pi | two templates, optional |
+| **S Shell substitution** | the harness's shell binary is `boxer-bash` | any harness whose shell path is configurable (OpenHands verified) | none per harness |
 
 - **R-LVL-1.** Level 0 is the default integration and `tool` the default mode. A repository that
   installs nothing but the MCP server and the skill is fully supported on every harness.
@@ -634,6 +635,13 @@ converge (Codex installs only from marketplaces and does not run Claude plugins;
   validator with an ECMAScript regex engine, because the spec's `name` pattern uses a lookahead);
   `TestViewsAreSubsetsOfThePackage` proves every per-harness bundle is byte-identical to the
   package's files it selects.
+- **R-LVL-8.** Level S is shell substitution: `boxer shim install --shell` writes `boxer-bash`
+  (`exec boxer run -- bash "$@"`), and any harness that lets its shell binary be configured runs
+  every command in the guest with no boxer code for that harness at all. It covers what a hook
+  cannot: an interactive PTY shell the harness drives itself. Verified with OpenHands' terminal
+  tool (`shell_path`, SDK 1.49, live 2026-09-18). PATH shims (§5.2) are the same idea for a
+  harness that resolves programs by name instead.
+
 - **R-LVL-7.** Grok's plugin hooks are discovered as zero in `grok -p` even when the plugin loads
   (`hooks: discovery complete total_hooks=0`); Grok is Level 0 until that is understood.
 
