@@ -39,7 +39,11 @@ allowlist, empty but for `CI` by default.
 
 Telemetry is off unless you turn it on. With `[telemetry] enabled = true`, events record scope
 names, harness names, durations and outcomes; command lines are elided unless you also set
-`record_commands = true`, and nothing leaves the machine unless you set an `endpoint`.
+`record_commands = true`, and nothing leaves the machine unless you set an `endpoint` — which only
+a binary built with `-tags otel` can even use, because the default build contains no exporter.
+`BOXER_TRACE=<path>` also turns the file sink on, whatever the configuration says; it is how the
+evaluation suite records hook traffic, and it writes to that path and nowhere else. The schema and
+the redaction rules are in [docs/events.md](docs/events.md).
 
 ## Supported versions
 

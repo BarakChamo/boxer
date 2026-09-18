@@ -447,6 +447,37 @@ mode               = "tool"       # block-only hooks; shims installed by `boxer 
 - **R-CFG-3.** Secrets are references resolved on the host at run time, matching smolvm's model,
   which stores no secret material. Values never appear in the config file or in VM metadata.
 
+### Observability
+
+```toml
+[telemetry]
+enabled         = false     # the whole stream, off unless this is true
+sink            = "none"    # none | file | stderr | otel
+path            = ""        # file sink; default $XDG_STATE_HOME/boxer/events.jsonl
+record_commands = false     # command lines stay out of the stream unless this is true
+endpoint        = ""        # otel sink; without it nothing leaves the machine
+```
+
+- **R-OBS-1.** boxer records what it did as one event type: an RFC3339Nano timestamp, an event
+  name, the scope key, the harness, a duration, an outcome, and an event-specific payload. The
+  names are `resolve`, `provision`, `pack`, `run`, `rewrite`, `deny`, `hook`, `mcp`, `gc` and
+  `error`. The schema is documented in [events.md](events.md) and is stable from 1.0: fields are
+  added, never repurposed.
+- **R-OBS-2.** The stream is off by default. With no `[telemetry]` table and no `BOXER_TRACE`,
+  boxer writes nothing to disk, to stderr or to the network, and a test asserts it.
+- **R-OBS-3.** Sinks are `none` (the default), `file`, `stderr`, and `otel` behind a build tag, so
+  the default binary carries no exporter. Nothing is sent off the machine unless an `endpoint` is
+  configured in a binary built with that tag. `enabled = true` with no sink named means `file`.
+- **R-OBS-4.** Redaction happens in the sink, not at the call site: the payload keys `command`,
+  `argv`, `env` and `setup` are dropped unless `record_commands = true`, each replaced by its
+  length. A caller cannot leak a command line by forgetting to elide one.
+- **R-OBS-5.** `BOXER_TRACE=<path>` is the file sink at that path whatever the configuration says,
+  and its hook lines keep the format `internal/eval`'s oracle parses. Events share that file; the
+  oracle reads only lines carrying an arrow.
+- **R-OBS-6.** `boxer logs [--scope NAME] [-n N] [--json]` reads the file sink back, and
+  `boxer status --json` carries the last few events for the scope, which is what a dashboard needs
+  from one call.
+
 ## 7. Integration: hook-based harnesses
 
 Because the hook contract converged (§4.1), this is **one binary and a bundle per harness**, not one

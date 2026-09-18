@@ -35,6 +35,19 @@ type Override struct {
 	Isolation   string `toml:"isolation"`
 }
 
+// Telemetry mirrors the [telemetry] table: boxer's event stream, off by default.
+//
+// Note on compatibility: merge rejects unknown keys, so a repository that adds this table is
+// rejected by an older binary. That is the same decision [tasks] faces and the two must be
+// reconciled before release (a config_version key, or unknown *tables* relaxed to a warning).
+type Telemetry struct {
+	Enabled        bool   `toml:"enabled"`
+	Sink           string `toml:"sink"` // none | file | stderr | otel
+	Path           string `toml:"path"`
+	RecordCommands bool   `toml:"record_commands"`
+	Endpoint       string `toml:"endpoint"`
+}
+
 // Config is the fully resolved configuration.
 type Config struct {
 	Isolation             string   `toml:"isolation"`
@@ -70,9 +83,10 @@ type Config struct {
 	// intercept list may or may not catch (R-CFG-4).
 	Tasks map[string]string `toml:"tasks"`
 
-	Network  Network             `toml:"network"`
-	Worktree Worktree            `toml:"worktree"`
-	Harness  map[string]Override `toml:"harness"`
+	Network   Network             `toml:"network"`
+	Telemetry Telemetry           `toml:"telemetry"`
+	Worktree  Worktree            `toml:"worktree"`
+	Harness   map[string]Override `toml:"harness"`
 
 	// Sources maps a top-level key to the file, the BOXER_* variable, or "default" it came from.
 	Sources map[string]string `toml:"-"`
@@ -104,6 +118,7 @@ func Defaults() Config {
 		Memory:                "4G",
 		EnvPassthrough:        []string{"CI"},
 		Network:               Network{Mode: "allowlist", AllowHosts: []string{}},
+		Telemetry:             Telemetry{Sink: "none"},
 		Worktree:              Worktree{Manage: "off"},
 		Harness:               map[string]Override{},
 		Tasks:                 map[string]string{},
@@ -232,6 +247,7 @@ var envKeys = map[string]func(c *Config, v string) error{
 	},
 	"BOXER_NETWORK_MODE":    func(c *Config, v string) error { c.Network.Mode = v; return nil },
 	"BOXER_WORKTREE_MANAGE": func(c *Config, v string) error { c.Worktree.Manage = v; return nil },
+	"BOXER_TELEMETRY_SINK":  func(c *Config, v string) error { c.Telemetry.Sink = v; c.Telemetry.Enabled = v != "none"; return nil },
 	"BOXER_WARM_ON_SESSION_START": func(c *Config, v string) error {
 		b, err := strconv.ParseBool(v)
 		c.WarmOnSessionStart = b
@@ -289,6 +305,7 @@ func (c Config) Validate() error {
 		{"on_sandbox_unavailable", c.OnSandboxUnavailable, []string{"fail", "passthrough"}},
 		{"network.mode", c.Network.Mode, []string{"off", "allowlist", "on"}},
 		{"worktree.manage", c.Worktree.Manage, []string{"off", "detect"}},
+		{"telemetry.sink", c.Telemetry.Sink, []string{"none", "file", "stderr", "otel"}},
 	}
 	for _, ch := range checks {
 		if !slices.Contains(ch.allowed, ch.val) {

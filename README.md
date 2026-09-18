@@ -88,17 +88,40 @@ isolation   = "worktree"   # one VM per worktree; repo is wider, session and sub
 mode        = "rewrite"    # rewrite | tool | off
 intercept   = ["npm", "bun", "node", "python", "go", "make"]
 passthrough = ["git", "gh", "ssh", "boxer"]
-setup       = ["bun install"]
+image       = ""                # default: detected from the lockfile, else debian:bookworm-slim
+setup       = ["bun install"]   # once per VM, inside the guest
 
-[tasks]                    # named commands the agent runs by name, not by composing a shell line
+[tasks]                         # named commands the agent runs by name, not by composing a shell line
 test  = "bun test"
 build = "bun run build"
+
+[network]
+mode        = "allowlist"       # registry hosts for the image are always allowed
+allow_hosts = ["registry.npmjs.org"]
+[worktree]
+manage      = "off"             # detect: a session in the main checkout shares the repository VM until it enters a worktree
+[harness.gemini-cli]
+mode        = "tool"
+[telemetry]
+enabled     = false             # the event stream, off by default; sink = none | file | stderr | otel
 ```
 
 Named tasks are the deterministic path: `boxer run --task test` runs what the repository's
 maintainers meant, and an unknown name is refused with the list of real ones. The skill boxer
 ships calls them, so an agent does not have to guess a command line for the intercept list to
 catch.
+
+## Telemetry
+
+Off by default: with no `[telemetry]` table, boxer writes no log, no metrics and nothing to the
+network. Turn it on with `enabled = true` and read it back with `boxer logs`; `boxer status --json`
+carries the last few events for the scope. Command lines are elided unless `record_commands = true`,
+and nothing leaves the machine unless you build with `-tags otel` and set an `endpoint`. The schema,
+the event names and the redaction rules are in [docs/events.md](docs/events.md).
+
+`boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
+`boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
+agent opens it. Opt-in; `boxer install all` leaves git configuration alone.
 
 `boxer doctor` prints every resolved value and where it came from. The rest of the keys, and what
 each one changes, are in [docs/configure.md](docs/configure.md).

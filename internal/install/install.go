@@ -21,10 +21,22 @@ import (
 	"github.com/BarakChamo/boxer/internal/config"
 )
 
-// Result reports what Install did.
+// Result reports what Install did. A write failure is kept here rather than returned at every
+// call site: the file writers are a long list of one-liners, and threading an error through each
+// of them buried the shape of the installer. The first failure stops the later writes and is
+// returned by Install, which is what matters — `boxer install` used to report success having
+// written nothing at all.
 type Result struct {
 	Written []string
 	Notes   []string
+	err     error
+}
+
+// keep records the first failure.
+func (r *Result) keep(err error) {
+	if r.err == nil {
+		r.err = err
+	}
 }
 
 // Install writes harness's project-level configuration under root.
@@ -132,7 +144,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	default:
 		return *r, fmt.Errorf("no project-level install for %q; use `boxer package %s` and follow its README", harness, harness)
 	}
-	return *r, nil
+	return *r, r.err
 }
 
 // User writes the user-level configuration files that orchestrators seed their managed harness
@@ -169,7 +181,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 	default:
 		return *r, fmt.Errorf("no user-level install for %q; user-level layers exist for claude-code and codex", harness)
 	}
-	return *r, nil
+	return *r, r.err
 }
 
 // parts locates one harness's pieces in its rendered view: the extension directory, its hooks
@@ -350,29 +362,41 @@ func (r *Result) copyTree(src, dst string) {
 	})
 }
 
+// copy writes src to dst, preserving the executable bit. It reports failure: an install that
+// cannot write the skill it promised used to print the harness name and nothing else, and the
+// operator learned about it from the agent ignoring a sandbox that was never configured.
 func (r *Result) copy(src, dst string) {
-	b, err := os.ReadFile(src)
-	if err != nil {
+	if r.err != nil {
 		return
 	}
 	mode := os.FileMode(0o644)
-	if st, err := os.Stat(src); err == nil && st.Mode()&0o111 != 0 {
-		mode = 0o755
+	b, err := os.ReadFile(src)
+	if err == nil {
+		if st, serr := os.Stat(src); serr == nil && st.Mode()&0o111 != 0 {
+			mode = 0o755
+		}
+		err = os.MkdirAll(filepath.Dir(dst), 0o755)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err == nil {
+		err = os.WriteFile(dst, b, mode)
+	}
+	if err != nil {
+		r.keep(err)
 		return
 	}
-	if err := os.WriteFile(dst, b, mode); err == nil {
-		r.Written = append(r.Written, dst)
-	}
+	r.Written = append(r.Written, dst)
 }
 
 const sectionMarker = "# boxer sandbox"
 
 // appendSection appends the rendered instruction file to dst unless dst already carries it.
 func (r *Result) appendSection(dst, src string) {
+	if r.err != nil {
+		return
+	}
 	body, err := os.ReadFile(src)
 	if err != nil {
+		r.keep(err)
 		return
 	}
 	cur, _ := os.ReadFile(dst)
@@ -385,9 +409,11 @@ func (r *Result) appendSection(dst, src string) {
 	if len(cur) > 0 && !strings.HasSuffix(string(cur), "\n\n") {
 		sep = "\n\n"
 	}
-	if err := os.WriteFile(dst, append(append(cur, []byte(sep)...), body...), 0o644); err == nil {
-		r.Written = append(r.Written, dst)
+	if err := os.WriteFile(dst, append(append(cur, []byte(sep)...), body...), 0o644); err != nil {
+		r.keep(err)
+		return
 	}
+	r.Written = append(r.Written, dst)
 }
 
 // Drift lists the installed files under root whose bytes differ from what this binary would

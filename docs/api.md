@@ -6,7 +6,7 @@ experimental until 1.0. Release rules are in [release.md](release.md).
 
 ## CLI JSON
 
-`--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks` prints exactly one JSON document (an object or an
+`--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks`, `logs` prints exactly one JSON document (an object or an
 array) on stdout, indented, with snake_case fields. Human output is unchanged without the flag.
 When a scoped command (`status`, `down`) is refused before it can act, the refusal is printed as
 `{"error": …}` on stdout (shape under "Errors") and repeated in prose on stderr; exit 1.
@@ -32,6 +32,10 @@ The sandbox for the current scope. Exit `0` running, `3` stopped, `4` absent, `1
   "last_used": null
 }
 ```
+
+`events` is present only when telemetry writes a file sink: the last five events for this scope,
+newest last, in the schema of [events.md](events.md). A dashboard polling `status` gets the state
+and the recent history in one call.
 
 When the machine exists, `state` is smolvm's (`running`, `stopped`), `image` is the machine's,
 `image_reason` is `machine`, `labels` carries the `boxer.*` labels, and `last_used` is the
@@ -129,6 +133,28 @@ worktree is gone: what a dashboard built on this API needs to stop a box.
 ```
 
 `removed` is `false` when no sandbox existed. `--all` prints an array of the same rows.
+
+### `boxer logs [--scope NAME] [-n N] [--json]`
+
+The event stream, oldest first, read back from the file sink. `--scope` filters to one sandbox and
+`-n` keeps only the last N. Exit 1 when no event log exists, with the configuration to set.
+
+```json
+[
+  {
+    "time": "2026-09-18T09:41:02.183746Z",
+    "event": "run",
+    "scope": "sb-7e1852e4a3c3",
+    "harness": "claude-code",
+    "duration_ms": 412.7,
+    "outcome": "ok",
+    "payload": { "exit": 0, "command_len": 24 }
+  }
+]
+```
+
+The stream is off by default and the schema, the event names and the redaction rules are in
+[events.md](events.md). Without `--json` each event prints as one line.
 
 ### `boxer doctor --json`
 

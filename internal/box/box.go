@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vm"
 )
@@ -81,6 +82,9 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if harness != "" {
 		cfg = cfg.ForHarness(harness)
 	}
+	// The first thing that knows the configuration turns the event stream on, so every later
+	// emission in this process — hooks, MCP, run — uses the repository's own [telemetry] policy.
+	obs.ConfigureFrom(cfg.Telemetry)
 	e := &Env{CWD: cwd, Harness: harness, Cfg: cfg, Git: g, ID: id, VM: vm.New(), Stderr: os.Stderr}
 	if g.Toplevel == "" {
 		return e, &Error{Reason: "not inside a git repository", Cause: "NO_REPOSITORY", Fix: "cd into a git worktree, or `git init`"}
@@ -114,7 +118,22 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 		e.Warnings = append(e.Warnings, "isolation degraded: "+s.Reason)
 	}
 	e.Scope = s
+	e.event(obs.Resolve, obs.OK, 0, map[string]any{"isolation": s.Isolation, "degraded": s.Degraded, "warnings": len(e.Warnings)})
 	return e, nil
+}
+
+// event records one event for this Env; the scope and harness are always the same two fields.
+func (e *Env) event(name, outcome string, d time.Duration, payload map[string]any) {
+	if !obs.On() {
+		return
+	}
+	obs.Emit(obs.Event{Name: name, Scope: e.Scope.Key, Harness: e.Harness, Outcome: outcome, Duration: d, Payload: payload})
+}
+
+// fail records the refusal and returns it, so every error contract boxer produces is also an event.
+func (e *Env) fail(err *Error) *Error {
+	e.event(obs.Err, obs.Failed, 0, map[string]any{"cause": err.Cause, "reason": err.Reason})
+	return err
 }
 
 // Inside reports whether the harness itself runs in the guest (integration = "inside").
@@ -204,6 +223,15 @@ func (e *Env) Exists() (vm.Machine, bool, error) {
 // concurrent callers (a SessionStart hook and the first tool call arrive together), because two
 // smolvm creates or starts for one machine race into "connection closed".
 func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
+	start := time.Now()
+	defer func() {
+		outcome := obs.OK
+		if err != nil {
+			outcome = obs.Failed
+		}
+		image, why := e.Image()
+		e.event(obs.Provision, outcome, time.Since(start), map[string]any{"created": created, "image": image, "image_reason": why})
+	}()
 	unlock, err := lockScope(e.Scope.Key)
 	if err != nil {
 		return false, err
@@ -221,7 +249,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	}
 	if !ok {
 		if !allowCreate {
-			return false, &Error{Reason: "no sandbox exists for this scope", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"}
+			return false, e.fail(&Error{Reason: "no sandbox exists for this scope", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"})
 		}
 		if err := e.create(); err != nil {
 			return false, err
@@ -231,7 +259,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		return false, nil
 	}
 	if err := e.VM.Start(e.Scope.Key); err != nil {
-		return created, &Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"}
+		return created, e.fail(&Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
 	}
 	if err := e.setup(); err != nil {
 		return created, err
@@ -240,8 +268,16 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 }
 
 func (e *Env) create() error {
-	image, _ := e.Image()
-	mem, _ := config.MemoryMiB(e.Cfg.Memory)
+	image, why := e.Image()
+	if image == "" && e.Cfg.Smolfile == "" {
+		return e.fail(&Error{Reason: "no guest image could be chosen (" + why + ")", Cause: "NO_IMAGE", Scope: e.Scope,
+			Fix: "set image = \"debian:bookworm-slim\" in boxer.toml"})
+	}
+	mem, err := config.MemoryMiB(e.Cfg.Memory)
+	if err != nil {
+		return e.fail(&Error{Reason: err.Error(), Cause: "CONFIG_INVALID", Scope: e.Scope,
+			Fix: "set memory = \"4G\" in boxer.toml"})
+	}
 	hosts := append([]string{}, e.Cfg.Network.AllowHosts...)
 	if e.Cfg.Network.Mode == "allowlist" && image != "" {
 		hosts = append(hosts, registryHosts(image)...)
@@ -285,15 +321,15 @@ func (e *Env) create() error {
 		AllowHosts: hosts,
 		Ports:      e.Cfg.Network.Ports,
 	}
-	if err := e.VM.Create(spec); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+	if err = e.VM.Create(spec); err != nil {
+		if vm.IsAlreadyExists(err) {
 			// Another boxer (a hook, a detached warm-up, an MCP server) is creating this scope
 			// under a different lock directory (a harness that strips XDG_STATE_HOME from its
 			// shell environment, for one). Wait for it rather than fail the command.
 			return e.awaitCreated()
 		}
-		return &Error{Reason: "sandbox could not be created: " + err.Error(), Cause: "CREATE_FAILED", Scope: e.Scope,
-			Fix: "boxer doctor"}
+		return e.fail(&Error{Reason: "sandbox could not be created: " + err.Error(), Cause: "CREATE_FAILED", Scope: e.Scope,
+			Fix: "boxer doctor"})
 	}
 	return nil
 }
@@ -372,6 +408,7 @@ func (e *Env) PackHarness() {
 		return
 	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s with %s installed (once per host)\n", image, e.Harness)
+	start := time.Now()
 	err = e.VM.Stop(e.Scope.Key)
 	if err == nil {
 		_, err = e.VM.PackFromVM(e.Scope.Key, stub)
@@ -379,9 +416,12 @@ func (e *Env) PackHarness() {
 	if serr := e.VM.Start(e.Scope.Key); serr != nil && err == nil {
 		err = serr
 	}
+	outcome := obs.OK
 	if err != nil {
+		outcome = obs.Failed
 		fmt.Fprintf(e.Stderr, "boxer: harness cache failed: %v\n", err)
 	}
+	e.event(obs.Pack, outcome, time.Since(start), map[string]any{"kind": "harness", "image": image, "path": side})
 }
 
 // StalePacks lists packs no machine references (by its boxer.pack label) whose last use is
@@ -426,10 +466,13 @@ func (e *Env) packed(image string) string {
 		return side
 	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s (once per host)\n", image)
+	start := time.Now()
 	if _, err := e.VM.Pack(image, stub); err != nil {
+		e.event(obs.Pack, obs.Failed, time.Since(start), map[string]any{"kind": "image", "image": image})
 		fmt.Fprintf(e.Stderr, "boxer: image cache failed, pulling directly: %v\n", err)
 		return ""
 	}
+	e.event(obs.Pack, obs.OK, time.Since(start), map[string]any{"kind": "image", "image": image, "path": side})
 	return side
 }
 
@@ -440,7 +483,15 @@ func (e *Env) setup() error {
 	if len(e.Cfg.Setup) == 0 {
 		return nil
 	}
-	if _, code, _ := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker); code == 0 {
+	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
+	// a VM that had already run them, which for a repository whose setup installs dependencies is
+	// minutes, not milliseconds.
+	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker)
+	if err != nil || vm.TransportFailure(out) {
+		return e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+			Fix: "boxer up --recreate"})
+	}
+	if code == 0 {
 		return nil
 	}
 	for _, cmd := range e.Cfg.Setup {
@@ -448,12 +499,29 @@ func (e *Env) setup() error {
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
 		if err != nil || code != 0 {
 			_ = e.VM.Delete(e.Scope.Key)
-			return &Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
-				Fix: "fix the `setup` list in boxer.toml, then: boxer up"}
+			return e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
+				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
 		}
 	}
-	_, _, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	_, code, err = e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	if err == nil && code != 0 {
+		err = fmt.Errorf("writing the setup marker exited %d", code)
+	}
 	return err
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // GuestWorkdir maps the host cwd into the mount.
@@ -490,10 +558,17 @@ func (e *Env) Run(argv []string, o RunOpts) (int, error) {
 			env = append(env, k+"="+v)
 		}
 	}
-	return e.VM.Exec(vm.ExecOpts{
+	start := time.Now()
+	code, err := e.VM.Exec(vm.ExecOpts{
 		Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, TTY: o.TTY,
 		Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr,
 	}, argv...)
+	outcome := obs.OK
+	if err != nil || code != 0 {
+		outcome = obs.Failed
+	}
+	e.event(obs.Run, outcome, time.Since(start), map[string]any{"exit": code, "command": strings.Join(argv, " ")})
+	return code, err
 }
 
 // lockScope takes an exclusive flock on a per-scope file under the state directory.

@@ -252,3 +252,29 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// `boxer install` used to report success having written nothing: copy and appendSection returned
+// silently. An unwritable destination must now be an error.
+func TestInstallReportsWriteFailure(t *testing.T) {
+	root := t.TempDir()
+	blocked := filepath.Join(root, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Dir(blocked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A file where the skill directory has to go: the copy cannot create the tree under it.
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install("claude-code", config.Defaults(), "test", root); err == nil {
+		t.Fatal("an install that cannot write its skill must not report success")
+	}
+	// The same for the instruction section: a directory where AGENTS.md belongs.
+	other := t.TempDir()
+	if err := os.Mkdir(filepath.Join(other, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Install("pi", config.Defaults(), "test", other)
+	if err == nil {
+		t.Fatalf("an install that cannot write AGENTS.md must not report success: %v", r.Written)
+	}
+}

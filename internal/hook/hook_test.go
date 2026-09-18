@@ -263,3 +263,31 @@ func TestOnlyGrokLacksSessionContext(t *testing.T) {
 		}
 	}
 }
+
+// internal/eval's oracle parses BOXER_TRACE line by line: a stamp, the harness, an arrow, and the
+// JSON. The event stream shares the file, so this pins the shape the oracle needs.
+func TestTraceFileKeepsItsFormat(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	trace := filepath.Join(t.TempDir(), "trace.log")
+	t.Setenv("BOXER_TRACE", trace)
+	call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash",
+		"tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s"})
+	b, _ := os.ReadFile(trace)
+	var in, out int
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.Contains(line, " claude-code <- ") && strings.Contains(line, `"tool_name":"Bash"`) {
+			in++
+		}
+		if strings.Contains(line, " claude-code -> ") && strings.Contains(line, `"command":"boxer run`) {
+			out++
+		}
+	}
+	if in != 1 || out != 1 {
+		t.Fatalf("want one input and one output line, got %d/%d:\n%s", in, out, b)
+	}
+	// The rewrite is also an event, and the command it carries is elided.
+	if !strings.Contains(string(b), `"event":"rewrite"`) || strings.Contains(string(b), `"command":"boxer run -c 'bun test'","tool"`) {
+		t.Fatalf("event line: %s", b)
+	}
+}

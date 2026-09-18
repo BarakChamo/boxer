@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/decide"
+	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vm"
 )
@@ -119,14 +119,15 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 	if vm.Inside() {
 		return 0 // already in a guest: the outer boxer owns isolation, never wrap twice
 	}
+	// BOXER_TRACE is read before any configuration is resolved: the hook may never get far
+	// enough to load one, and the eval suite still needs the invocation recorded.
+	obs.Configure(obs.Config{})
+	start := time.Now()
 	raw, _ := io.ReadAll(stdin)
-	if trace := os.Getenv("BOXER_TRACE"); trace != "" {
-		// Append every hook invocation for eval and support; the output is traced by emit.
-		if f, err := os.OpenFile(trace, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			fmt.Fprintf(f, "%s %s <- %s\n", stamp(), harness, strings.TrimSpace(string(raw)))
-			f.Close()
-			stdout = io.MultiWriter(stdout, traceWriter{trace, harness})
-		}
+	if obs.Tracing() {
+		// Every hook invocation is appended for eval and support; the output is traced as it is written.
+		obs.Trace(harness, "<-", strings.TrimSpace(string(raw)))
+		stdout = io.MultiWriter(stdout, traceWriter{harness})
 	}
 	var in Input
 	if err := json.Unmarshal(raw, &in); err != nil {
@@ -137,6 +138,10 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 	if purpose == "" {
 		return 0
 	}
+	defer func() {
+		obs.Emit(obs.Event{Name: obs.Hook, Harness: harness, Duration: time.Since(start), Outcome: obs.OK,
+			Payload: map[string]any{"event": in.HookEventName, "purpose": purpose}})
+	}()
 	e, err := resolve(in.CWD, harness, scope.Identity{SessionID: in.SessionID, AgentID: in.AgentID})
 	if err != nil {
 		// Outside a repository or misconfigured: say so once at session start, stay silent otherwise.
@@ -230,6 +235,7 @@ func provision(d Dialect, e *box.Env, purpose, event string, stdout, stderr io.W
 // input replaces the tool's input wholesale, and a schema with other required fields (Grok's
 // run_terminal_command needs description) would otherwise reject it.
 func rewrite(d Dialect, w io.Writer, cmd string, original map[string]any) int {
+	obs.Emit(obs.Event{Name: obs.Rewrite, Harness: d.Name, Outcome: obs.OK, Payload: map[string]any{"tool": d.ShellTool, "command": cmd}})
 	input := map[string]any{}
 	for k, v := range original {
 		input[k] = v
@@ -248,6 +254,7 @@ func rewrite(d Dialect, w io.Writer, cmd string, original map[string]any) int {
 }
 
 func deny(d Dialect, w io.Writer, reason, fix string) int {
+	obs.Emit(obs.Event{Name: obs.Deny, Harness: d.Name, Outcome: obs.Denied, Payload: map[string]any{"tool": d.ShellTool, "reason": reason}})
 	msg := reason
 	if fix != "" {
 		msg += "\nfix: " + fix
@@ -283,18 +290,12 @@ func emit(w io.Writer, v any) int {
 	return 0
 }
 
-type traceWriter struct{ path, harness string }
+type traceWriter struct{ harness string }
 
 func (t traceWriter) Write(p []byte) (int, error) {
-	if f, err := os.OpenFile(t.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintf(f, "%s %s -> %s", stamp(), t.harness, p)
-		f.Close()
-	}
+	obs.Trace(t.harness, "->", string(p))
 	return len(p), nil
 }
-
-// stamp is the trace line prefix: when a signal fired is what the timing matrix measures.
-func stamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func names() []string {
 	var out []string

@@ -181,7 +181,7 @@ func TestLoadWithNoFilesIsDefaults(t *testing.T) {
 func TestUnknownTablesWarnAndUnknownKeysFail(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "boxer.toml")
-	if err := os.WriteFile(p, []byte("[tasks]\ntest = \"make test\"\n\n[telemetry]\nenabled = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("[tasks]\ntest = \"make test\"\n\n[fromafuturerelease]\nenabled = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadFiles(p)
@@ -191,7 +191,7 @@ func TestUnknownTablesWarnAndUnknownKeysFail(t *testing.T) {
 	if cfg.Tasks["test"] != "make test" {
 		t.Fatalf("tasks: %v", cfg.Tasks)
 	}
-	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "[telemetry]") {
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "[fromafuturerelease]") {
 		t.Fatalf("unknown table must warn: %v", cfg.Warnings)
 	}
 	if err := os.WriteFile(p, []byte("mod = \"off\"\n"), 0o644); err != nil {
@@ -205,5 +205,34 @@ func TestUnknownTablesWarnAndUnknownKeysFail(t *testing.T) {
 	}
 	if _, err := LoadFiles(p); err == nil {
 		t.Fatal("an empty task command must fail")
+	}
+}
+
+// [telemetry] is off by default, parsed from the file, and overridable from the environment for a
+// harness that offers nothing else. An unknown sink is a configuration error, not a silent "none".
+func TestTelemetryTable(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Telemetry.Enabled || cfg.Telemetry.Sink != "none" {
+		t.Fatalf("telemetry must be off by default: %+v", cfg.Telemetry)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "boxer.toml")
+	os.WriteFile(p, []byte("[telemetry]\nenabled = true\nsink = \"file\"\npath = \"/tmp/e.jsonl\"\nrecord_commands = true\n"), 0o644)
+	cfg, err := LoadFiles(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Telemetry.Enabled || cfg.Telemetry.Sink != "file" || cfg.Telemetry.Path != "/tmp/e.jsonl" || !cfg.Telemetry.RecordCommands {
+		t.Fatalf("parsed: %+v", cfg.Telemetry)
+	}
+	bad := filepath.Join(dir, "bad.toml")
+	os.WriteFile(bad, []byte("[telemetry]\nsink = \"carrier pigeon\"\n"), 0o644)
+	if _, err := LoadFiles(bad); err == nil {
+		t.Fatal("an unknown sink must be rejected")
+	}
+	t.Setenv("BOXER_TELEMETRY_SINK", "stderr")
+	cfg, err = LoadFiles(p)
+	if err != nil || cfg.Telemetry.Sink != "stderr" || cfg.Sources["telemetry_sink"] != "BOXER_TELEMETRY_SINK" {
+		t.Fatalf("environment override: %+v %v", cfg.Telemetry, cfg.Sources)
 	}
 }
