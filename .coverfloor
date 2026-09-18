@@ -17,4 +17,4 @@ internal/scope     87
 internal/shim      67
 internal/vm        75
 pkg/boxer          78
-cmd/boxer          69
+cmd/boxer          74

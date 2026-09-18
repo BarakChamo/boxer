@@ -147,3 +147,91 @@ func TestToolModeRefusesWithTheWayIn(t *testing.T) {
 		t.Fatalf("tool mode must deny and name boxer_run: %d %s", code, out)
 	}
 }
+
+// Installing is the command a user runs once per repository, and its failure modes are the ones
+// they meet first: the wrong place, an unknown harness, a harness with no project layer, and the
+// two special targets that are not harnesses at all.
+func TestInstallPathsAndRefusals(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+
+	if code, out := call(t, nil, "install"); code != 2 || !strings.Contains(out, "usage:") {
+		t.Fatalf("no harness named: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "install", "nosuchharness"); code == 0 || !strings.Contains(out, "known:") || !strings.Contains(out, "claude-code") {
+		t.Fatalf("an unknown harness must list the known ones: %d %s", code, out)
+	}
+	// Copilot's hooks load only from a trusted directory, which headless mode does not grant, so
+	// the project layer refuses and names the flag that works.
+	if code, out := call(t, nil, "install", "copilot"); code == 0 || !strings.Contains(out, "--user") {
+		t.Fatalf("copilot's refusal must name --user: %d %s", code, out)
+	}
+
+	// `all` writes every harness this repository can take, and is idempotent: a user runs it again
+	// after every upgrade, and the second run must add nothing. One install writes one hook entry
+	// per lifecycle event, so the invariant is that the count does not grow.
+	if code, out := call(t, nil, "install", "all"); code != 0 {
+		t.Fatalf("install all: %d %s", code, out)
+	}
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	first, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, nil, "install", "all"); code != 0 {
+		t.Fatalf("install all, again: %d %s", code, out)
+	}
+	second, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("a second install changed the settings:\n%s\n---\n%s", first, second)
+	}
+	if n := strings.Count(string(second), "boxer hook claude-code"); n == 0 {
+		t.Fatalf("no hook entry at all: %s", second)
+	}
+
+	// git is not a harness: it is a post-checkout hook that warms a worktree the moment git makes
+	// one, which is what an orchestrator needs.
+	if code, out := call(t, nil, "install", "git"); code != 0 || !strings.Contains(out, "wrote") {
+		t.Fatalf("install git: %d %s", code, out)
+	}
+	hookFile := filepath.Join(dir, ".git", "hooks", "post-checkout")
+	b, err := os.ReadFile(hookFile)
+	if err != nil || !strings.Contains(string(b), "boxer up --detach") {
+		t.Fatalf("post-checkout must warm the new worktree: %v %s", err, b)
+	}
+
+	// Conductor is an orchestrator, not a harness: its file points at boxer's shims.
+	if code, out := call(t, nil, "install", "conductor"); code != 0 || !strings.Contains(out, "settings.toml") {
+		t.Fatalf("install conductor: %d %s", code, out)
+	}
+}
+
+// Running outside a git repository is the other thing every command has to survive, because an
+// agent's shell starts wherever the user left it.
+func TestCommandsOutsideARepository(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	vmtest.Repo(t, vmtest.NoWorktreeCheck) // sets the isolation env, then we leave it
+	t.Chdir(t.TempDir())
+
+	for _, args := range [][]string{{"up"}, {"status"}, {"brief"}, {"tasks"}, {"run", "-c", "true"}} {
+		code, out := call(t, nil, args...)
+		if code == 0 {
+			t.Fatalf("%v outside a repository should fail: %s", args, out)
+		}
+		if !strings.Contains(out, "boxer:") || !strings.Contains(out, "fix:") {
+			t.Fatalf("%v must fail with a reason and a fix: %s", args, out)
+		}
+	}
+	// ls and gc are host-wide: they work anywhere, because they are how you find what is left.
+	if code, out := call(t, nil, "ls"); code != 0 {
+		t.Fatalf("ls is host-wide: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "gc", "--dry-run"); code != 0 {
+		t.Fatalf("gc is host-wide: %d %s", code, out)
+	}
+}
