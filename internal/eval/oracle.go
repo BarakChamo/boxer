@@ -170,7 +170,9 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	// tool mode: the model cannot read the brief before its first command, so it tries the shell,
 	// is denied once, and recovers. Measured across four models (eval-adherence.md) and recorded
 	// in the dialect, so it is a known harness fact rather than a permanently red cell.
-	if maxDenies == 0 && c.Mode == "tool" && hook.Dialects[c.Harness].NoSessionContext {
+	// Not in the adherence tier: there the denial is the measurement, and Grok's brief cell must
+	// keep failing so the finding stays visible.
+	if c.Scenario == "" && maxDenies == 0 && c.Mode == "tool" && hook.Dialects[c.Harness].NoSessionContext {
 		maxDenies = 1
 	}
 	if !expectDeny && maxDenies >= 0 && t.denies > maxDenies {

@@ -114,3 +114,25 @@ func TestPromptPerScenario(t *testing.T) {
 		t.Fatalf("multistep prompt: %s", p)
 	}
 }
+
+// The dialect's one-denial budget is for the mechanical matrix only: in the adherence tier the
+// denial is what the cell measures, so Grok's brief cell must still fail.
+func TestGrokBriefStillFailsInAdherence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.log")
+	os.WriteFile(path, []byte(`grok -> {"hookSpecificOutput":{"permissionDecision":"deny"}}`+"\n"), 0o644)
+	deny := func(scenario string) bool {
+		c := Cell{Harness: "grok", Mode: "tool", Compliant: true, Tier: "t2", Scenario: scenario}
+		for _, f := range Judge(&Env{Tier: "t2", Trace: path, Repo: t.TempDir()}, c, Transcript{Answer: "Linux"}) {
+			if f.Check == "deny" {
+				return true
+			}
+		}
+		return false
+	}
+	if !deny("brief") {
+		t.Error("a denial in the brief scenario must stay a finding for grok")
+	}
+	if deny("") {
+		t.Error("the mechanical matrix budgets grok's one denial")
+	}
+}
