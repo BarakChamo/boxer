@@ -290,3 +290,48 @@ func TestDownAllAndGCSweeps(t *testing.T) {
 		t.Fatalf("down --all with a refusing smolvm: %d %s", code, out)
 	}
 }
+
+// shim, package and inside are the three commands with no JSON output and no test, and each one
+// writes something a user then depends on: programs on PATH, a published directory, a harness in
+// the guest. Their usage and refusal paths are what a person hits first.
+func TestShimPackageAndInsideUsage(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	dir := t.TempDir()
+
+	if code, out := call(t, nil, "shim", "install", "--shell", dir); code != 0 || !strings.Contains(out, "boxer-bash") {
+		t.Fatalf("shim install --shell: %d %s", code, out)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "boxer-bash")); err != nil || st.Mode()&0o111 == 0 {
+		t.Fatalf("boxer-bash must be executable: %v", err)
+	}
+	if code, out := call(t, nil, "shim", "install", "--harness", "claude,codex", dir); code != 0 || !strings.Contains(out, "2 harness shims") {
+		t.Fatalf("shim install --harness: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "shim", "install", "--harness", "nope", dir); code != 2 || !strings.Contains(out, "unknown harness") {
+		t.Fatalf("an unknown harness must name the known ones: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "shim", "install", dir); code != 0 || !strings.Contains(out, "shims to") {
+		t.Fatalf("shim install from the intercept list: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "shim"); code != 2 || !strings.Contains(out, "usage") {
+		t.Fatalf("bare shim: %d %s", code, out)
+	}
+
+	// package renders the whole thing: one package plus one view per harness.
+	out := filepath.Join(t.TempDir(), "dist")
+	if code, o := call(t, nil, "package", "all", "--out", out); code != 0 {
+		t.Fatalf("package all: %d %s", code, o)
+	}
+	if _, err := os.Stat(filepath.Join(out, "boxer", "skills", "boxer", "scripts", "task")); err != nil {
+		t.Fatalf("the package must carry the skill's scripts: %v", err)
+	}
+	if code, o := call(t, nil, "package", "nosuchharness", "--out", out); code == 0 {
+		t.Fatalf("an unknown harness must not render: %d %s", code, o)
+	}
+
+	// inside without a harness names the ones that exist rather than guessing.
+	if code, o := call(t, nil, "shell"); code != 2 || !strings.Contains(o, "harnesses:") {
+		t.Fatalf("bare shell: %d %s", code, o)
+	}
+}
