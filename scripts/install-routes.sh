@@ -63,6 +63,15 @@ code=$?
 set -e
 [ "$code" -ne 0 ] || { echo "npm launcher did not forward a non-zero exit code"; exit 1; }
 
+# A package installed with scripts refused must still work: the launcher fetches on first use.
+echo "== npm package, postinstall refused, launcher self-heals"
+noscripts="$work/npmroot-noscripts"
+mkdir -p "$noscripts"
+( cd "$noscripts" && BOXER_BASE_URL="$base" npm install --ignore-scripts --no-audit --no-fund "$tgz" >/dev/null )
+[ ! -f "$noscripts/node_modules/boxer-cli/vendor/boxer" ] || { echo "expected no vendored binary with --ignore-scripts"; exit 1; }
+out=$(cd "$noscripts" && BOXER_BASE_URL="$base" "$noscripts/node_modules/.bin/boxer" --version)
+echo "$out" | grep -q "$version" || { echo "launcher did not self-heal: $out"; exit 1; }
+
 echo "== npm package, tampered checksum must abort"
 cp "$work/checksums.bad" "$stage/checksums.txt"
 rm -rf "$prefix/node_modules"

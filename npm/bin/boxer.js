@@ -8,9 +8,16 @@ const { spawnSync } = require('child_process');
 
 const binary = path.join(__dirname, '..', 'vendor', 'boxer');
 if (!fs.existsSync(binary)) {
-  console.error('boxer-cli: the boxer binary is missing; reinstall the package, or install boxer with');
-  console.error('  curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh');
-  process.exit(1);
+  // npm is moving towards refusing install scripts by default, and a package whose binary only
+  // arrives through postinstall is broken the moment that happens. Fetch it on first use instead
+  // of telling the user to reinstall: same script, same checksum check, one line of output.
+  const postinstall = path.join(__dirname, '..', 'postinstall.js');
+  const fetch = spawnSync(process.execPath, [postinstall], { stdio: 'inherit' });
+  if (fetch.status !== 0 || !fs.existsSync(binary)) {
+    console.error('boxer-cli: could not download the boxer binary. Install it directly with');
+    console.error('  curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh');
+    process.exit(1);
+  }
 }
 
 const res = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });
