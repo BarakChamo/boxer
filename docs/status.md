@@ -12,6 +12,10 @@ account); T2 live on `zai/glm-5.3-flash` **31 pass, 1 fail, 16 skip** for $0.15 
 tool-mode finding below; skips are Gemini without its own key, scripted-only noncompliant cells,
 and orchestrators). Every cell is a fresh repository and a fresh VM.
 
+Since that pass the Paperclip and T3 Code orchestrator cells are driven headlessly and were run on
+their own (2026-09-18): three cells, all pass, $0.048 of live spend. The matrix totals above are
+from the earlier full run and do not yet include them.
+
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | pass | pass | pass 13 s | pass 13 s | 7/7 live; session and subagent isolation and the four worktree timings pass at t1 |
@@ -29,8 +33,8 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 | Orchestrator | Path | Result |
 | --- | --- | --- |
 | OpenHands | terminal `shell_path` = `boxer-bash` (`boxer shim install --shell`), real SDK 1.49 | t1 pass; **live pass** through the gateway (agent's terminal ran in the guest); the earlier `BoxerWorkspace`-only design did not sandbox the agent's terminal |
-| Paperclip | project layer over `claude-agent-acp` | spike 7 answered (env passes through); driver skips: `paperclipai` not installed |
-| T3 Code | ACP (`boxer acp`) and project layer | spike 8 answered (WS sequence known); driver skips: `t3` not installed |
+| Paperclip | project layer over `claude-agent-acp`, one git worktree per issue | driver (`orch_paperclip.go`): T1 pass 21 s; **live 2026-09-18 pass, 2 m 4 s, $0.0364** |
+| T3 Code | project layer, and the instance's `binaryPath` on a `boxer shim` (inside) | driver (`orch_t3.go`), two cells: T1 pass 9 s / 18 s; **live 2026-09-18 pass, 18 s $0.0047 and 27 s $0.0070** |
 | Multica | project layer | spike 9 answered; driver skips: no account (`multica setup`) |
 | herdr | checklist | no driver by design (pane-driven) |
 | Conductor (local) | checklist | no driver (setup-script lane) |

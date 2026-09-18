@@ -37,3 +37,20 @@ func TestHostLockNestedIsNoop(t *testing.T) {
 		t.Fatal("nested HostLock must not touch the lock file")
 	}
 }
+
+func TestSessionRootPrefersOrchestratorWorktree(t *testing.T) {
+	e := &Env{Repo: "/repo"}
+	if got := e.SessionRoot(Cell{}); got != "/repo" {
+		t.Errorf("no orchestrator worktree: got %q, want /repo", got)
+	}
+	if got := e.SessionRoot(Cell{Timing: "before"}); got != "/repo/wt" {
+		t.Errorf("timing cell: got %q, want /repo/wt", got)
+	}
+	// An orchestrator cuts its own worktree and its driver records it; the oracle judges that one.
+	e.Root = "/elsewhere/task-1"
+	for _, c := range []Cell{{}, {Timing: "before"}} {
+		if got := e.SessionRoot(c); got != e.Root {
+			t.Errorf("Env.Root set: got %q, want %q", got, e.Root)
+		}
+	}
+}

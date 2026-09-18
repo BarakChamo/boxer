@@ -2,8 +2,9 @@
 
 How boxer behaves when a harness is launched by something other than the user's terminal: T3
 Code, Paperclip, OpenHands, or any tool that spawns `claude`, `codex`, `gemini`, `opencode`, or
-`grok` as a subprocess. Findings are from reading each project's source on 2026-09-17; verify
-against the version you run.
+`grok` as a subprocess. Findings are from reading each project's source on 2026-09-17 and from
+headless driver runs on 2026-09-18 (`paperclipai` 2026.916.0, `t3` 0.0.42); verify against the
+version you run.
 
 ## The problem: plugins do not follow the harness
 
@@ -82,17 +83,22 @@ A wrapping adapter would add only Codex hook trust and `boxer up`/`down` around 
 execution targets sync the worktree to another machine; install `boxer` and smolvm there, or leave
 those targets to their own isolation.
 
-## Checklists and spike answers (2026-09-17)
+## Drivers and checklists (2026-09-18)
 
-`boxer-eval` has a driver for OpenHands (`internal/eval/orch_openhands.go`) and a checklist
-driver for each orchestrator below that reports one skipped cell naming what is missing
-(`internal/eval/orch.go`). Each procedure proves the same four things: the worktree maps to one
-VM (`boxer ls` shows `sb-<key>` for the task worktree), the hook or ACP path was taken (`BOXER_TRACE`
-shows a `PreToolUse`/`tool.execute.before` rewrite or `boxer acp` was the agent command), the
-command ran in the guest (`uname -a` starts with `Linux`), and installing both the plugin and the
-project layer creates one VM, not two.
+`boxer-eval` drives OpenHands (`internal/eval/orch_openhands.go`), Paperclip
+(`orch_paperclip.go`) and T3 Code (`orch_t3.go`) headlessly; Multica keeps a checklist driver that
+reports one skipped cell naming what is missing (`orch.go`). Each proves the same four things: the
+task worktree maps to one VM (`boxer ls` shows `sb-<key>` for it), the hook or ACP path was taken,
+the command ran in the guest (`uname -a` starts with `Linux`), and the canary never appeared on the
+host.
 
-### Paperclip (spike 7: does `claude_local` pass env through to `claude-agent-acp`?)
+An orchestrator cuts its own worktree, and its driver only learns the path at run time, so the
+driver records it in `Env.Root`. `Env.SessionRoot` prefers it over the checkout, and the oracle
+resolves the scope, the configuration and the VM from there (`internal/eval/oracle.go`,
+`timing.go`). Without that the oracle would judge the main checkout's VM and miss the one the run
+actually used.
+
+### Paperclip (driver; spike 7: does `claude_local` pass env through to `claude-agent-acp`?)
 
 Read from `packages/adapters/claude-local/src/server/{acp.ts,probe-env.ts,execute.ts}` at `master`:
 
@@ -104,20 +110,46 @@ Read from `packages/adapters/claude-local/src/server/{acp.ts,probe-env.ts,execut
   list. So `ANTHROPIC_BASE_URL` reaches the agent and a fake-model (T1) run is possible in
   principle; `PATH` and `BOXER_TRACE` are not caller-settable, so hooks run with the Paperclip
   server's `PATH` and the oracle must judge by the VM and the guest canary rather than the trace.
-- Not automated here: `test-drive` boots a full instance with an embedded database, then needs an
-  issue, an assignment, and a heartbeat over REST before a run happens.
+Automated since 2026-09-18 as the cell `paperclip/rewrite/project/worktree`
+(`internal/eval/orch_paperclip.go`):
 
-Checklist:
+```sh
+bin/boxer-eval --tier t1 --cell paperclip          # scripted model
+bin/boxer-eval --tier t2 --cell paperclip --keep   # live model
+```
 
-1. `npm i -g paperclipai`; in a repository with `boxer install claude-code` committed and `boxer`
-   on the server's `PATH`: `paperclipai test-drive --harness claude --no-browser --data-dir <tmp>`.
-2. Create an issue whose body is the eval prompt (`Run the shell command \`uname -a\` exactly once
-   and reply with only the first word of its output`), assign it to the CEO agent, trigger a
-   heartbeat.
-3. Assert: the run's worktree has a VM (`boxer ls`), the answer is `Linux`, `boxer gc` reclaims
-   the VM once Paperclip removes the worktree.
+The driver commits `boxer install claude-code` into the eval repository, starts
+`paperclipai test-drive --harness claude --no-browser --data-dir <work>/paperclip` (plus `--model`
+at t2) from the eval environment so the agent's hooks inherit `PATH`, then over REST: reads the
+company and its CEO agent, PATCHes the agent's `adapterConfig.env` with the gateway variables,
+creates a project whose primary workspace is the repository, files the issue, wakes the agent, and
+polls `heartbeat-runs` until one finishes.
 
-### T3 Code (spike 8: WS sequence and env inheritance)
+Two things have to be right, and neither is obvious from the API:
+
+- **The wake must name the issue.** `POST /api/agents/<id>/wakeup` with
+  `{"source":"assignment","payload":{"issueId":…}}` puts the issue in the run's context
+  (`enrichWakeContextSnapshot`), which is what resolves its project. A bare
+  `heartbeat/invoke` resolves no project, logs `No project or prior session workspace was
+  available`, and runs the turn in a Paperclip-owned fallback directory — where there is no project
+  layer and no worktree, so the command ran on the host (`Darwin`, canary leaked).
+- **Isolated workspaces are off by default.** `enableIsolatedWorkspaces` is an experimental
+  instance setting; until `PATCH /api/instance/settings/experimental` turns it on,
+  `gateProjectExecutionWorkspacePolicy` drops the project's `isolated_workspace` + `git_worktree`
+  policy and every run uses the project checkout itself. With it on, Paperclip cuts
+  `<repo>/.paperclip/worktrees/<issue-key>` per issue and the VM is keyed to that.
+
+Two smaller ones: the ready line is `Paperclip is ready at http://127.0.0.1:3100.` — the trailing
+full stop is part of the line, and the port is fixed, so only one instance runs at a time. And
+`adapterConfig.env` replaces the adapter's environment block, so `BOXER_TRACE` does not reach
+`claude-agent-acp`: the trace file stays empty and the oracle judges by the VM, the guest canary
+and the answer instead (`reachedGuest` in `oracle.go` covers exactly this case).
+
+Proved live on 2026-09-18 (`zai/glm-5.3-flash`): pass in 2 m 4 s for $0.0364 — worktree
+`.paperclip/worktrees/TES-1-uname`, one VM keyed to it, canary in that guest and not on the host,
+answer `Linux`. Scripted (t1): pass in 21 s.
+
+### T3 Code (driver; spike 8: WS sequence and env inheritance)
 
 Read from `pingdotgg/t3code` `packages/contracts/src/{orchestration.ts,rpc.ts}`,
 `apps/server/src/provider/Drivers/{ClaudeDriver.ts,ClaudeHome.ts}`, `ProviderInstanceEnvironment.ts`:
@@ -132,21 +164,44 @@ Read from `pingdotgg/t3code` `packages/contracts/src/{orchestration.ts,rpc.ts}`,
   variable list (`mergeProviderInstanceEnvironment`), and `CLAUDE_CONFIG_DIR` set to a T3-owned
   home. So `ANTHROPIC_BASE_URL`, `BOXER_TRACE`, and `PATH` inherit from the `t3` server process:
   a T1 run is possible when the server is started from the eval's environment.
-- Not automated here: `t3` (npm package `t3`, 0.0.42) is not installed; it starts the server and
-  the local web app together, and Go has no WebSocket client in the standard library, so the
-  driver would be a small node script.
+Automated since 2026-09-18 as two cells (`internal/eval/orch_t3.go`), against `t3` 0.0.42:
 
-Checklist:
+```sh
+bin/boxer-eval --tier t2 --cell t3code/rewrite --keep   # project layer, stock claude
+bin/boxer-eval --tier t2 --cell t3code/inside  --keep   # the harness itself in the guest
+```
 
-1. `npm i -g t3`; start `t3` from a shell with `boxer` on `PATH` and `BOXER_TRACE` set.
-2. Outside path: repository with `boxer install claude-code` committed; provider instance
-   `claude` stock. Inside path: provider instance whose executable is `boxer` with arguments
-   `acp claude` (agent command), `integration = "inside"` in `boxer.toml`.
-3. Send `project.create` and `thread.turn.start` with `bootstrap.prepareWorktree`; prompt as above.
-4. Assert: VM keyed to the new worktree; outside: trace shows the rewrite; inside: no trace, the
-   harness itself ran in the guest; answer `Linux`.
+The driver writes `<base-dir>/userdata/settings.json` with one provider instance
+(`providerInstances.claudeAgent`: `driver: "claudeAgent"`, an `environment` list of
+`{name, value}` pairs, and a `config` carrying `homePath` and, for the inside cell, `binaryPath`),
+starts `t3 serve --mode web --host 127.0.0.1 --port <free> --base-dir <work>/t3 --no-browser <repo>`
+and waits for `T3 Code server is ready`, mints a bearer token with
+`t3 auth session issue --base-dir … --token-only --ttl 1h`, and talks Effect RPC over
+`ws://127.0.0.1:<port>/ws` from a small node script (Go has no WebSocket client in its standard
+library). The framing is `{_tag:"Request", id, tag, payload, headers}` out; `Chunk` (each
+acknowledged with `{_tag:"Ack", requestId}`), `Exit` and `Defect` back.
+`orchestration.dispatchCommand` carries `project.create` and `thread.turn.start`;
+`orchestration.subscribeThread` is the event stream.
 
-### Multica (spike 9: `MULTICA_CLAUDE_ARGS`, env inheritance)
+The one thing that is not guessable is **when the turn is over**. The assistant's text rides the
+`thread.message-sent` event with `streaming: true`; the final, non-streaming one has an empty
+`text`. Waiting for a non-empty non-streaming message hangs until the driver's own timeout — the
+first attempt spent 12 minutes there with the answer already on the wire. The turn ends when
+`thread.session-set` drops `activeTurnId` back to `null` after having set it, and the answer is the
+last non-empty assistant message.
+
+T3 puts the worktree at `<base-dir>/worktrees/<repo>/<branch>` and reports it on the thread as
+`worktreePath`; the driver hands that to the oracle as `Env.Root`. The inside cell installs a shim
+with `boxer shim install --harness claude <work>/shims` and names it as the instance's
+`binaryPath`, with the eval's Claude config dir under the repository as `homePath`: T3 spawns the
+shim, the shim runs `boxer shell claude`, and the harness itself runs in the guest — no hook path,
+so the oracle's inside branch applies.
+
+Proved live on 2026-09-18 (`zai/glm-5.3-flash`): `t3code/rewrite/project/worktree` pass in 18 s for
+$0.0047, `t3code/inside/shim/worktree` pass in 27 s for $0.0070. Both: one VM keyed to the worktree
+T3 created, canary in that guest and not on the host, answer `Linux`. Scripted (t1): 9 s and 18 s.
+
+### Multica (checklist; spike 9: `MULTICA_CLAUDE_ARGS`, env inheritance)
 
 - The `multica` binary (Homebrew) reads `MULTICA_CLAUDE_ARGS`, `MULTICA_CLAUDE_PATH`,
   `MULTICA_CODEX_ARGS`, `MULTICA_KEEP_ENV_AFTER_TASK`, `MULTICA_AGENT_TEMP_BASE`, and the
@@ -185,6 +240,9 @@ path.
 - Verified 2026-09-17: Grok Build reads project hooks from `.grok/hooks/*.json` (not
   `.grok/settings.json`), gated by folder trust (`--trust` once, or `GROK_FOLDER_TRUST=0` for a
   headless run); `boxer install grok` writes that path.
-- Not verified: that `claude-agent-acp` loads project settings by default (Paperclip passes
-  `--setting-sources user` only when it manages the AI connection, which implies the default is
-  broader).
+- Verified 2026-09-18 by live runs, not by reading: `claude-agent-acp` under Paperclip does load
+  the project layer (the hook rewrote the command into the guest with no user-level install);
+  Paperclip's per-issue worktree and T3's per-thread worktree each map to exactly one VM, keyed to
+  the worktree the orchestrator made.
+- Not verified: how either orchestrator behaves when the plugin is installed at the user level as
+  well — the double-install idempotence argument above is still read from source only.

@@ -14,8 +14,8 @@ func Drivers() []Driver {
 		Inside{},
 		InsideACP{},
 		OpenHands{},
-		Paperclip,
-		T3,
+		&Paperclip{},
+		&T3{},
 		Multica,
 	}
 }
