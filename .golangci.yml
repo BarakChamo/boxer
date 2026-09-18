@@ -1,0 +1,31 @@
+# Linters boxer runs in CI. The set is deliberately small: correctness and dead code, not style.
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable:
+    - errcheck      # an ignored error is a decision; make it explicit
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      # Writing to an already-failing stream, and best-effort cleanup, are deliberate.
+      exclude-functions:
+        - (io.Writer).Write
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+  exclusions:
+    rules:
+      # The evaluation harness drives other people's CLIs; its cleanup paths are best-effort by
+      # design and it is proven by running the tiers, not by static analysis.
+      - path: internal/eval/
+        linters: [errcheck]
+      - path: _test\.go
+        linters: [errcheck]
+formatters:
+  enable:
+    - gofmt

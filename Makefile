@@ -1,27 +1,51 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test smoke eval-t1 eval-t2 package tidy
+.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package clean help
 
-build:            ## bin/boxer bin/boxer-eval bin/fakellm
+help:             ## list the targets
+	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
+
+build:            ## bin/boxer bin/boxer-eval bin/fakellm, all version-stamped
 	go build -ldflags "$(LDFLAGS)" -o bin/boxer ./cmd/boxer
-	go build -o bin/boxer-eval ./cmd/boxer-eval
-	go build -o bin/fakellm ./cmd/fakellm
+	go build -ldflags "$(LDFLAGS)" -o bin/boxer-eval ./cmd/boxer-eval
+	go build -ldflags "$(LDFLAGS)" -o bin/fakellm ./cmd/fakellm
 
-test:             ## unit tests with the fake smolvm (safe to run in parallel with anything)
-	go vet ./... && go test ./...
+test:             ## vet, race detector, coverage floor; fake smolvm, safe to run any time
+	go vet ./...
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	./scripts/coverfloor.sh coverage.out
 
-smoke: build      ## real smolvm, no model (44 checks); serialised by the host eval lock
+cover: test       ## per-function coverage for the package you are working on: make cover PKG=./internal/box
+	go tool cover -func=coverage.out | grep -E '$(or $(PKG),.)' | sort -k3 -n | head -40
+
+lint:             ## golangci-lint with the repository's linter set
+	golangci-lint run
+
+fmt-check:        ## fail if anything needs gofmt
+	@out=$$(gofmt -l cmd internal pkg); \
+	if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
+tidy:             ## tidy modules and format in place
+	go mod tidy
+	gofmt -w cmd internal pkg
+
+smoke: build      ## real smolvm, no model; serialised by the host eval lock
 	evals/smoke.sh
 
-eval-t1: build    ## real harness CLIs + fake model + real smolvm; report to docs/eval-t1.md
+eval-t1: build    ## real harness CLIs + scripted model + real smolvm; report to docs/eval-t1.md
 	bin/boxer-eval --tier t1 --out docs/eval-t1.md
 
-eval-t2: build    ## live models; credentials from evals/.env (gitignored)
-	set -a; for f in .env evals/.env; do [ -f $f ] && . $f; done; set +a; bin/boxer-eval --tier t2 --out docs/eval-t2.md
+eval-t2: build    ## live models through the gateway; credentials from .env or evals/.env
+	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
+	bin/boxer-eval --tier t2 --out docs/eval-t2.md
 
-package: build    ## render every harness bundle into dist/
+eval-adherence: build  ## does a live model follow the brief; four models, report to docs/eval-adherence.md
+	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
+	bin/boxer-eval --tier adherence --out docs/eval-adherence.md
+
+package: build    ## render the published package and every client view into dist/
 	bin/boxer package all --out dist
 
-tidy:
-	go mod tidy && gofmt -w cmd internal pkg 2>/dev/null || gofmt -w cmd internal
+clean:            ## remove build output and coverage
+	rm -rf bin dist coverage.out
