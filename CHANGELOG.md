@@ -4,7 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-09-18
+
+First public release. What is stable, and what breaking it would cost, is in
+[docs/release.md](docs/release.md): the command line and its flags, the `--json` shapes, the exit
+codes and error contract, the skill and plugin layout, the MCP tool names, `pkg/boxer`, and the
+configuration keys.
+
+Evidence for this release, all run on 2026-09-18 on Apple Silicon with smolvm 1.16.1: unit tests
+with the race detector and per-package coverage floors on Linux and macOS; lint and vulnerability
+scan clean; smoke 53/53; T1 67 pass, 0 fail, 1 skip, run twice with identical per-cell verdicts;
+T2 live 42 pass, 0 fail, 14 named skips for $0.19; adherence 80 of 96 live cells across four
+models with one harness verdict, the known Grok one. `v1.0.0-rc.1` proved the publishing path:
+signed checksums that verify against the release workflow's identity, and all four install routes
+exercised against the published release.
 
 ### Added
 - Storage reclaims itself. Any command that provisions a sandbox starts a background sweep, at

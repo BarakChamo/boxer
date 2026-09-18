@@ -1,4 +1,4 @@
-# Status: v1.0.0-rc.1 (2026-09-18)
+# Status: v1.0.0 (2026-09-18)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
