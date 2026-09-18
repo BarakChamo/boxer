@@ -44,6 +44,18 @@ var claudeEvents = map[string]string{
 	"SubagentStop":  "subagent_stop",
 }
 
+// dshEvents differs from claudeEvents twice. The bridge does not implement SessionEnd, so boxer's
+// MCP server EOF is the session-end signal there. And it runs SessionStart detached and aborts
+// still-running hook processes when it disposes, so a hook that waits for a sandbox is killed when
+// a short run ends; UserPromptSubmit is the awaited waterfall, so that is where boxer provisions
+// and hands over its instructions instead.
+var dshEvents = map[string]string{
+	"PreToolUse":       "intercept",
+	"UserPromptSubmit": "session_start",
+	"SubagentStart":    "subagent_start",
+	"SubagentStop":     "subagent_stop",
+}
+
 // Dialects is every harness the hook binary speaks.
 var Dialects = map[string]Dialect{
 	"claude-code": {Name: "claude-code", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
@@ -52,7 +64,11 @@ var Dialects = map[string]Dialect{
 	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents,
 		RunToolHint: "the boxer_run tool: find it with search_tool, then call it with use_tool"},
 	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
-	"dsh":  {Name: "dsh", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	// DSH has no hooks of its own; the shipped @deepseek-ai/dsh-hooks-claude-code bridge runs a
+	// Claude Code hooks.json, so the payloads and the output shape are Claude Code's. It honours
+	// deny and ask but logs and ignores updatedInput, and it does not implement SessionEnd. Its
+	// shell tool is named `bash` (verified 2026-09-18 against 0.1.5-rc.2).
+	"dsh": {Name: "dsh", MCP: true, ShellTool: "bash", Rewrite: false, Family: "claude", Events: dshEvents},
 	"gemini-cli": {Name: "gemini-cli", MCP: true, ShellTool: "run_shell_command", Rewrite: true, Family: "gemini", Events: map[string]string{
 		"BeforeTool":   "intercept",
 		"SessionStart": "session_start",
@@ -132,7 +148,7 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 	case "intercept":
 		return intercept(d, e, in, stdout, stderr)
 	case "session_start", "subagent_start":
-		return provision(d, e, purpose, stdout, stderr)
+		return provision(d, e, purpose, in.HookEventName, stdout, stderr)
 	case "session_end", "subagent_stop":
 		if config.Has(e.Cfg.DestroyOn, purpose) {
 			if err := e.Down(); err != nil {
@@ -181,7 +197,7 @@ func withIdentity(cmd string, e *box.Env) string {
 	return "boxer run " + strings.Join(flags, " ") + " " + strings.TrimPrefix(cmd, "boxer run ")
 }
 
-func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) int {
+func provision(d Dialect, e *box.Env, purpose, event string, stdout, stderr io.Writer) int {
 	ctx := box.InstructionsFor(e.Cfg, d.RunToolHint)
 	for _, w := range e.Warnings {
 		ctx += "\nNote: " + w + "."
@@ -199,7 +215,7 @@ func provision(d Dialect, e *box.Env, purpose string, stdout, stderr io.Writer) 
 		}
 	}
 	if purpose == "session_start" {
-		return context(d, stdout, ctx)
+		return context(d, stdout, event, ctx)
 	}
 	return 0
 }
@@ -243,11 +259,14 @@ func deny(d Dialect, w io.Writer, reason, fix string) int {
 	}
 }
 
-func context(d Dialect, w io.Writer, text string) int {
+// context hands the session brief back. The event name is echoed rather than fixed at
+// "SessionStart": a harness that provisions on another event (DSH uses UserPromptSubmit) has its
+// hook-specific fields discarded when the name does not match the event that fired.
+func context(d Dialect, w io.Writer, event, text string) int {
 	if d.Family == "opencode" {
 		return emit(w, map[string]any{"context": text})
 	}
-	out := map[string]any{"hookEventName": "SessionStart", "additionalContext": text}
+	out := map[string]any{"hookEventName": event, "additionalContext": text}
 	if d.Family == "gemini" {
 		delete(out, "hookEventName")
 	}

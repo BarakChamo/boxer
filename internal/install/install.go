@@ -121,11 +121,12 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 			"Kimi hooks live in the user config only; append this to ~/.kimi-code/config.toml:\n"+strings.TrimSpace(string(toml)),
 			"Kimi cannot rewrite tool input and its Bash tool ignores PATH shims: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in.")
 	case "dsh":
+		r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml"))
 		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))
 		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
 		r.Notes = append(r.Notes,
-			"DSH reads .dsh/hooks.json through a hooks plugin (dsh-plugin-hooks); install one.",
-			"DSH cannot rewrite tool input: run `boxer shim install` and prepend the directory to PATH.")
+			"DSH has no project-level plugin config: boot it with the patch layer, `dsh --profile headless --patch .dsh/cordis.patch.yml \"<task>\"`, or copy those rows into $DSH_HOME/cordis.patch.yml to apply them to every profile.",
+			"The patch mounts @deepseek-ai/dsh-hooks-claude-code over .dsh/hooks.json; that bridge honours deny and ask but ignores updatedInput, so DSH cannot rewrite a command. Set [harness.dsh] mode = \"tool\" in boxer.toml, or run `boxer shim install` and prepend the directory to PATH.")
 	default:
 		return *r, fmt.Errorf("no project-level install for %q; use `boxer package %s` and follow its README", harness, harness)
 	}

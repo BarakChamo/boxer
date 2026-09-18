@@ -57,7 +57,9 @@ func TestEveryHarnessRenders(t *testing.T) {
 		if !strings.Contains(s, "boxer") || !strings.Contains(s, cfg.MountAt) {
 			t.Errorf("%s: instruction text missing", h)
 		}
-		if h != "claude-code" && strings.Contains(strings.ToLower(s), "claude") {
+		// dsh is the exception: its only hook mechanism is the shipped compatibility bridge
+		// @deepseek-ai/dsh-hooks-claude-code, so its README has to name it.
+		if h != "claude-code" && h != "dsh" && strings.Contains(strings.ToLower(s), "claude") {
 			t.Errorf("%s bundle mentions Claude; bundles must be harness-neutral", h)
 		}
 		for _, core := range []string{"plugin.json", "mcp.json", "skills/boxer/SKILL.md", Namespace(h) + "/README.md"} {

@@ -59,6 +59,7 @@ var liveModels = map[string]string{
 	"opencode":  "anthropic/claude-haiku-4.5",
 	"pi":        "anthropic/claude-haiku-4.5",
 	"kimi":      "moonshotai/kimi-k2.5",
+	"dsh":       "zai/glm-5.3-flash", // verified against dsh 0.1.5-rc.2 on 2026-09-18
 	"grok":      "spacexai/grok-4.1-fast-non-reasoning",
 	"openhands": "openai/gpt-5-mini",
 }
