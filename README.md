@@ -53,7 +53,17 @@ allow_hosts = ["registry.npmjs.org"]
 manage      = "off"             # detect: a session in the main checkout shares the repository VM until it enters a worktree
 [harness.gemini-cli]
 mode        = "tool"
+[telemetry]
+enabled     = false             # the event stream, off by default; sink = none | file | stderr | otel
 ```
+
+## Telemetry
+
+Off by default: with no `[telemetry]` table, boxer writes no log, no metrics and nothing to the
+network. Turn it on with `enabled = true` and read it back with `boxer logs`; `boxer status --json`
+carries the last few events for the scope. Command lines are elided unless `record_commands = true`,
+and nothing leaves the machine unless you build with `-tags otel` and set an `endpoint`. The schema,
+the event names and the redaction rules are in [docs/events.md](docs/events.md).
 
 `boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
 `boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
