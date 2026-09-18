@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -27,8 +28,20 @@ import (
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
-// Version is set by the release build; "dev" otherwise.
-var Version = "dev"
+// Version is stamped by the release build. A `go install` of a tagged version carries no stamp,
+// so it falls back to the module version the toolchain recorded, and only a build from a working
+// tree is really "dev".
+var Version = versionOrBuildInfo("dev")
+
+func versionOrBuildInfo(stamped string) string {
+	if stamped != "dev" && stamped != "" {
+		return stamped
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
 
 const usage = `boxer — run agent commands in a microVM per worktree
 

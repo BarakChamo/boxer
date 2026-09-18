@@ -48,6 +48,9 @@ boxer install copilot --user # Copilot CLI is user-level only: its repository ho
 launch gets its own configuration directory and never sees a user-level plugin. The five ways an
 agent ends up in the sandbox, and which harness gets which, are in [integrate.md](integrate.md).
 
+A `go install` build carries no release stamp, so it reports the module version the toolchain
+recorded (`boxer --version` prints `v1.0.0`, not `dev`). Only a build from a working tree is `dev`.
+
 ## Check the install
 
 ```sh

@@ -335,3 +335,17 @@ func TestShimPackageAndInsideUsage(t *testing.T) {
 		t.Fatalf("bare shell: %d %s", code, o)
 	}
 }
+
+// A `go install github.com/BarakChamo/boxer/cmd/boxer@v1.2.3` carries no ldflags, so the version
+// has to come from the module the toolchain recorded. Reporting "dev" there makes doctor's drift
+// warning meaningless and makes a bug report ambiguous.
+func TestVersionFallsBackToTheModuleVersion(t *testing.T) {
+	if got := versionOrBuildInfo("v1.2.3"); got != "v1.2.3" {
+		t.Fatalf("a stamped build keeps its stamp: %q", got)
+	}
+	// In a test binary the build info says "(devel)", which is exactly the case that must stay
+	// "dev" rather than leaking a placeholder into a bug report.
+	if got := versionOrBuildInfo("dev"); got != "dev" {
+		t.Fatalf("an unstamped build from a working tree: %q", got)
+	}
+}
