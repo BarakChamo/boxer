@@ -32,14 +32,16 @@ require_worktree = "off"'
 
 echo "# run, exit code, stdin, cwd, mount, setup-once"
 mkrepo "$WORK/a" "$BASE
-setup = [\"echo ready > /tmp/marker\"]"
+setup = [\"mkdir -p /var/lib/boxer-smoke && echo ready > /var/lib/boxer-smoke/marker\"]"
 cd "$WORK/a"
-check "lazy provision + exit code" '[ "$(boxer run -c "cat /tmp/marker; exit 4" 2>/dev/null; echo $?)" = "ready
+# /var/lib, not /tmp: the guest's /tmp is tmpfs and empties on stop/start, and caching the
+# environment stops the VM to snapshot it. Setup that writes to /tmp loses it.
+check "lazy provision + exit code" '[ "$(boxer run -c "cat /var/lib/boxer-smoke/marker; exit 4" 2>/dev/null; echo $?)" = "ready
 4" ]'
 check "stdin forwarded"          '[ "$(printf "a\nb\n" | boxer run -- wc -l | tr -d " ")" = "2" ]'
 mkdir -p sub; check "subdir maps into mount"  '[ "$(cd sub && boxer run -c pwd)" = "/workspace/sub" ]'
 check "guest write visible on host" 'boxer run -c "echo hi > g.txt" && [ "$(cat g.txt)" = "hi" ]'
-check "setup ran once"           'boxer run -- true; [ "$(boxer run -c "cat /tmp/marker")" = "ready" ]'
+check "setup ran once"           'boxer run -- true; [ "$(boxer run -c "cat /var/lib/boxer-smoke/marker")" = "ready" ]'
 check "egress blocked by default allowlist" '[ "$(boxer run -c "wget -q -T 3 -O- http://example.com >/dev/null 2>&1 && echo LEAK || echo blocked")" = "blocked" ]'
 check "warm run under 1s"        '[ "$( { /usr/bin/time -p boxer run -- true; } 2>&1 | awk "/real/{print (\$2 < 1.0)}")" = "1" ]'
 

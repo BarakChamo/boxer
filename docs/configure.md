@@ -78,8 +78,18 @@ image: a `docker save` archive (`image = "./dev.tar"`), an extracted rootfs dire
 stdin. That is the path for a repository that builds its own image: build it with your own tooling,
 save it, and point boxer at the file. Nothing is pulled, so no registry host is opened.
 
-**`setup`** runs once when a VM is created — installing dependencies, usually. The result is
-packed, so the next worktree starts from the pack rather than repeating the work.
+**`setup`** runs once when a VM is created — installing dependencies, usually — and the result is
+cached as an *environment pack*: the image with your setup already applied. The next worktree of
+the same repository starts from that pack and runs no setup at all, which takes a second rather
+than however long `bun install` takes.
+
+The pack is keyed on the image plus the setup commands, like a Docker layer: change a setup line
+and the key changes, the old pack is no longer used, and `boxer gc` reclaims it. `boxer doctor`
+prints the key and whether it is cached yet.
+
+One thing to know: snapshotting stops the VM for a moment, and the guest's `/tmp` is memory-backed,
+so anything `setup` writes there is gone afterwards. That was already true across any restart.
+Write to the worktree or somewhere durable like `/var/lib`.
 
 **`tasks`** is how a repository names the commands it actually wants run: `test = "bun test"` makes
 `boxer run --task test` work, `boxer tasks` lists them, and an unknown name is refused with the

@@ -235,3 +235,43 @@ func TestCommandsOutsideARepository(t *testing.T) {
 		t.Fatalf("gc is host-wide: %d %s", code, out)
 	}
 }
+
+// doctor answers "will this worktree have to run setup again", which before environment packs
+// could only be learned by watching a VM boot.
+func TestDoctorReportsTheEnvironmentCache(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo hi\"]\n")
+
+	var r map[string]any
+	if code, out := call(t, &r, "doctor", "--json"); code != 0 {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+	env, _ := r["environment"].(map[string]any)
+	if env == nil || env["cached"] != false || env["key"] == "" {
+		t.Fatalf("an uncached environment must say so: %v", r["environment"])
+	}
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	if code, out := call(t, &r, "doctor", "--json"); code != 0 {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+	if env, _ = r["environment"].(map[string]any); env["cached"] != true {
+		t.Fatalf("after one sandbox the environment is cached: %v", r["environment"])
+	}
+	// The human form says it in words, because that is the form someone reads when a worktree took
+	// longer than they expected.
+	if code, out := call(t, nil, "doctor"); code != 0 || !strings.Contains(out, "environment:") || !strings.Contains(out, "skips setup") {
+		t.Fatalf("doctor must say the environment is cached: %d %s", code, out)
+	}
+	// A repository with no setup has no environment to report. (A fresh map: unmarshalling into
+	// one that already has keys merges rather than replaces, which would silently keep the old
+	// answer.)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n")
+	var plain map[string]any
+	if code, _ := call(t, &plain, "doctor", "--json"); code != 0 || plain["environment"] != nil {
+		t.Fatalf("no setup, no environment row: %v", plain["environment"])
+	}
+}

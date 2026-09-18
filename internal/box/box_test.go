@@ -2,6 +2,7 @@ package box
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -393,7 +394,7 @@ func TestSetupMarkerProbeDistinguishesTransportFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	vmtest.FailExecOnce(t, "test -f /var/lib/boxer/setup-done")
-	err = e.setup()
+	_, err = e.setup()
 	be, ok := err.(*Error)
 	if !ok || be.Cause != "TRANSPORT_FAILED" {
 		t.Fatalf("want TRANSPORT_FAILED, got %v", err)
@@ -526,5 +527,92 @@ func TestLocalImagesNeedNoRegistryHosts(t *testing.T) {
 		if len(registryHosts(img)) == 0 {
 			t.Errorf("%q must open its registry: %v", img, registryHosts(img))
 		}
+	}
+}
+
+// The environment pack is the release's reason to exist: without it every worktree of a repository
+// repeats `bun install` from scratch while a pack of the bare image sits beside it. The first
+// worktree pays setup once and snapshots the result; the second starts from that snapshot and runs
+// nothing. Changing a setup line invalidates it, exactly like a Docker layer.
+func TestEnvironmentPackSkipsSetupOnTheNextWorktree(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	toml := vmtest.NoWorktreeCheck + "image = \"alpine\"\nsetup = [\"echo installing-dependencies\"]\n"
+
+	first := vmtest.Repo(t, toml)
+	e, err := Resolve(first, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	pack := PackPath(EnvKey("alpine", e.Cfg))
+	if !packReady(pack) {
+		t.Fatalf("the first worktree must leave an environment pack at %s", pack)
+	}
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "echo installing-dependencies"); n != 1 {
+		t.Fatalf("setup runs once for the first worktree, ran %d times:\n%s", n, b)
+	}
+
+	// A second worktree of the same repository: same key, so it is created from that pack and the
+	// marker inside it means setup has nothing to do.
+	second := vmtest.Repo(t, toml)
+	e2, err := Resolve(second, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2.Stderr = io.Discard
+	if _, err := e2.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(log)
+	if n := strings.Count(string(b), "echo installing-dependencies"); n != 1 {
+		t.Fatalf("the second worktree must not repeat setup, it ran %d times total:\n%s", n, b)
+	}
+	if !strings.Contains(string(b), "--from "+pack) {
+		t.Fatalf("the second VM must be created from the environment pack:\n%s", b)
+	}
+
+	// Change a setup line: a different environment, so a different key and a fresh run.
+	third := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo something-else\"]\n")
+	e3, err := Resolve(third, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e3.Stderr = io.Discard
+	if _, err := e3.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if EnvKey("alpine", e3.Cfg) == EnvKey("alpine", e.Cfg) {
+		t.Fatal("a changed setup line must change the key")
+	}
+	b, _ = os.ReadFile(log)
+	if !strings.Contains(string(b), "echo something-else") {
+		t.Fatalf("a changed environment runs its own setup:\n%s", b)
+	}
+}
+
+// A repository with no setup has no environment to cache, and packing an unchanged image twice
+// would be waste, not caching.
+func TestNoSetupMeansNoEnvironmentPack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	packs := t.TempDir()
+	t.Setenv("BOXER_PACKS", packs)
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if p := PackPath(EnvKey("alpine", e.Cfg)); packReady(p) {
+		t.Fatalf("no setup, no environment pack: %s", p)
 	}
 }

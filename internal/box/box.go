@@ -279,8 +279,12 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	if err := e.VM.Start(e.Scope.Key); err != nil {
 		return created, e.fail(&Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
 	}
-	if err := e.setup(); err != nil {
+	ranSetup, err := e.setup()
+	if err != nil {
 		return created, err
+	}
+	if ranSetup {
+		e.PackEnv()
 	}
 	return created, nil
 }
@@ -317,8 +321,12 @@ func (e *Env) create() error {
 	}
 	from := ""
 	if e.Cfg.Smolfile == "" && image != "" {
-		if from = e.harnessPack(image); from == "" {
-			from = e.packed(image)
+		// Most specific first: an environment (setup already run), then a harness install, then
+		// the bare image. Each is a superset of the one after it.
+		if from = e.envPack(image); from == "" {
+			if from = e.harnessPack(image); from == "" {
+				from = e.packed(image)
+			}
 		}
 	}
 	if from != "" {
@@ -389,6 +397,83 @@ func PackDir() string {
 func PackPath(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return filepath.Join(PackDir(), hex.EncodeToString(sum[:8])+".smolmachine")
+}
+
+// EnvKey names the guest an environment produces: the image plus everything that changes what is
+// installed in it. Two worktrees of the same repository share a key, which is the point — the
+// second starts from the first one's pack with `setup` already run.
+//
+// It is a hash of the inputs, not of the result, exactly like a Docker layer: change a setup line
+// and the key changes, so the old pack is no longer used and `gc` reclaims it. Only `setup` shapes
+// it today; the keys that 1.1 adds (start, env, mounts) join it as they land.
+func EnvKey(image string, cfg config.Config) string {
+	key := image + "\x00env"
+	for _, c := range cfg.Setup {
+		key += "\x00" + c
+	}
+	return key
+}
+
+// envPack returns the pack of image with this repository's setup already run, when one exists.
+func (e *Env) envPack(image string) string {
+	if len(e.Cfg.Setup) == 0 {
+		return ""
+	}
+	side := PackPath(EnvKey(image, e.Cfg))
+	if !packReady(side) {
+		return ""
+	}
+	return side
+}
+
+// PackEnv snapshots the scope's VM, setup already run, into the pack envPack looks for. Without
+// it every new worktree repeats `bun install` from scratch while a pack of the bare image sits
+// beside it, which is the most expensive thing about boxer before 1.1.
+//
+// smolvm packs only a stopped VM, so the VM is stopped and restarted around it: a few seconds,
+// once per host per environment. Failure is reported and never blocks the run.
+func (e *Env) PackEnv() {
+	image, _ := e.Image()
+	if image == "" || e.Cfg.Smolfile != "" || len(e.Cfg.Setup) == 0 || e.Inside() {
+		return
+	}
+	side := PackPath(EnvKey(image, e.Cfg))
+	stub := strings.TrimSuffix(side, ".smolmachine")
+	if packReady(side) {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
+		return
+	}
+	unlock, err := lockFile(stub + ".lock")
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if packReady(side) { // packed while we waited
+		return
+	}
+	if free, crowded := packingWouldCrowdTheDisk(e.minFree()); crowded {
+		fmt.Fprintf(e.Stderr, "boxer: not caching this environment: %s free, below min_free_gb (%.1f GB). The next worktree runs setup again; `boxer gc` reclaims space.\n",
+			humanBytes(free), e.Cfg.MinFreeGB)
+		e.event(obs.Pack, obs.Skipped, 0, map[string]any{"kind": "env", "image": image, "free_bytes": free})
+		return
+	}
+	fmt.Fprintln(e.Stderr, "boxer: caching this environment so the next worktree skips setup (once per host)")
+	start := time.Now()
+	err = e.VM.Stop(e.Scope.Key)
+	if err == nil {
+		_, err = e.VM.PackFromVM(e.Scope.Key, stub)
+	}
+	if serr := e.VM.Start(e.Scope.Key); serr != nil && err == nil {
+		err = serr
+	}
+	outcome := obs.OK
+	if err != nil {
+		outcome = obs.Failed
+		fmt.Fprintf(e.Stderr, "boxer: environment cache failed: %v\n", err)
+	}
+	e.event(obs.Pack, outcome, time.Since(start), map[string]any{"kind": "env", "image": image, "path": side})
 }
 
 func harnessKey(image, harness string) string {
@@ -529,27 +614,30 @@ func (e *Env) packed(image string) string {
 const setupMarker = "/var/lib/boxer/setup-done"
 
 // setup runs the configured commands once per VM (R-GUEST-2). Failure deletes the VM.
-func (e *Env) setup() error {
+// setup runs the configured commands once per VM, recorded by a marker file inside the guest. It
+// reports whether it ran them, so the caller can snapshot the result: a VM created from an
+// environment pack carries the marker and runs nothing, which is the whole point of the pack.
+func (e *Env) setup() (ran bool, err error) {
 	if len(e.Cfg.Setup) == 0 {
-		return nil
+		return false, nil
 	}
 	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
 	// a VM that had already run them, which for a repository whose setup installs dependencies is
 	// minutes, not milliseconds.
 	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker)
 	if err != nil || vm.TransportFailure(out) {
-		return e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
+		return false, e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
 	}
 	if code == 0 {
-		return nil
+		return false, nil
 	}
 	for _, cmd := range e.Cfg.Setup {
 		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
 		if err != nil || code != 0 {
 			_ = e.VM.Delete(e.Scope.Key)
-			return e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
+			return false, e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
 				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
 		}
 	}
@@ -557,7 +645,7 @@ func (e *Env) setup() error {
 	if err == nil && code != 0 {
 		err = fmt.Errorf("writing the setup marker exited %d", code)
 	}
-	return err
+	return err == nil, err
 }
 
 func errText(err error) string {

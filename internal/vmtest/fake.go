@@ -66,18 +66,35 @@ case "$verb" in
     if [ -n "$pack" ] && [ -f "$pack" ] && [ "$(cat "$pack")" != "fake-pack" ]; then
       echo "Error: agent operation failed: read checkpoint footer: I/O error: sidecar file too small to contain footer" >&2; exit 1
     fi
-    printf '%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" > "$dir/$name" ;;
+    printf '%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" > "$dir/$name"
+    # Restore the guest state the pack carries, so a VM created from it skips what it already has.
+    if [ -n "$pack" ]; then
+      for m in "$pack".marker-*; do
+        [ -f "$m" ] || continue
+        cp "$m" "$dir/$name.$(basename "$m" | sed 's/^.*\.marker-//')"
+      done
+    fi ;;
   "pack create")
-    shift 2; out=""
+    shift 2; out=""; fromvm=""
     while [ $# -gt 0 ]; do
       case "$1" in
         -o) out="$2"; shift;;
+        --from-vm) fromvm="$2"; shift;;
         -I) [ "$2" = "fail-image" ] && { echo "Error: image pull failed" >&2; exit 1; }; shift;;
       esac; shift
     done
     # A pack has a body: boxer treats an empty file as the truncation an interrupted
     # pack create leaves behind, and refuses to build a machine from it.
-    printf 'fake-pack\n' > "$out"; printf 'fake-pack\n' > "$out.smolmachine" ;;
+    printf 'fake-pack\n' > "$out"; printf 'fake-pack\n' > "$out.smolmachine"
+    # A pack of a machine carries that machine's guest state. The markers are what decide whether
+    # setup and the harness install run again, so a pack that loses them is not a pack: every VM
+    # made from it would repeat the work the pack exists to skip.
+    if [ -n "$fromvm" ]; then
+      for m in "$dir/$fromvm".setup "$dir/$fromvm".harness-*; do
+        [ -f "$m" ] || continue
+        cp "$m" "$out.smolmachine.marker-$(basename "$m" | sed "s/^$fromvm\.//")"
+      done
+    fi ;;
   "machine start"|"machine stop")
     state=running; [ "$2" = stop ] && state=stopped
     name=""; shift 2

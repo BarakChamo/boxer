@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Environment packs.** `setup` was run once per VM and never cached, so every worktree repeated
+  `bun install` from scratch while a pack of the bare image sat beside it. The result of setup is
+  now packed and keyed on the image plus the setup commands, so a second worktree of the same
+  repository starts with dependencies already installed — measured at 0.7 s against 2.9 s, and the
+  saving grows with the size of the install. Changing a setup line changes the key, exactly like a
+  Docker layer.
+- `boxer doctor` reports the environment's cache key and whether it is cached yet, so "will this
+  worktree have to run setup again" is answerable without watching a VM boot.
+
 ## [1.0.0] - 2026-09-18
 
 First public release. What is stable, and what breaking it would cost, is in

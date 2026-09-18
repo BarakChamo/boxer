@@ -434,6 +434,7 @@ type doctorReport struct {
 	Drift        []string        `json:"drift,omitempty"`
 	Signals      []hook.Signal   `json:"signals,omitempty"`
 	Storage      *box.Footprint  `json:"storage,omitempty"`
+	Environment  *doctorEnv      `json:"environment,omitempty"`
 	Warnings     []string        `json:"warnings"`
 	Error        string          `json:"error,omitempty"`
 	resolved     bool            // Env exists (config could be loaded)
@@ -477,6 +478,14 @@ type doctorSetting struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
 	Source string `json:"source"`
+}
+
+// doctorEnv answers "will this worktree have to run setup again": the environment's cache key,
+// and whether a pack for it exists. Without it the only way to know is to watch a VM boot.
+type doctorEnv struct {
+	Key    string `json:"key"`
+	Pack   string `json:"pack"`
+	Cached bool   `json:"cached"`
 }
 
 type doctorShims struct {
@@ -533,6 +542,12 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	r.Scope = scopeRow(e.Scope)
 	r.Image, r.ImageReason = e.Image()
+	if len(e.Cfg.Setup) > 0 && r.Image != "" {
+		key := box.EnvKey(r.Image, e.Cfg)
+		pack := box.PackPath(key)
+		_, err := os.Stat(pack)
+		r.Environment = &doctorEnv{Key: filepath.Base(pack), Pack: pack, Cached: err == nil}
+	}
 	if e.Cfg.Network.Mode == "off" {
 		r.ImageWarning = "network.mode = off — the image can only be used if smolvm already has it cached"
 	}
@@ -640,6 +655,13 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		if !r.Signals[0].GitHook {
 			fmt.Fprintln(w, "           git_hook: none; `boxer install git` warms new worktrees as git creates them")
 		}
+	}
+	if env := r.Environment; env != nil {
+		state := "not cached yet; the first sandbox here runs setup and caches the result"
+		if env.Cached {
+			state = "cached; a new worktree starts from it and skips setup"
+		}
+		fmt.Fprintf(w, "environment: %s — %s\n", env.Key, state)
 	}
 	if st := r.Storage; st != nil {
 		fmt.Fprintf(w, "storage:   %d sandbox(es), %d pack(s) %s cached, %s free (boxer gc --all reclaims the packs)\n",
