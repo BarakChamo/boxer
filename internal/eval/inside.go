@@ -30,7 +30,10 @@ func (Inside) Available(tier string) (bool, string) {
 
 func (Inside) Cells(tier string) []Cell {
 	var cells []Cell
-	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok"} {
+	// Copilot joins the inside cells: its row existed in the table and had never been run, which
+	// is a claim without evidence. DSH has no inside row at all — it is a plugin stack rather than
+	// a single binary — so it is absent here rather than silently expected to work.
+	for _, h := range []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok", "copilot"} {
 		cells = append(cells, Cell{Harness: "inside-" + h, Mode: "inside", Entry: "shell", Isolation: "worktree", Compliant: true, Tier: tier, Inside: h})
 	}
 	return cells

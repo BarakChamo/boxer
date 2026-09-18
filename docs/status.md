@@ -43,7 +43,7 @@ t1 only, and Multica needs an account (`multica setup`).
 | OpenCode | pass | pass | pass 11 s | pass 11 s | 3/3 live |
 | pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
 | Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
-| GitHub Copilot CLI | pass (user hooks; `modifiedArgs`) | pass | not measured | `copilot --acp` (row present, not run) | 3/3 live for $0.0092 through BYOK on the gateway — no Copilot seat needed |
+| GitHub Copilot CLI | pass (user hooks; `modifiedArgs`) | pass | in the inside cells since 1.1 | `copilot --acp` | 3/3 live for $0.0092 through BYOK on the gateway — no Copilot seat needed |
 | Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 4/4 live |
 | DSH | deny-only hooks through the `dsh-hooks-claude-code` bridge; shims | pass | not in table | none | t1 3/3, t2 2/2 live; tool mode only (the bridge ignores `updatedInput`), and boxer provisions on `UserPromptSubmit` because its `SessionStart` is detached |
 
@@ -151,8 +151,8 @@ First and second pass:
   `boxer install git`: T3's provider gives up while a cold VM boots.
 - Packs are 130 to 365 MB each. `gc` prunes them by `idle_timeout`; a long eval session can fill a
   small disk before that runs, and two back-to-back T1 runs have done exactly that.
-- Copilot's inside-mode row exists but has never been run; an inside cell costs a full npm install
-  in the guest.
+- DSH has no inside-mode row: it is a plugin stack rather than a single binary, so there is nothing
+  for `boxer shell` to launch. That is a gap in the table rather than an untested claim.
 - Conductor and Multica remain checklists: local Conductor workspaces have no API, and a Multica
   driver needs a self-hosted server.
 
