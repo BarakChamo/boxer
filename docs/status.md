@@ -1,4 +1,4 @@
-# Status: v0.2.0 (2026-09-18)
+# Status: v1.0.0-rc.1 (2026-09-18)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
@@ -7,10 +7,21 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 
 ## Proven
 
-Unit tests green; smoke **49/49** (which now also prints and bounds cold start, warm run and hook
-latency); T1 **61 pass, 0 fail, 2 skip**, and two consecutive full runs gave identical per-cell
-verdicts; T2 live on `zai/glm-5.3-flash` **38 pass, 0 fail, 14 skip** for $0.20. Every cell is a
-fresh repository and a fresh VM.
+Unit tests green with the race detector and a per-package coverage floor; lint and the
+vulnerability scan clean; smoke **49/49** (which also prints and bounds cold start, warm run and
+hook latency); T1 **67 pass, 0 fail, 1 skip**; T2 live on `zai/glm-5.3-flash` **42 pass, 0 fail,
+14 skip** for $0.19. Every cell is a fresh repository and a fresh VM.
+
+The publishing path is proven rather than asserted: `v1.0.0-rc.1` published four platform
+archives, four SBOMs, the plugin and skill tarballs, the npm tarball and a `checksums.txt` signed
+keylessly against the release workflow's OIDC identity. The signature verifies with the command in
+[release.md](release.md), and both download routes install that release on a machine that had no
+boxer: `install.sh` and `npm i -g` each report `boxer 1.0.0-rc.1`.
+
+One cell is not yet deterministic: `acp-codex/inside/acp/worktree` failed once in seven runs, after
+its own retry, with `agent closed: EOF` and an empty stderr. It passed five of five on repeat and
+in the following full run. The driver now carries the agent's last output into the failure, so the
+next occurrence explains itself.
 
 Added 2026-09-18 (stream C): GitHub Copilot CLI as the ninth harness — **T1 4/4, T2 3/3 live for
 $0.0092** — and a real herdr driver replacing its checklist — **T1 pass, T2 pass for $0.0039**.

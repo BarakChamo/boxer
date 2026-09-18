@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The remote, and with it the first proof of the publishing path: `v1.0.0-rc.1` published four
+  platform archives, four SBOMs, the plugin, skill and npm tarballs, and a signed `checksums.txt`
+  that verifies against the release workflow's OIDC identity.
+
+### Fixed
+- A release could not have succeeded: the Homebrew cask named a tap token this repository does not
+  have, so the first tag would have failed with every artifact already built. The tap push is now
+  skipped when the token is absent.
+- A candidate tag published as the latest release, which is what `install.sh` and Homebrew hand to
+  anyone asking for the current version. Candidates are prereleases.
+- CI's linter could never have run: the configuration declares version 2 while the workflow
+  installed version 1 through an action that only installs version 1.
+- The toolchain carried five known standard-library vulnerabilities, four of them reachable.
+
+### Added
 - `[tasks]` in `boxer.toml` with `boxer tasks` and `boxer run --task <name>`: the repository names
   the commands it wants run, so whether work is sandboxed no longer depends on the intercept list
   matching a shell line the agent composed.
