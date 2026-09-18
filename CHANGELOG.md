@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `[tasks]` in `boxer.toml` with `boxer tasks` and `boxer run --task <name>`: the repository names
+  the commands it wants run, so whether work is sandboxed no longer depends on the intercept list
+  matching a shell line the agent composed.
+- `boxer brief [--json]`: the resolved brief for a checkout, so published content can stay static
+  and still tell an agent what this repository expects. Hooks inject the same text, and the MCP
+  server serves it as a resource.
+- The skill ships its `scripts/` layer, per the Agent Skills specification: `run`, `task`,
+  `status` and `brief` call the installed CLI, so every harness has a deterministic command path
+  with no per-harness code.
+- An opt-in event stream (`[telemetry]`) with file, stderr and OpenTelemetry sinks, `boxer logs`,
+  an event tail on `boxer status --json`, and command lines elided unless asked for. Off by
+  default: with no table, boxer writes no log and nothing to the network. Schema in
+  `docs/events.md`.
 - Apache-2.0 licence, contribution guide, security policy and code of conduct.
 - `npm/bin/boxer.js`, the launcher `package.json` had always declared but the repository never
   contained, so packed tarballs installed a command that could not run.
@@ -22,9 +35,22 @@ All notable changes to this project are documented here. The format follows
   `docs/troubleshooting.md`, with `docs/architecture.md` and a `docs/README.md` index.
 
 ### Changed
+- Published content is static. The package and the skill are byte-identical for every user but for
+  the release version, `boxer install` copies them verbatim, and `doctor` reports drift instead of
+  editing installed files in place. Configuration reaches the agent at runtime through
+  `boxer brief`.
+- An unknown top-level table in `boxer.toml` is a warning rather than an error, so a repository
+  that adopts a newer boxer's table still loads under an older binary. A misspelled scalar key
+  stays fatal.
 - `docs/release.md` now states what is stable at 1.0 and what is not, sets a deprecation window of
   one minor release, and gives the release gate as a runnable checklist.
 - The README opens with a two-minute quickstart and the five integration levels.
+
+### Fixed
+- A truncated pack (an interrupted pack write) made every sandbox on the host fail with an I/O
+  error that named neither the pack nor a fix. An empty pack is now rewritten, and a broken one is
+  deleted at create time and the image pulled instead.
+- `boxer install` reported success having written nothing when a copy or an append failed.
 
 ## [0.2.0] - 2026-09-18
 
