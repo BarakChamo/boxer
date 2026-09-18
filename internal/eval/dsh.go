@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // DSH drives the DeepSeek Harness. `dsh --profile headless "<task>"` is its one-shot mode: the
@@ -86,16 +85,8 @@ func (d DSH) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	var answer, all bytes.Buffer
 	cmd.Stdout = &answer
 	cmd.Stderr = &all
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: all.String() + answer.String()}, fmt.Errorf("dsh timed out")
+	if err := wait(cmd, "dsh"); err != nil {
+		return Transcript{Raw: all.String() + answer.String()}, err
 	}
 	tr := Transcript{Raw: all.String() + "\n--- stdout ---\n" + answer.String(), Tools: env.LLMTools()}
 	// Headless prints the final answer, and only that, on stdout.

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Pi drives pi in print mode with the boxer extension loaded via -e. pi has no config-dir
@@ -85,27 +84,11 @@ func (d Pi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("pi timed out")
+	if err := wait(cmd, "pi"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}
-	for _, line := range strings.Split(stripANSI(out.String()), "\n") {
-		l := strings.TrimSpace(line)
-		if l == "" || strings.HasPrefix(l, "boxer") || strings.HasPrefix(l, "scope:") || strings.HasPrefix(l, "worktree:") || strings.HasPrefix(l, "cause:") || strings.HasPrefix(l, "fix:") {
-			continue
-		}
-		if f := strings.Fields(l); len(f) > 0 {
-			tr.Answer = f[0]
-		}
-	}
+	tr.Answer = lastAnswer(out.String(), "boxer", "scope:", "worktree:", "cause:", "fix:")
 	return tr, nil
 }
 

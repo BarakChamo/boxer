@@ -2,6 +2,8 @@ package eval
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,5 +70,58 @@ func TestParseCopilotJSON(t *testing.T) {
 	tr := parseCopilotJSON(raw)
 	if tr.Answer != "Linux" || len(tr.Tools) != 1 || tr.Tools[0] != "bash" {
 		t.Fatalf("%+v", tr)
+	}
+}
+
+// The control cell decides whether boxer stayed out of the way, and it is the one verdict the
+// oracle reaches without a VM. It is also the one that must not be lenient: a rewrite or a denial
+// in mode "off" means boxer acted where it was told not to.
+func TestJudgeControlCell(t *testing.T) {
+	env := &Env{Tier: "t1", RunID: "judge-test", Trace: filepath.Join(t.TempDir(), "trace.log")}
+	off := Cell{Harness: "claude-code", Mode: "off", Compliant: true}
+
+	if f := Judge(env, off, Transcript{Answer: "Darwin"}); len(f) != 0 {
+		t.Fatalf("a clean control cell has no findings: %v", f)
+	}
+	// The scripted model ran on the host, which is what "off" means; a live model that chose the
+	// run tool anyway is also correct.
+	if f := Judge(&Env{Tier: "t2", RunID: "j", Trace: env.Trace}, off, Transcript{Answer: "Linux"}); len(f) != 0 {
+		t.Fatalf("live control may choose boxer_run: %v", f)
+	}
+	if f := Judge(env, off, Transcript{Answer: "Linux"}); len(f) != 1 || f[0].Check != "control" {
+		t.Fatalf("scripted control must have run on the host: %v", f)
+	}
+	if f := Judge(env, off, Transcript{Answer: ""}); len(f) == 0 {
+		t.Fatal("no answer at all is a finding")
+	}
+	// A hook that acted in mode off is the failure this cell exists to catch.
+	trace := "t claude-code <- {\"tool_name\":\"Bash\"}\nt claude-code -> {\"command\": \"boxer run -c 'uname -s'\"}\n"
+	if err := os.WriteFile(env.Trace, []byte(trace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := Judge(env, off, Transcript{Answer: "Darwin"})
+	if len(f) != 1 || f[0].Check != "control" {
+		t.Fatalf("a rewrite in mode off must be reported: %v", f)
+	}
+}
+
+// wait bounds a harness invocation, and lastAnswer reads the answer out of a noisy stream. Both
+// replaced a copy per driver, so both are worth pinning.
+func TestWaitAndLastAnswer(t *testing.T) {
+	if err := wait(exec.Command("true"), "t"); err != nil {
+		t.Fatalf("a command that exits 0: %v", err)
+	}
+	if err := wait(exec.Command("false"), "t"); err == nil {
+		t.Fatal("a failing command must report its failure")
+	}
+	if err := wait(exec.Command("/nonexistent/binary"), "t"); err == nil {
+		t.Fatal("a command that cannot start must report it")
+	}
+	raw := "$ uname -s\ntimestamp=1 level=info\n\nLinux the kernel\n"
+	if got := lastAnswer(raw, "$ ", "timestamp="); got != "Linux" {
+		t.Fatalf("answer: %q", got)
+	}
+	if got := lastAnswer("$ only noise\n", "$ "); got != "" {
+		t.Fatalf("nothing but noise is no answer: %q", got)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Kimi drives Kimi Code CLI. Its hooks are user-level TOML and block-only (updatedInput is not
@@ -94,16 +93,8 @@ func (d Kimi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("kimi timed out")
+	if err := wait(cmd, "kimi"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}
 	// The final assistant line is printed as "• <text>".

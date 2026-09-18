@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Copilot drives GitHub Copilot CLI headless. Its hooks load from ${COPILOT_HOME}/hooks/*.json at
@@ -81,16 +80,8 @@ func (d Copilot) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("copilot timed out")
+	if err := wait(cmd, "copilot"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseCopilotJSON(out.String())
 	if len(tr.Tools) == 0 {

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Codex drives `codex exec`. t1 uses a private CODEX_HOME whose config.toml points the Responses
@@ -86,16 +85,8 @@ func (d Codex) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("codex timed out")
+	if err := wait(cmd, "codex"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseCodexJSON(out.String())
 	if b, err := os.ReadFile(last); err == nil {

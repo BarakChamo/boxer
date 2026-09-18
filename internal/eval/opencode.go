@@ -77,29 +77,12 @@ func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("opencode timed out")
+	if err := wait(cmd, "opencode"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	waitForHook("boxer hook opencode")
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}
-	// The final assistant text is the last non-empty line that is not a "$ command" echo.
-	for _, line := range strings.Split(stripANSI(out.String()), "\n") {
-		l := strings.TrimSpace(line)
-		if l == "" || strings.HasPrefix(l, "$ ") || strings.HasPrefix(l, "timestamp=") || strings.HasPrefix(l, ">") || strings.HasPrefix(l, "|") {
-			continue
-		}
-		if f := strings.Fields(l); len(f) > 0 {
-			tr.Answer = f[0]
-		}
-	}
+	tr.Answer = lastAnswer(out.String(), "$ ", "timestamp=", ">", "|")
 	return tr, nil
 }
 

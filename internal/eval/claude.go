@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Claude drives Claude Code headless. t1 points it at the fake model through ANTHROPIC_BASE_URL
@@ -115,16 +114,8 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Env = append(env.BaseEnv(), d.modelEnv(env)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	done := make(chan error, 1)
-	if err := cmd.Start(); err != nil {
-		return Transcript{}, err
-	}
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(4 * time.Minute):
-		cmd.Process.Kill()
-		return Transcript{Raw: out.String()}, fmt.Errorf("claude timed out")
+	if err := wait(cmd, "claude"); err != nil {
+		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseClaudeStream(out.String())
 	if env.Tier == "t2" && tr.Answer == "" {
