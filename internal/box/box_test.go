@@ -463,3 +463,45 @@ func TestStalePacks(t *testing.T) {
 		t.Fatalf("packs younger than the timeout survive: %v", got)
 	}
 }
+
+// A pack can be truncated: an interrupted pack write leaves a file whose footer is missing, and
+// smolvm then fails every create from it with the same I/O error until someone deletes it by
+// hand. An empty one is never used; a non-empty broken one is deleted at create time and the
+// image pulled instead, so a bad cache entry costs one slow run rather than every run.
+func TestUnusablePackIsDeletedAndTheImagePulled(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = &bytes.Buffer{}
+	image, _ := e.Image()
+	side := PackPath(image)
+	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Empty: not a pack at all, so it is repacked rather than used.
+	if err := os.WriteFile(side, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.packed(image); got != side {
+		t.Fatalf("an empty pack must be rewritten, not used: %q", got)
+	}
+
+	// Truncated: present and non-empty, and smolvm refuses it.
+	if err := os.WriteFile(side, []byte("truncated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatalf("a broken pack must not fail the run: %v", err)
+	}
+	if _, err := os.Stat(side); !os.IsNotExist(err) {
+		t.Fatalf("the broken pack must be deleted: %v", err)
+	}
+	b, _ := os.ReadFile(log)
+	if !strings.Contains(string(b), "machine create") || strings.Count(string(b), "--from "+side) != 1 {
+		t.Fatalf("want one create from the pack and a retry without it:\n%s", b)
+	}
+}

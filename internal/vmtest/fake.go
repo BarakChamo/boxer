@@ -61,6 +61,11 @@ case "$verb" in
       esac; shift
     done
     [ -f "$dir/$name" ] && { echo "Error: config operation failed: create machine: machine '$name' already exists or is being created" >&2; exit 1; }
+    # smolvm reads the pack's footer, so a file that is not a whole pack fails here and nowhere
+    # earlier: the same shape as a truncated pack on a real host.
+    if [ -n "$pack" ] && [ -f "$pack" ] && [ "$(cat "$pack")" != "fake-pack" ]; then
+      echo "Error: agent operation failed: read checkpoint footer: I/O error: sidecar file too small to contain footer" >&2; exit 1
+    fi
     printf '%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" > "$dir/$name" ;;
   "pack create")
     shift 2; out=""
@@ -70,7 +75,9 @@ case "$verb" in
         -I) [ "$2" = "fail-image" ] && { echo "Error: image pull failed" >&2; exit 1; }; shift;;
       esac; shift
     done
-    : > "$out"; : > "$out.smolmachine" ;;
+    # A pack has a body: boxer treats an empty file as the truncation an interrupted
+    # pack create leaves behind, and refuses to build a machine from it.
+    printf 'fake-pack\n' > "$out"; printf 'fake-pack\n' > "$out.smolmachine" ;;
   "machine start"|"machine stop")
     state=running; [ "$2" = stop ] && state=stopped
     name=""; shift 2

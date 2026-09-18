@@ -122,7 +122,9 @@ check "one package plus eight views" '[ -f "$D/boxer/plugin.json" ] && [ -f "$D/
 check "views are subsets of the package" 'for h in claude-code codex grok gemini-cli kimi dsh opencode pi; do [ -f "$D/$h/plugin.json" ] || exit 1; done'
 check "package has no root hooks dir" '[ ! -d "$D/boxer/hooks" ]'
 check "all json valid" 'for f in $(find "$D" -name "*.json"); do python3 -m json.tool "$f" >/dev/null || exit 1; done'
-check "claude bundle has shims" '[ -x "$D/claude-code/bin/npm" ]'
+# Published content is static: shims are written by `boxer shim install` into the machine that
+# runs the harness, never rendered into a package someone else installs.
+check "package carries no shims" '! find "$D" -type d -name bin | grep -q .'
 # DSH's only hook mechanism is the dsh-hooks-claude-code bridge, so its view names the package.
 check "no view but claude mentions claude" '! grep -ril claude "$D" | grep -v "/claude-code/\|/boxer/\|/com.deepseek.dsh/" | grep -q .'
 

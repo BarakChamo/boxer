@@ -321,7 +321,18 @@ func (e *Env) create() error {
 		AllowHosts: hosts,
 		Ports:      e.Cfg.Network.Ports,
 	}
-	if err = e.VM.Create(spec); err != nil {
+	if err = e.VM.Create(spec); err != nil && from != "" && !vm.IsAlreadyExists(err) {
+		// A pack can be truncated: an interrupted `pack create` leaves a file smaller than its
+		// own footer, and every later create from it fails with the same unhelpful I/O error
+		// until someone deletes it by hand. Delete it and pull the image instead.
+		fmt.Fprintf(e.Stderr, "boxer: cached image unusable, pulling directly: %v\n", err)
+		_ = os.Remove(from)
+		spec.From = ""
+		delete(labels, vm.LabelPrefix+"pack")
+		spec.Labels = labels
+		err = e.VM.Create(spec)
+	}
+	if err != nil {
 		if vm.IsAlreadyExists(err) {
 			// Another boxer (a hook, a detached warm-up, an MCP server) is creating this scope
 			// under a different lock directory (a harness that strips XDG_STATE_HOME from its
@@ -372,12 +383,21 @@ func harnessKey(image, harness string) string {
 
 // harnessPack returns the pack of image with this harness installed when one exists, so a new
 // inside-mode VM skips the install (R-GUEST-4).
+// packReady reports whether a pack file is present and whole. A zero-length or truncated pack is
+// what an interrupted `pack create` leaves behind, and smolvm reports it as a checkpoint footer
+// error at create time rather than as a missing file. A pack that is present but truncated past
+// that gets caught at create time instead, where the create retries without it.
+func packReady(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() > 0
+}
+
 func (e *Env) harnessPack(image string) string {
 	if !e.Inside() || e.Harness == "" {
 		return ""
 	}
 	side := PackPath(harnessKey(image, e.Harness))
-	if _, err := os.Stat(side); err != nil {
+	if !packReady(side) {
 		return ""
 	}
 	return side
@@ -393,7 +413,7 @@ func (e *Env) PackHarness() {
 	}
 	side := PackPath(harnessKey(image, e.Harness))
 	stub := strings.TrimSuffix(side, ".smolmachine")
-	if _, err := os.Stat(side); err == nil {
+	if packReady(side) {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
@@ -404,7 +424,7 @@ func (e *Env) PackHarness() {
 		return
 	}
 	defer unlock()
-	if _, err := os.Stat(side); err == nil { // packed while we waited
+	if packReady(side) { // packed while we waited
 		return
 	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s with %s installed (once per host)\n", image, e.Harness)
@@ -451,7 +471,7 @@ func StalePacks(ms []vm.Machine, idle time.Duration) []string {
 func (e *Env) packed(image string) string {
 	side := PackPath(image)
 	stub := strings.TrimSuffix(side, ".smolmachine")
-	if _, err := os.Stat(side); err == nil {
+	if packReady(side) {
 		return side
 	}
 	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
@@ -462,7 +482,7 @@ func (e *Env) packed(image string) string {
 		return ""
 	}
 	defer unlock()
-	if _, err := os.Stat(side); err == nil { // packed while we waited
+	if packReady(side) { // packed while we waited
 		return side
 	}
 	fmt.Fprintf(e.Stderr, "boxer: caching %s (once per host)\n", image)
