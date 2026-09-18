@@ -69,6 +69,22 @@ boxer down --all         # stop every running sandbox first, if you want everyth
 short of space now, `boxer down --all && boxer gc` is the blunt version. Run `gc` on a schedule if
 you create many worktrees.
 
+## Every sandbox fails with "read checkpoint footer"
+
+```
+boxer: sandbox could not be created: smolvm machine: Error: agent operation failed:
+read checkpoint footer: I/O error: sidecar file too small to contain footer
+```
+
+A cached pack was written only partly, usually because the machine ran out of disk or the write
+was interrupted. boxer now deletes such a pack at create time and pulls the image instead, so the
+first run after the bad pack is slow and the rest are normal again. On an older binary, delete it
+by hand:
+
+```sh
+rm -f ~/.local/state/boxer/packs/*.smolmachine   # they are a cache; each rebuilds on demand
+```
+
 ## Grok denies my first command every time
 
 Grok does not surface session-start context to the model, so in `tool` mode the agent has not been
