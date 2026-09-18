@@ -185,7 +185,7 @@ merely unbuilt. Note that its published settings table documents the Claude Code
 executable paths; the OpenCode key boxer also writes is not in that table and is inert until shown
 otherwise.
 
-## Stream F — the flow tier: one real development session — **in progress**
+## Stream F — the flow tier: one real development session — **done**
 
 Every cell today is one command in and one answer out. A development session scaffolds a project,
 serves it, breaks it, reads a tool's view of the failure, fixes it, and checks again. The flow tier
