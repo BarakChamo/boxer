@@ -1,11 +1,13 @@
 package eval
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInfra(t *testing.T) {
@@ -123,5 +125,27 @@ func TestWaitAndLastAnswer(t *testing.T) {
 	}
 	if got := lastAnswer("$ only noise\n", "$ "); got != "" {
 		t.Fatalf("nothing but noise is no answer: %q", got)
+	}
+}
+
+// A harness that spawns a child hands it the same stdout pipe, so killing the harness does not
+// close it and Wait blocks until the grandchild exits. A timed-out cell must still end.
+func TestWaitDoesNotHangOnASurvivingChild(t *testing.T) {
+	old := harnessTimeout
+	harnessTimeout = time.Second
+	t.Cleanup(func() { harnessTimeout = old })
+
+	cmd := exec.Command("sh", "-c", "sleep 300 & exec sleep 300")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	done := make(chan error, 1)
+	go func() { done <- wait(cmd, "t") }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("want a timeout error, got %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait hung after killing a process whose child still holds the pipe")
 	}
 }

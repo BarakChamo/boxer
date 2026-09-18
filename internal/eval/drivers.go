@@ -30,8 +30,9 @@ func Drivers() []Driver {
 }
 
 // harnessTimeout bounds one harness invocation. A cell that has not answered in four minutes is a
-// failure worth reporting, not something to wait out: the whole suite is sixty-odd cells.
-const harnessTimeout = 4 * time.Minute
+// failure worth reporting, not something to wait out: the whole suite is sixty-odd cells. It is a
+// variable so a test can prove the kill path without waiting four minutes for it.
+var harnessTimeout = 4 * time.Minute
 
 // wait runs cmd to completion, killing it after harnessTimeout. Every driver used to carry its
 // own copy of this start/wait/kill dance, and they had drifted: some killed only the parent, some
@@ -48,7 +49,13 @@ func wait(cmd *exec.Cmd, name string) error {
 		return err
 	case <-time.After(harnessTimeout):
 		_ = cmd.Process.Kill()
-		<-done // reap, so the process does not outlive the cell
+		// Reap, but never wait forever for it: Wait blocks until every inherited pipe is closed,
+		// and a harness that spawns children hands them the same pipe, so killing the parent does
+		// not close it. A timed-out cell must end the cell.
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
 		return fmt.Errorf("%s timed out after %s", name, harnessTimeout)
 	}
 }
