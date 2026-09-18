@@ -417,3 +417,39 @@ func TestUpRebuildDropsTheCachedEnvironment(t *testing.T) {
 		t.Fatalf("a rebuild leaves a fresh cache: %v", after["environment"])
 	}
 }
+
+// One stream, two sources: a state change says a VM started, an event says what it was asked to
+// do. A consumer should read one thing rather than correlating two.
+func TestWatchCarriesEventsAsWellAsStateChanges(t *testing.T) {
+	vmtest.Install(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[telemetry]\nenabled = true\n")
+
+	r, w := io.Pipe()
+	go func() { run([]string{"watch", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard) }()
+	t.Cleanup(func() { _ = r.Close() })
+	lines := make(chan string, 64)
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+
+	if code, out := call(t, nil, "run", "-c", "true"); code != 0 {
+		t.Fatalf("run: %d %s", code, out)
+	}
+	deadline := time.After(15 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if strings.Contains(line, `"change":"event"`) && strings.Contains(line, `"event"`) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the stream must carry events, not only state changes")
+		}
+	}
+}

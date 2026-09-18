@@ -427,6 +427,9 @@ type statusJSON struct {
 	// Events is the tail of this scope's event log when telemetry writes one; a dashboard reads
 	// status and wants the last few things that happened without a second command.
 	Events []obs.Event `json:"events,omitempty"`
+	// Resources is what this sandbox costs, measured when it exists. One sandbox is cheap to
+	// measure, so unlike `ls` this does not need asking for.
+	Resources *box.Resources `json:"resources,omitempty"`
 }
 
 // Exit codes of `boxer status`.
@@ -450,6 +453,18 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 	code := exitAbsent
 	if ok {
 		s.State, s.Image, s.ImageReason, s.Labels = m.State, m.Image, "machine", m.Labels
+		// One sandbox, so measuring is cheap enough to do unasked: this is the command someone
+		// runs when they want to know about *this* worktree, and its cost is part of that.
+		client := vm.New()
+		dir, derr := client.DataDir(m.Name)
+		if derr != nil {
+			dir = ""
+		}
+		r := box.MachineResources(m, dir)
+		if derr != nil {
+			r.MeasuredAll = false
+		}
+		s.Resources = &r
 		if s.Labels == nil {
 			s.Labels = map[string]string{}
 		}
@@ -1300,6 +1315,18 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	seen := map[string]string{}
 	first := true
 	enc := json.NewEncoder(stdout)
+	// The event log, when telemetry writes one: a state change says a VM started, an event says
+	// what it was asked to do. An interface wants both in one stream.
+	cfg, _ := config.Load(cwdRoot())
+	obs.ConfigureFrom(cfg.Telemetry)
+	events := obs.Current().Path
+	if events == "" {
+		events = obs.DefaultPath()
+	}
+	sentEvents := 0
+	if seenNow, err := obs.Read(events, "", 0); err == nil {
+		sentEvents = len(seenNow) // only what happens from now on
+	}
 	for {
 		ms, err := client.Owned()
 		if err != nil {
@@ -1324,6 +1351,12 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 				emitWatch(enc, stdout, *asJSON, "gone", machineJSON{Scope: name, State: "gone"})
 			}
 		}
+		if all, err := obs.Read(events, "", 0); err == nil && len(all) > sentEvents {
+			for _, e := range all[sentEvents:] {
+				emitEvent(enc, stdout, *asJSON, e)
+			}
+			sentEvents = len(all)
+		}
 		seen, first = now, false
 		time.Sleep(*interval)
 	}
@@ -1334,6 +1367,24 @@ type watchEvent struct {
 	Time    string      `json:"time"`
 	Change  string      `json:"change"`
 	Sandbox machineJSON `json:"sandbox"`
+}
+
+// emitEvent puts one event from the log into the same stream as the state changes, so a consumer
+// reads one thing rather than correlating two.
+func emitEvent(enc *json.Encoder, w io.Writer, asJSON bool, e obs.Event) {
+	if asJSON {
+		_ = enc.Encode(struct {
+			Time   string    `json:"time"`
+			Change string    `json:"change"`
+			Event  obs.Event `json:"event"`
+		}{Time: e.Time.UTC().Format(time.RFC3339), Change: "event", Event: e})
+		return
+	}
+	outcome := e.Outcome
+	if outcome == "" {
+		outcome = "-"
+	}
+	fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", e.Time.Format("15:04:05"), e.Name, e.Scope, e.Harness, outcome)
 }
 
 func emitWatch(enc *json.Encoder, w io.Writer, asJSON bool, change string, row machineJSON) {

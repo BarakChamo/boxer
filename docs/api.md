@@ -261,11 +261,16 @@ stopped machine's process or an unreadable directory.
 `harness`, `session` and `agent` appear on every row when the harness said who it was. They are
 absent, not empty, when it did not.
 
+`boxer status --json` carries the same `resources` object for the one sandbox it describes,
+measured without asking, since measuring one is cheap.
+
 ### `boxer watch --json`
 
 A stream, so **one JSON document per line** rather than an array: it has no end, and a consumer
 reads each line as it arrives. `change` is `present` for what already existed when the watch
-started, then `created`, the machine's state as it changes, and `gone` when it is deleted.
+started, then `created`, the machine's state as it changes, and `gone` when it is deleted. When
+telemetry writes an event log, its events join the same stream as `{"change":"event","event":{…}}`,
+so a consumer reads one thing rather than correlating two.
 
 ```json
 {"time":"2026-09-19T00:23:13Z","change":"created","sandbox":{"scope":"sb-4f2a9c11","state":"stopped","harness":"claude-code","session":"4f2a9c11","worktree":"/Users/you/project"}}
