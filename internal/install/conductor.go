@@ -25,6 +25,10 @@ func Conductor(root, shimDir string) (Result, error) {
 		conductorStart,
 		"claude_code_executable_path = " + q("claude"),
 		"codex_executable_path = " + q("codex"),
+		// Conductor documents claude_code_executable_path and codex_executable_path as repository
+		// settings; OpenCode's path is set in the app's own preferences and this key is not in the
+		// published table. It is written anyway because an unknown key is inert, and removed if
+		// Conductor ever rejects it.
 		"opencode_executable_path = " + q("opencode"),
 		"",
 		"[environment_variables]",

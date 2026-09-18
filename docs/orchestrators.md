@@ -302,7 +302,9 @@ boxer install conductor       # writes .conductor/settings.toml
 ```
 
 `boxer install conductor` writes a managed block with `claude_code_executable_path`,
-`codex_executable_path` and `opencode_executable_path` pointing at those shims, an
+`codex_executable_path` and `opencode_executable_path` pointing at those shims (the first two are
+documented repository settings; the third is not in Conductor's published table, and OpenCode's
+path is set in the app's preferences, so treat it as inert until verified), an
 `[environment_variables]` table, and `[scripts]` whose `setup` warms the sandbox
 (`boxer up --detach && boxer doctor`) as the workspace is created. Conductor then spawns the shim,
 the shim runs `boxer shell <harness>`, and the harness itself runs in the VM keyed to the
