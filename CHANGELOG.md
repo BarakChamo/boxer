@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
   environment pack; secrets stay in `secrets` and `env_passthrough`, which are read from the host
   at run time and never snapshotted. `mounts` adds host directories beside the worktree, with `~`
   expanded, usually for a shared dependency cache.
+- **A flow tier**: one development session end to end — scaffold a pinned Next.js app in the
+  sandbox, serve it, reach it from the host, speak MCP to a server running in the guest, restart and
+  find the dependencies still there. Passes in 54 s warm, 3 m 34 s cold. `make eval-flow`; it runs
+  on demand and before a release, never in the default gate. It proves a capability boxer had and
+  had never claimed: an MCP server that must live beside the code runs in the sandbox, addressed by
+  an ordinary `.mcp.json` entry through `boxer run`.
 - **Devcontainers are read.** A repository with `.devcontainer/devcontainer.json` gets its image,
   lifecycle commands, ports, environment, bind mounts and workspace folder without restating any of
   it, and `doctor` says which file each value came from. What needs an image build (`features`,

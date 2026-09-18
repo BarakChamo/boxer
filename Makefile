@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence package install-routes release-gate clean clean-evals help
+.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence eval-flow package install-routes release-gate clean clean-evals help
 
 help:             ## list the targets
 	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -49,6 +49,9 @@ eval-adherence: build  ## does a live model follow the brief; four models, repor
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier adherence --models "$(ADHERENCE_MODELS)" \
 	  --jsonl docs/eval-adherence.jsonl --out docs/eval-adherence.md
+
+eval-flow: build  ## one real development session: scaffold, serve, MCP in the guest, restart (slow, needs the network)
+	bin/boxer-eval --tier flow --out docs/eval-flow.md
 
 package: build    ## render the package and every client view into dist/, and refresh the checked-in plugin/
 	bin/boxer package all --out dist

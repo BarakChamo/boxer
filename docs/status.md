@@ -60,6 +60,22 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 | Conductor (local) | `.conductor/settings.toml` (**not** the legacy `conductor.json`): `claude_code_executable_path`/`codex_`/`opencode_` on boxer's harness shims plus `scripts.setup` warming the sandbox, written by `boxer install conductor` | checklist: local workspaces have no API |
 | ACP real client | `@agentclientprotocol/sdk` example client against `boxer acp claude` | pass: initialize, session, prompt, `Terminal` tool, `Linux` |
 
+## Flow
+
+`boxer-eval --tier flow` (`make eval-flow`), added in 1.1: one development session end to end
+rather than one command. A pinned Next.js 16 app is scaffolded and installed inside the sandbox,
+served by `start`, waited for by `ready`, reached from the host through a forwarded port, asked for
+its tools over MCP by `next-devtools-mcp` running *in the guest* and addressed through `boxer run`,
+then restarted to prove the environment pack made the install unnecessary.
+
+**Pass, 54 s** on 2026-09-19 with a warm environment pack; 3 m 34 s cold, which is what the pack
+saves. It is slow and network-heavy, so it runs on demand and before a release, never in the
+default gate. Report: [eval-flow.md](eval-flow.md).
+
+It is also the only cell that proves the capability boxer had and never claimed: an MCP server that
+must live beside the code runs in the sandbox, and an ordinary `.mcp.json` entry reaches it —
+`{"command": "boxer", "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"]}`.
+
 ## Adherence
 
 `boxer-eval --tier adherence`: does a live model follow the injected brief when the prompt never
