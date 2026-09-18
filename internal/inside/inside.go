@@ -75,8 +75,13 @@ var Harnesses = map[string]Harness{
 		Hosts: []string{"api.anthropic.com", "api.openai.com"}},
 	// Copilot CLI verified 2026-09-18 against 1.0.86: `--acp` starts an ACP server, COPILOT_HOME
 	// holds config and state, and the BYOK variables run it with no GitHub sign-in at all.
-	"copilot": {Bin: "copilot", Install: "npm i -g @github/copilot",
-		ACP: []string{"copilot", "--acp"}, ConfigVar: "COPILOT_HOME", ConfigDir: "~/.copilot",
+	// Copilot's model client is a native binary that reads the system trust store rather than
+	// node's bundled one, and a slim image has no CA certificates: without them every request
+	// fails with "No CA certificates were loaded from the system", which names neither TLS nor the
+	// image. Codex needs them for the same reason.
+	"copilot": {Bin: "copilot",
+		Install: "apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates && npm i -g @github/copilot",
+		ACP:     []string{"copilot", "--acp"}, ConfigVar: "COPILOT_HOME", ConfigDir: "~/.copilot",
 		Env: []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_MODEL", "COPILOT_AUTO_UPDATE",
 			"COPILOT_PROVIDER_TYPE", "COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_API_KEY", "COPILOT_PROVIDER_WIRE_API"},
 		Creds:     []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_PROVIDER_API_KEY"},

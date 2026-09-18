@@ -157,6 +157,10 @@ func (d Inside) guestEnvFor(env *Env, h string) []string {
 		case "gemini":
 			k, _ := anySet("GEMINI_API_KEY", "GOOGLE_API_KEY")
 			return []string{"GEMINI_CLI_HOME=" + dir, "GEMINI_API_KEY=" + os.Getenv(k), "GEMINI_CLI_TRUST_WORKSPACE=true"}
+		case "copilot":
+			return append([]string{"COPILOT_HOME=" + dir, "COPILOT_AUTO_UPDATE=false", "COPILOT_ALLOW_ALL=true"},
+				"COPILOT_PROVIDER_TYPE=openai", "COPILOT_PROVIDER_BASE_URL="+gatewayOpenAI,
+				"COPILOT_PROVIDER_API_KEY="+key, "COPILOT_MODEL="+LiveModel("copilot"))
 		}
 	}
 	switch h {
@@ -174,6 +178,11 @@ func (d Inside) guestEnvFor(env *Env, h string) []string {
 		return []string{"HOME=" + dir, "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0"}
 	case "grok":
 		return []string{"GROK_HOME=" + dir, "GROK_DISABLE_AUTOUPDATER=1"}
+	case "copilot":
+		// COPILOT_ALLOW_ALL trusts the working directory, which headless mode otherwise refuses.
+		return []string{"COPILOT_HOME=" + dir, "COPILOT_AUTO_UPDATE=false", "COPILOT_ALLOW_ALL=true",
+			"COPILOT_PROVIDER_TYPE=openai", "COPILOT_PROVIDER_BASE_URL=" + url + "/v1",
+			"COPILOT_PROVIDER_API_KEY=fake", "COPILOT_MODEL=fake-model"}
 	}
 	return nil
 }
@@ -197,6 +206,12 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		args = []string{"-p", "--no-session", "--provider", "fake", "--model", "fake-model", prompt}
 	case "grok":
 		args = []string{"-p", prompt, "-m", "fake-model", "--permission-mode", "bypassPermissions", "--no-auto-update"}
+	case "copilot":
+		// Inside the guest the sandbox is the machine, so the permissions that matter are the
+		// harness's own. --allow-all-tools is refused where a GitHub policy says so, hence the
+		// named grants; --allow-all-paths because Copilot verifies the paths a command touches.
+		args = []string{"-p", prompt, "-s", "--allow-tool", "shell", "--allow-tool", "write", "--allow-all-paths",
+			"--no-ask-user", "--output-format", "json", "--no-auto-update"}
 	}
 	if env.Tier == "t2" {
 		switch h {
@@ -243,6 +258,8 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		tr.Answer = parseClaudeStream(raw).Answer
 	case "codex":
 		tr.Answer = parseCodexJSON(raw).Answer
+	case "copilot":
+		tr.Answer = parseCopilotJSON(raw).Answer
 	default:
 		for _, line := range strings.Split(stripANSI(raw), "\n") {
 			l := strings.TrimSpace(line)
