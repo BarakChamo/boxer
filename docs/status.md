@@ -27,6 +27,7 @@ Measured on Apple Silicon, smolvm 1.16.1: cold start 0.9 s from a host pack, war
 | OpenCode | pass | pass | pass 11 s | pass 11 s | 3/3 live |
 | pi | pass | pass | pass 15 s | no ACP server | 3/3 live |
 | Kimi | block-only hooks; shims | pass | pass 17 s | pass 14 s | 2/2 live |
+| GitHub Copilot CLI | pass (user hooks; `modifiedArgs`) | pass | not measured | `copilot --acp` (row present, not run) | 3/3 live for $0.0092 through BYOK on the gateway — no Copilot seat needed |
 | Grok | pass (user and project hooks) | live: one denial then recovery | pass 13 s | pass 14 s | 4/4 live |
 | DSH | deny-only hooks through the `dsh-hooks-claude-code` bridge; shims | pass | not in table | none | t1 3/3, t2 2/2 live; tool mode only (the bridge ignores `updatedInput`), and boxer provisions on `UserPromptSubmit` because its `SessionStart` is detached |
 
@@ -38,9 +39,9 @@ per host pays the install once (10 s to 11 min depending on npm) and packs the r
 | OpenHands | terminal `shell_path` = `boxer-bash` (`boxer shim install --shell`), real SDK 1.49 | t1 pass; **live pass** through the gateway (agent's terminal ran in the guest); the earlier `BoxerWorkspace`-only design did not sandbox the agent's terminal |
 | Paperclip | project layer over `claude-agent-acp`, one git worktree per issue | driver (`orch_paperclip.go`): T1 pass 21 s; **live 2026-09-18 pass, 2 m 4 s, $0.0364** |
 | T3 Code | project layer, and the instance's `binaryPath` on a `boxer shim` (inside) | driver (`orch_t3.go`), two cells: T1 pass 9 s / 18 s; **live 2026-09-18 pass, 18 s $0.0047 and 27 s $0.0070** |
-| Multica | project layer | spike 9 answered; driver skips: no account (`multica setup`) |
-| herdr | checklist | no driver by design (pane-driven) |
-| Conductor (local) | checklist | no driver (setup-script lane) |
+| Multica | project layer; harness path through `multica runtime profile create --command-name` + `runtime profile set-path`, or `MULTICA_<PROVIDER>_PATH` | checklist: a driver needs a self-hosted Multica server (documented and scriptable, not attempted) |
+| herdr | project layer in a pane over the socket API (`herdr server`, `workspace create`, `pane split`, `agent start/prompt/read`) | driver (`orch_herdr.go`): **T1 pass 8 s; live 2026-09-18 pass, 15 s, $0.0039**. Also level S (`terminal.default_shell` = `boxer-bash`) and a validated `herdr-plugin.toml` (`start-agent` action, `worktree.created` → `boxer up --detach`). `herdr integration install claude` and `boxer install claude-code --user` coexist in `~/.claude/settings.json`, verified both orders |
+| Conductor (local) | `.conductor/settings.toml` (**not** the legacy `conductor.json`): `claude_code_executable_path`/`codex_`/`opencode_` on boxer's harness shims plus `scripts.setup` warming the sandbox, written by `boxer install conductor` | checklist: local workspaces have no API |
 | ACP real client | `@agentclientprotocol/sdk` example client against `boxer acp claude` | pass: initialize, session, prompt, `Terminal` tool, `Linux` |
 
 ## Adherence

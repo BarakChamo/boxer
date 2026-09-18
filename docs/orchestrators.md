@@ -208,36 +208,109 @@ hook, so `git worktree add` warms the sandbox before the harness starts; the cel
 (2026-09-18, 1 m 15 s, $0.0041). Any orchestrator that creates a worktree and launches into it
 wants that hook.
 
-### Multica (checklist; spike 9: `MULTICA_CLAUDE_ARGS`, env inheritance)
+### Multica (checklist; spike 9, corrected 2026-09-18)
 
 - The `multica` binary (Homebrew) reads `MULTICA_CLAUDE_ARGS`, `MULTICA_CLAUDE_PATH`,
   `MULTICA_CODEX_ARGS`, `MULTICA_KEEP_ENV_AFTER_TASK`, `MULTICA_AGENT_TEMP_BASE`, and the
   per-harness `MULTICA_*_MODEL` variables (from `strings` on the binary). `MULTICA_CLAUDE_ARGS`
-  is where `--plugin-dir <dist/claude-code>` goes; `MULTICA_CLAUDE_PATH=boxer-shim/claude` is the
+  is where `--plugin-dir <dist/claude-code>` goes; `MULTICA_<PROVIDER>_PATH=<shim>/claude` is the
   inside path.
+- **Runtime profiles are the supported form of the same thing**, and the environment variables are
+  the override of last resort: `multica runtime profile create --command-name <name>` declares a
+  runtime, and `multica runtime profile set-path` points it at a binary — boxer's harness shim.
+  Prefer the profile: it is per-installation configuration rather than per-process environment, so
+  it survives a daemon restart and applies to every task the daemon runs.
 - The daemon needs a server: `multica auth status` answers `No server configured. Run 'multica
-  setup' first.` on this machine, so env inheritance could not be observed. Live only until a
-  Multica account exists.
+  setup' first.` on this machine, so env inheritance could not be observed. A driver therefore
+  needs a **self-hosted Multica server**; the setup is documented and scriptable
+  (`multica setup`, `multica daemon start`), and was not attempted here. This is the one
+  orchestrator left as a checklist for 1.0.
 
-Checklist: `multica setup` (account), `multica daemon start` from a shell with `boxer` on `PATH`,
-`multica repo add <repo with boxer install committed>`, `multica issue create --title "uname"
---description "<prompt>" --assignee <agent>`, then `multica issue runs` and `run-messages`; assert
-a VM for the daemon's worktree and `Linux` in the run output.
+Checklist: `multica setup` (account or self-hosted server), `multica runtime profile create
+--command-name claude` plus `runtime profile set-path <shim>/claude` (or `MULTICA_CLAUDE_PATH`),
+`multica daemon start` from a shell with `boxer` on `PATH`, `multica repo add <repo with boxer
+install committed>`, `multica issue create --title "uname" --description "<prompt>" --assignee
+<agent>`, then `multica issue runs` and `run-messages`; assert a VM for the daemon's worktree and
+`Linux` in the run output.
 
-### herdr (no driver)
+### herdr (driver, corrected 2026-09-18)
 
-herdr owns terminal panes and runs the harness interactively with the shell's own environment,
-so the plugin or project layer applies unchanged. Checklist: `herdr pane split`, `herdr pane run
-w:p "claude --plugin-dir <dist/claude-code>"` in a worktree, `herdr pane send-text` the prompt,
-`herdr agent wait --until done`, `herdr pane read`; assert `Linux` and a VM for the pane's cwd.
+An earlier note here called herdr undrivable. It is not: 0.9.1 documents a socket API, a plugin
+API, and a configurable pane shell, and boxer now drives it headlessly
+(`internal/eval/orch_herdr.go`, cell `herdr/rewrite/project/worktree`).
 
-### Conductor, local (no driver)
+```sh
+bin/boxer-eval --tier t1 --cell herdr          # scripted model
+bin/boxer-eval --tier t2 --cell herdr --keep   # live model
+```
 
-Conductor's public API drives cloud workspaces only; the local Mac app runs Claude Code in
-`~/conductor/workspaces/<repo>/<ws>`. Checklist: a `conductor.json` whose `setup` script runs
-`boxer doctor` and whose `run` script runs `boxer run -c 'uname -a'`; create one workspace by
-hand and read the two scripts' output in the app; assert `Linux` and a VM keyed to the workspace
-path.
+The driver starts a private server (`HERDR_SOCKET_PATH`, `HERDR_HOME` and `HERDR_CONFIG_PATH` keep
+it clear of the user's own session), then `workspace create --cwd <repo>`, `pane split`,
+`agent start boxeval --kind claude --pane <id>`, `agent prompt … --wait --until idle` and
+`agent read --source recent-unwrapped`. The pane inherits the server's environment, so the project
+layer, `PATH` and `BOXER_TRACE` all apply, and the oracle judges it like any other cell.
+
+Three things are not guessable and cost a run each:
+
+- **`agent start` refuses a pane whose shell it cannot recognise**: `agent_pane_busy`, "not an
+  available shell". A shell another tool has renamed (kiro-cli rewrites `argv0` to
+  `bash (kiro-cli-term)`) is refused, so the driver pins `terminal.default_shell = "/bin/sh"` with
+  `shell_mode = "non_login"` in its own config file.
+- **A pane runs the harness interactively**, where Claude Code's workspace-trust question blocks
+  startup; headless drivers never see it. The driver accepts it once in its private config dir
+  (`projects.<root>.hasTrustDialogAccepted`).
+- **`agent_not_ready` is not a failure**: the name stays usable, so the driver waits for `idle`
+  rather than giving up there.
+
+**Levels.** herdr needs no boxer-specific code to sandbox a pane:
+
+- **Level S.** `terminal.default_shell` in `~/.config/herdr/config.toml` (or `HERDR_CONFIG_PATH`)
+  pointed at `boxer-bash` from `boxer shim install --shell` puts every new pane's shell in the
+  sandbox for its worktree.
+- **Harness shims.** `boxer shim install --harness claude,codex` on `PATH` makes `agent start
+  --kind claude` launch `boxer shell claude`. herdr 0.9.1 classifies a pane from its screen buffer,
+  not from the process tree or an environment variable, so the wrapper does not confuse it. The
+  shim also exports `HERDR_AGENT=<kind>`, which 0.9.1 ignores; no sandbox-wrapper environment
+  contract exists in this version (the only `HERDR_AGENT*` string in the binary is
+  `HERDR_AGENT_DETECTION_MANIFEST_CATALOG_URL`).
+- **Plugin.** `adapters/herdr/herdr-plugin.toml`, linked with `herdr plugin link adapters/herdr`,
+  carries a `start-agent` action that opens a pane running `boxer shell claude` and a
+  `worktree.created` event that runs `boxer up --detach`, so a worktree herdr cuts has a warm
+  sandbox before anything runs in it. The manifest schema was derived by validating against the
+  running binary: `id`, `name`, `version`, `min_herdr_version` required, `platforms` warned about
+  when absent, every `command` an argv array, `[[actions]]` with `id`/`title`/`contexts`,
+  `[[panes]]` with `id`/`title`/`placement`, `[[events]]` with `on`/`command`. The Vercel sandbox
+  plugin is the blueprint; ours is simpler because the worktree is already local.
+
+**Coexistence, verified.** `herdr integration install claude` writes
+`~/.claude/hooks/herdr-agent-state.sh` and a `SessionStart` group in `~/.claude/settings.json` —
+the same file `boxer install claude-code --user` writes. Installed in either order, both survive:
+each merges into the existing `hooks` map, and `SessionStart` ends up with both groups
+(verified 2026-09-18 with `CLAUDE_CONFIG_DIR` pointed at a scratch directory, both orders,
+`herdr integration status` still reporting `claude: current`).
+
+### Conductor, local (checklist; corrected 2026-09-18)
+
+Our earlier note named `conductor.json`. That is legacy. Conductor reads
+`.conductor/settings.toml` in the repository, with `.conductor/settings.local.toml` beside it and
+`~/.conductor/settings.toml` and `~/.conductor/settings.managed.toml` above it, and it has a
+first-class override we had missed: **the harness executable path**.
+
+```sh
+boxer shim install --harness claude,codex,opencode
+boxer install conductor       # writes .conductor/settings.toml
+```
+
+`boxer install conductor` writes a managed block with `claude_code_executable_path`,
+`codex_executable_path` and `opencode_executable_path` pointing at those shims, an
+`[environment_variables]` table, and `[scripts]` whose `setup` warms the sandbox
+(`boxer up --detach && boxer doctor`) as the workspace is created. Conductor then spawns the shim,
+the shim runs `boxer shell <harness>`, and the harness itself runs in the VM keyed to the
+workspace — no hook path at all.
+
+It stays a checklist, because Conductor's public API drives cloud workspaces only: create one
+local workspace by hand in `~/conductor/workspaces/<repo>/<ws>`, read the setup script's output in
+the app, and assert `Linux` from `boxer run -c 'uname -a'` and one VM keyed to the workspace path.
 
 ## Verified and not
 

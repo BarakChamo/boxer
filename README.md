@@ -25,7 +25,7 @@ how releases are cut is in [docs/release.md](docs/release.md).
 - **Hooks first, errors last.** `boxer hook <harness>` is one binary speaking every harness's hook
   dialect. At session start it provisions the VM and injects the agent brief; on each shell call it
   rewrites intercepted commands to `boxer run` (Claude Code, Codex, Grok Build, Gemini CLI,
-  OpenCode) or, where a harness can only block, stays silent and lets PATH shims do the same job.
+  OpenCode, GitHub Copilot CLI) or, where a harness can only block, stays silent and lets PATH shims do the same job.
 - **Three modes.** `rewrite` (transparent), `tool` (shell denied, `boxer_run` MCP tool is the way),
   `off`. Per-harness overrides in `[harness.<name>]`.
 - **Errors are instructions.** Every refusal is `boxer: <reason>` plus `scope`, `worktree`,
@@ -114,7 +114,7 @@ package, `dist/boxer`, valid for every client at once: `plugin.json`, `skills/bo
 `mcp.json` (the `boxer mcp` server), `AGENTS.md`, and one reverse-domain directory per client
 carrying its hooks and README (`com.anthropic.claude-code/`, `com.openai.codex/`, `ai.x.grok/`,
 `com.google.gemini-cli/`, `ai.moonshot.kimi-code/`, `com.deepseek.dsh/`, `ai.opencode/`,
-`works.earendil.pi/`). The same directory carries the native manifests each loader reads today,
+`works.earendil.pi/`, `com.github.copilot/`). The same directory carries the native manifests each loader reads today,
 so it installs everywhere now:
 
 ```sh
