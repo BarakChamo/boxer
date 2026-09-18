@@ -44,10 +44,18 @@ func (*Herdr) Cells(tier string) []Cell {
 
 func (d *Herdr) sock(env *Env) string { return filepath.Join(env.Work, "herdr.sock") }
 
+// env is what the herdr server runs with, and therefore what every pane it spawns inherits: the
+// eval's PATH and trace file plus the Claude Code cell's private config dir and model endpoint.
 func (d *Herdr) env(env *Env) []string {
-	return append(env.BaseEnv(),
+	return append(append(env.BaseEnv(), Claude{}.modelEnv(env)...),
 		"HERDR_SOCKET_PATH="+d.sock(env),
 		"HERDR_HOME="+filepath.Join(env.Work, "herdr-home"),
+		"HERDR_CONFIG_PATH="+filepath.Join(env.Work, "herdr-config.toml"),
+		// A pane whose shell another tool has renamed (kiro-cli rewrites argv0 to
+		// "bash (kiro-cli-term)") is refused by `agent start` as "not an available shell", so the
+		// cell pins a plain non-login /bin/sh. terminal.default_shell is also boxer's level-S seam
+		// here: pointing it at boxer-bash puts every pane's shell in the sandbox.
+		"SHELL=/bin/sh",
 		"HERDR_ENV=1")
 }
 
@@ -73,10 +81,22 @@ func (d *Herdr) cli(env *Env, args ...string) (map[string]any, string, error) {
 }
 
 func (d *Herdr) Prepare(env *Env, c Cell) error {
-	if out, err := env.boxer(env.Repo, "install", "claude-code"); err != nil {
-		return fmt.Errorf("boxer install claude-code: %v\n%s", err, out)
+	// The harness herdr starts is stock Claude Code reading the project layer, with the eval's
+	// private config dir and fake or gateway model: exactly the Claude driver's project cell.
+	if err := (Claude{}).Prepare(env, Cell{Harness: "claude-code", Mode: c.Mode, Entry: "project", Isolation: c.Isolation, Tier: c.Tier}); err != nil {
+		return err
+	}
+	// Headless drivers pass -p and never see Claude Code's first-run dialogs; a pane runs it
+	// interactively, where the workspace-trust question blocks startup. Accepting it in the
+	// private config dir is what a human does once.
+	if err := trustProject(filepath.Join(env.Work, "claude-home", ".claude.json"), env.Repo); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Join(env.Work, "herdr-home"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(env.Work, "herdr-config.toml"),
+		[]byte("[terminal]\ndefault_shell = \"/bin/sh\"\nshell_mode = \"non_login\"\n"), 0o644); err != nil {
 		return err
 	}
 	srv, err := startServer(env.Repo, d.env(env), "herdr", "server")
@@ -103,16 +123,37 @@ func (d *Herdr) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		return tr, err
 	}
 	wsID, _ := dig(ws, "workspace", "workspace_id").(string)
-	pane, raw, err := d.cli(env, "pane", "list", "--workspace", wsID)
+	// Split rather than reuse the workspace's first pane: that one is still starting its shell
+	// ("agent target pane … is not an available shell"), and a split returns a pane id directly.
+	list, raw, err := d.cli(env, "pane", "list", "--workspace", wsID)
 	tr.Raw += raw
 	if err != nil {
 		return tr, err
 	}
-	paneID := firstPaneID(pane)
-	if paneID == "" {
+	first := firstPaneID(list)
+	if first == "" {
 		return tr, fmt.Errorf("herdr: no pane in workspace %s\n%s", wsID, raw)
 	}
-	if _, raw, err = d.cli(env, "agent", "start", "boxeval", "--kind", "claude", "--pane", paneID, "--timeout", "120000"); err != nil {
+	split, raw, err := d.cli(env, "pane", "split", first, "--direction", "down", "--cwd", env.Repo, "--no-focus")
+	tr.Raw += raw
+	if err != nil {
+		return tr, err
+	}
+	paneID, _ := dig(split, "pane", "pane_id").(string)
+	if paneID == "" {
+		paneID = firstPaneID(split)
+	}
+	if paneID == "" {
+		return tr, fmt.Errorf("herdr: pane split returned no pane id\n%s", raw)
+	}
+	// `agent start` returns agent_not_ready when the harness is still blocked at startup; the name
+	// stays usable, so the cell waits for idle rather than failing there (herdr's own contract).
+	_, raw, err = d.cli(env, "agent", "start", "boxeval", "--kind", "claude", "--pane", paneID, "--timeout", "120000")
+	tr.Raw += raw
+	if err != nil && !strings.Contains(raw, "agent_not_ready") {
+		return tr, err
+	}
+	if _, raw, err = d.cli(env, "agent", "wait", "boxeval", "--until", "idle", "--timeout", "120000"); err != nil {
 		tr.Raw += raw
 		return tr, err
 	}
@@ -137,6 +178,26 @@ func (d *Herdr) Cleanup(env *Env, c Cell) {
 		d.srv.stop()
 		d.srv = nil
 	}
+}
+
+// trustProject marks root as trusted in a Claude Code config file.
+func trustProject(path, root string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	projects, _ := m["projects"].(map[string]any)
+	if projects == nil {
+		projects = map[string]any{}
+	}
+	projects[root] = map[string]any{"hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true}
+	m["projects"] = projects
+	out, _ := json.Marshal(m)
+	return os.WriteFile(path, out, 0o600)
 }
 
 // dig walks nested maps.
