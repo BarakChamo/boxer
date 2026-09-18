@@ -91,9 +91,9 @@ func TestHumanBytes(t *testing.T) {
 	for _, tc := range []struct {
 		in   int64
 		want string
-	}{{0, "0 bytes"}, {2048, "2 MB"}, {3 << 30, "3.0 GB"}} {
-		if got := HumanBytes(tc.in); got != tc.want && !(tc.in == 2048 && got == "2048 bytes") {
-			t.Errorf("%d: %q", tc.in, got)
+	}{{0, "0 bytes"}, {4 << 20, "4 MB"}, {3 << 30, "3.0 GB"}} {
+		if got := HumanBytes(tc.in); got != tc.want {
+			t.Errorf("%d: %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
