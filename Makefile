@@ -40,9 +40,15 @@ eval-t2: build    ## live models through the gateway; credentials from .env or e
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier t2 --out docs/eval-t2.md
 
+# The two-model rule needs more than one model: a single failure among passes is the model's
+# adherence, and only a cell every model fails is boxer's problem. Without this list the tier runs
+# the .env model alone and can never reach a verdict.
+ADHERENCE_MODELS ?= zai/glm-5.3-flash,anthropic/claude-haiku-4.5,alibaba/qwen3.7-flash,deepseek/deepseek-v4-flash
+
 eval-adherence: build  ## does a live model follow the brief; four models, report to docs/eval-adherence.md
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
-	bin/boxer-eval --tier adherence --out docs/eval-adherence.md
+	bin/boxer-eval --tier adherence --models "$(ADHERENCE_MODELS)" \
+	  --jsonl docs/eval-adherence.jsonl --out docs/eval-adherence.md
 
 package: build    ## render the package and every client view into dist/, and refresh the checked-in plugin/
 	bin/boxer package all --out dist
