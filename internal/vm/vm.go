@@ -46,11 +46,11 @@ func New() Client {
 
 // Machine is the subset of `smolvm machine ls --json` boxer reads.
 type Machine struct {
-	Name       string            `json:"name"`
-	State      string            `json:"state"`
-	Image      string            `json:"image"`
-	Labels     map[string]string `json:"labels"`
-	CreatedAt  int64             `json:"created_at"`
+	Name      string            `json:"name"`
+	State     string            `json:"state"`
+	Image     string            `json:"image"`
+	Labels    map[string]string `json:"labels"`
+	CreatedAt int64             `json:"created_at"`
 }
 
 // Running reports whether the machine can accept exec.
