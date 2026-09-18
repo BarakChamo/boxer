@@ -9,7 +9,7 @@ internal/decide    99
 internal/eval      14
 internal/fakellm   81
 internal/hook      90
-internal/inside    73
+internal/inside    92
 internal/install   84
 internal/mcp       94
 internal/obs       81

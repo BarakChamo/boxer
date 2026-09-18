@@ -6,6 +6,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -410,5 +411,26 @@ func TestDoctorReportsStorage(t *testing.T) {
 	}
 	if code, out := call(t, nil, "doctor"); code != 0 || !strings.Contains(out, "storage:") {
 		t.Fatalf("human doctor must print the footprint: %d %s", code, out)
+	}
+}
+
+// The release stamp is a linker flag, and `-X` refuses, silently, to rewrite a variable whose
+// initializer is anything but a plain string constant. A computed initializer here would unstamp
+// every published binary while every test still passed, so this builds one and looks.
+func TestTheReleaseStampSurvivesTheLinker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary")
+	}
+	bin := filepath.Join(t.TempDir(), "boxer")
+	build := exec.Command("go", "build", "-ldflags", "-X main.Version=v9.9.9-test", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin, "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("--version: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "boxer v9.9.9-test" {
+		t.Fatalf("the stamp did not reach the binary: %q", out)
 	}
 }

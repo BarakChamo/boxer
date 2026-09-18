@@ -1,6 +1,7 @@
 package inside
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,5 +160,60 @@ func TestLastLines(t *testing.T) {
 	}
 	if got := LastLines("\n \n", 3); got != "" {
 		t.Fatalf("nothing but blank lines: %q", got)
+	}
+}
+
+// Inside mode is the level where boxer has nothing to hook, because the harness itself is in the
+// guest. Run is the whole of it, and these are the four things a user meets: an unknown harness,
+// a harness with no ACP server, the shell path, and the ACP path.
+func TestRunLaunchesTheHarnessInTheGuest(t *testing.T) {
+	_, log := vmtest.Install(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\n")
+	e, err := box.Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+
+	if code, err := Run(e, "nosuchharness", nil, false, Options{}); code != 2 || err == nil || !strings.Contains(err.Error(), "known:") {
+		t.Fatalf("an unknown harness must list the known ones: %d %v", code, err)
+	}
+	// pi has no ACP server, and the refusal names the command that does work.
+	if code, err := Run(e, "pi", nil, true, Options{}); code != 2 || err == nil || !strings.Contains(err.Error(), "boxer shell pi") {
+		t.Fatalf("a harness without ACP must point at shell: %d %v", code, err)
+	}
+
+	// The shell path: the VM is provisioned, the harness installed once, and the binary run in the
+	// guest at the mounted worktree.
+	if _, err := Run(e, "claude", []string{"--version"}, false, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatalf("shell: %v", err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if !strings.Contains(s, "machine create") || !strings.Contains(s, "harness-claude") {
+		t.Fatalf("inside mode provisions and installs:\n%s", s)
+	}
+	if !strings.Contains(s, "claude --version") {
+		t.Fatalf("the harness binary must run in the guest:\n%s", s)
+	}
+
+	// The ACP path runs a different entry point in the same guest, and installs nothing twice.
+	before := strings.Count(s, "harness-claude")
+	if _, err := Run(e, "claude", nil, true, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatalf("acp: %v", err)
+	}
+	b, _ = os.ReadFile(log)
+	if !strings.Contains(string(b), "claude-agent-acp") {
+		t.Fatalf("the ACP server is a different entry point:\n%s", b)
+	}
+	// One install line per VM. Counting "npm i -g" would count twice, because the line retries
+	// itself; the environment prefix appears once per invocation.
+	if installs := strings.Count(string(b), "NPM_CONFIG_FETCH_TIMEOUT"); installs != 1 {
+		t.Fatalf("the harness installs once per VM, not per launch (%d):\n%s", installs, b)
+	}
+	if now := strings.Count(string(b), "harness-claude"); now <= before {
+		t.Fatalf("the second launch still checks the marker: %d then %d", before, now)
 	}
 }

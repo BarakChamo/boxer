@@ -28,10 +28,15 @@ import (
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
-// Version is stamped by the release build. A `go install` of a tagged version carries no stamp,
-// so it falls back to the module version the toolchain recorded, and only a build from a working
-// tree is really "dev".
-var Version = versionOrBuildInfo("dev")
+// Version is stamped by the release build with -ldflags -X. It MUST stay a plain string constant
+// initializer: the linker refuses to rewrite a variable initialized by anything else, silently,
+// so computing a fallback here would unstamp every release. version() resolves the fallback at
+// the point of use instead.
+var Version = "dev"
+
+// version is the version to report: the release stamp when there is one, otherwise the module
+// version the toolchain recorded for a `go install ...@v1.2.3`, and only then "dev".
+func version() string { return versionOrBuildInfo(Version) }
 
 func versionOrBuildInfo(stamped string) string {
 	if stamped != "dev" && stamped != "" {
@@ -98,7 +103,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "version", "--version", "-v":
-		fmt.Fprintln(stdout, "boxer", Version)
+		fmt.Fprintln(stdout, "boxer", version())
 		return 0
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
@@ -115,7 +120,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err := fs.Parse(rest); err != nil {
 			return 2
 		}
-		s := &mcp.Server{Harness: *harness, Resolve: box.Resolve, Version: Version}
+		s := &mcp.Server{Harness: *harness, Resolve: box.Resolve, Version: version()}
 		if err := s.Serve(stdin, stdout); err != nil {
 			fmt.Fprintln(stderr, "boxer mcp:", err)
 			return 1
@@ -487,7 +492,7 @@ func (r *doctorReport) exit() int {
 }
 
 func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
-	r := &doctorReport{Version: Version, Inside: vm.Inside(), ConfigFiles: []string{}, Settings: []doctorSetting{}, Warnings: []string{}}
+	r := &doctorReport{Version: version(), Inside: vm.Inside(), ConfigFiles: []string{}, Settings: []doctorSetting{}, Warnings: []string{}}
 	client := vm.New()
 	if e != nil {
 		client = e.VM
@@ -556,9 +561,9 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	r.Signals = hook.Signals(e.Cfg.Isolation, install.GitInstalled(e.Scope.Root))
 	// Installed content is published verbatim and never edited afterwards, so the drift check is
 	// a comparison against this binary's own copy.
-	r.Drift = install.Drift(e.Scope.Root, Version)
+	r.Drift = install.Drift(e.Scope.Root, version())
 	for _, p := range r.Drift {
-		r.Warnings = append(r.Warnings, fmt.Sprintf("%s differs from the copy in boxer %s (boxer install <harness> rewrites it)", p, Version))
+		r.Warnings = append(r.Warnings, fmt.Sprintf("%s differs from the copy in boxer %s (boxer install <harness> rewrites it)", p, version()))
 	}
 	// What boxer costs this host, because "why is my disk full" is the question a sandbox tool
 	// has to be able to answer about itself.
@@ -1066,7 +1071,7 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	for _, h := range names {
 		var r install.Result
 		if *user {
-			r, err = install.User(h, cfg.ForHarness(h), Version)
+			r, err = install.User(h, cfg.ForHarness(h), version())
 		} else {
 			r, err = install.Install(h, cfg.ForHarness(h), Version, wt)
 		}

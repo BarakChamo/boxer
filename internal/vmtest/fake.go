@@ -99,9 +99,14 @@ case "$verb" in
     fi
     if [ "$1" = "sh" ]; then
       case "$*" in
+        # Guest marker files decide whether setup and the harness install run again, so the fake
+        # models them per machine: without that, "once per VM" cannot be tested at all.
         *"test -f /var/lib/boxer/setup-done"*) [ -f "$dir/$name.setup" ] && exit 0 || exit 1;;
         *"touch /var/lib/boxer/setup-done"*) touch "$dir/$name.setup"; exit 0;;
-        *"touch /var/lib/boxer/harness-"*) exit 0;;
+        *"test -f /var/lib/boxer/harness-"*)
+          h=${*##*harness-}; [ -f "$dir/$name.harness-${h%% *}" ] && exit 0 || exit 1;;
+        *"touch /var/lib/boxer/harness-"*)
+          h=${*##*harness-}; touch "$dir/$name.harness-${h%% *}"; exit 0;;
       esac
     fi
     exec "$@" ;;
