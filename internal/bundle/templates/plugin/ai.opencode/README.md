@@ -22,4 +22,4 @@ Copy into the repository root:
 | Run tool | `opencode.json` `mcp.boxer` | `boxer_run`, `boxer_status` |
 | Gap closer | argument mutation; PATH shims via `boxer shim install` | |
 
-Mode at render time: `[[.Mode]]`.
+The mode in force is a property of the checkout, not of this package: run `boxer brief` to see it.

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run a task declared in boxer.toml's [tasks] table: scripts/task test
+exec boxer run --task "$1"

@@ -20,4 +20,4 @@ install <dir>`, `/plugin`, or a marketplace entry.
 | Run tool | `mcp.json` | `boxer_run`, `boxer_status` |
 | Gap closer | hook rewrite; PATH shims via `boxer shim install` | Grok Build exposes no per-agent tool restriction boxer could verify, so the rewrite hook is the closure |
 
-Mode at render time: `[[.Mode]]`.
+The mode in force is a property of the checkout, not of this package: run `boxer brief` to see it.

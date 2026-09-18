@@ -1,0 +1,3 @@
+#!/bin/sh
+# Report this scope's sandbox as JSON.
+exec boxer status --json "$@"

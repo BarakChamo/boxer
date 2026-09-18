@@ -18,6 +18,6 @@ claude plugin install ./boxer   # the full package, or ./claude-code (this view)
 | Lifecycle hooks | `com.anthropic.claude-code/hooks/hooks.json` | `SessionStart`/`SubagentStart` provision and instruct; `SessionEnd`/`SubagentStop` reclaim per `destroy_on` |
 | Intercept hook | same file, `PreToolUse` on `Bash` | Mode `rewrite`: rewrites intercepted commands to `boxer run`. Mode `tool`: denies with the exact fix |
 | Run tool | `mcp.json` | `boxer_run`, `boxer_status` |
-| Gap closer | `bin/` shims[[if not .Shims]] (not rendered: enforcement = [[.Enforcement]])[[end]]; `agents/boxed.md` | `bin/` is added to Bash's PATH while the plugin is enabled, so a bare `npm` is already sandboxed. The `boxed` agent has no Bash tool at all |
+| Gap closer | PATH shims via `boxer shim install`; `agents/boxed.md` | A shim directory on PATH sandboxes a bare `npm`. The `boxed` agent has no Bash tool at all |
 
-Mode at render time: `[[.Mode]]`. Change `mode` in `boxer.toml` and re-run `boxer package`.
+The mode in force is a property of the checkout, not of this package: run `boxer brief` to see it.

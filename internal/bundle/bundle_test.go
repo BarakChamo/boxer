@@ -36,10 +36,9 @@ func TestEveryHarnessRenders(t *testing.T) {
 	if len(hs) != 8 {
 		t.Fatalf("expected 8 harness views, got %v", hs)
 	}
-	cfg := config.Defaults()
 	for _, h := range hs {
 		dir := filepath.Join(t.TempDir(), h)
-		files, err := Render(h, cfg, "test", dir)
+		files, err := Render(h, "test", dir)
 		if err != nil {
 			t.Fatalf("%s: %v", h, err)
 		}
@@ -54,8 +53,8 @@ func TestEveryHarnessRenders(t *testing.T) {
 		if !strings.Contains(s, "boxer hook "+h) {
 			t.Errorf("%s: no hook invocation for its own name", h)
 		}
-		if !strings.Contains(s, "boxer") || !strings.Contains(s, cfg.MountAt) {
-			t.Errorf("%s: instruction text missing", h)
+		if !strings.Contains(s, "boxer brief") {
+			t.Errorf("%s: nothing points the agent at the run-time brief", h)
 		}
 		// dsh is the exception: its only hook mechanism is the shipped compatibility bridge
 		// @deepseek-ai/dsh-hooks-claude-code, so its README has to name it.
@@ -72,14 +71,13 @@ func TestEveryHarnessRenders(t *testing.T) {
 
 // Every view is a subset of the package: same relative paths, same bytes.
 func TestViewsAreSubsetsOfThePackage(t *testing.T) {
-	cfg := config.Defaults()
 	pkg := t.TempDir()
-	if _, err := Render(Package, cfg, "t", pkg); err != nil {
+	if _, err := Render(Package, "t", pkg); err != nil {
 		t.Fatal(err)
 	}
 	for _, h := range Harnesses() {
 		dir := t.TempDir()
-		files, _ := Render(h, cfg, "t", dir)
+		files, _ := Render(h, "t", dir)
 		for _, f := range files {
 			rel, _ := filepath.Rel(dir, f)
 			src := rel
@@ -96,7 +94,7 @@ func TestViewsAreSubsetsOfThePackage(t *testing.T) {
 // R-LVL-6a: the portable manifests conform to the Agent Plugins 1.0.0 schemas (vendored in spec/).
 func TestManifestsConformToAgentPluginsSchemas(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Render(Package, config.Defaults(), "0.1.0", dir); err != nil {
+	if _, err := Render(Package, "0.1.0", dir); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{"plugin", "mcp"} {
@@ -126,55 +124,99 @@ func TestManifestsConformToAgentPluginsSchemas(t *testing.T) {
 	}
 }
 
-func TestClaudeCarriesShimsOnlyWhenEnforcementSaysSo(t *testing.T) {
-	cfg := config.Defaults()
-	dir := t.TempDir()
-	Render("claude-code", cfg, "t", dir)
-	if _, err := os.Stat(filepath.Join(dir, "bin", "npm")); err != nil {
-		t.Fatal("default enforcement=both must render bin/ shims")
+// The bug this package was rewritten to kill: published content used to be rendered from the
+// packager's own resolved configuration, so the release artifact carried one person's mode,
+// intercept list and mount path into everybody else's repository. Two hostile configurations and
+// a hostile environment must not move a single byte.
+func TestPackageIsConfigIndependent(t *testing.T) {
+	hostile := []struct {
+		toml string
+		env  map[string]string
+	}{
+		{"mode = \"tool\"\nenforcement = \"hook\"\nmount_at = \"/src\"\nintercept = [\"make\"]\npassthrough = [\"git\"]\n\n[harness.claude-code]\nmode = \"off\"\n",
+			map[string]string{"BOXER_MODE": "off", "BOXER_MOUNT_AT": "/elsewhere", "BOXER_ENFORCEMENT": "shim", "BOXER_ISOLATION": "repo"}},
+		{"mode = \"rewrite\"\nenforcement = \"both\"\nmount_at = \"/workspace\"\nintercept = [\"npm\", \"cargo\"]\n", nil},
 	}
-	if !strings.Contains(read(t, filepath.Join(dir, "agents", "boxed.md")), "disallowedTools: [Bash]") {
-		t.Fatal("boxed agent must remove Bash")
+	var out []map[string]string
+	for _, h := range hostile {
+		home := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", home)
+		if err := os.MkdirAll(filepath.Join(home, "boxer"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "boxer", "boxer.toml"), []byte(h.toml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range h.env {
+			t.Setenv(k, v)
+		}
+		// Rendering goes through the same configuration load every command does; if any of it
+		// reached the templates, this file set would differ.
+		if _, err := config.Load("", ""); err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		files, err := Render(Package, "1.0.0", dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, f := range files {
+			rel, _ := filepath.Rel(dir, f)
+			got[rel] = read(t, f)
+		}
+		out = append(out, got)
 	}
-	cfg.Enforcement = "hook"
-	dir = t.TempDir()
-	Render("claude-code", cfg, "t", dir)
-	if _, err := os.Stat(filepath.Join(dir, "bin")); err == nil {
-		t.Fatal("enforcement=hook must not render shims")
+	if len(out[0]) != len(out[1]) {
+		t.Fatalf("different file sets: %d vs %d", len(out[0]), len(out[1]))
+	}
+	for rel, a := range out[0] {
+		if b, ok := out[1][rel]; !ok || a != b {
+			t.Errorf("%s differs between configurations", rel)
+		}
 	}
 }
 
-func TestGeminiToolModeExcludesShell(t *testing.T) {
-	cfg := config.Defaults()
+// The spec's executable layer: the scripts exist, are runnable, and call the installed binary
+// rather than carrying policy of their own.
+func TestSkillCarriesItsScripts(t *testing.T) {
 	dir := t.TempDir()
-	Render("gemini-cli", cfg, "t", dir)
-	if strings.Contains(read(t, filepath.Join(dir, "gemini-extension.json")), "excludeTools") {
-		t.Fatal("rewrite mode must keep run_shell_command")
+	if _, err := Render(Package, "t", dir); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(read(t, filepath.Join(dir, "hooks", "hooks.json")), "BeforeTool") {
-		t.Fatal("gemini view must copy its hooks to the fixed hooks/hooks.json path")
+	for _, n := range []string{"run", "task", "status", "brief"} {
+		p := filepath.Join(dir, "skills", "boxer", "scripts", n)
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("scripts/%s: %v", n, err)
+		}
+		if st.Mode()&0o111 == 0 {
+			t.Errorf("scripts/%s is not executable", n)
+		}
+		if body := read(t, p); !strings.HasPrefix(body, "#!/bin/sh") || !strings.Contains(body, "exec boxer ") {
+			t.Errorf("scripts/%s must be a POSIX sh wrapper around the binary:\n%s", n, body)
+		}
 	}
-	cfg.Mode = "tool"
-	dir = t.TempDir()
-	Render("gemini-cli", cfg, "t", dir)
-	m := read(t, filepath.Join(dir, "gemini-extension.json"))
-	if !strings.Contains(m, `"excludeTools": ["run_shell_command"]`) {
-		t.Fatalf("tool mode must exclude the shell tool:\n%s", m)
+	if !strings.Contains(read(t, filepath.Join(dir, "skills", "boxer", "SKILL.md")), "allowed-tools: Bash(boxer:*)") {
+		t.Error("SKILL.md must pre-approve the binary it tells the agent to run")
 	}
-	if !strings.Contains(read(t, filepath.Join(dir, "AGENTS.md")), "boxer_run") {
-		t.Fatal("tool-mode instruction must name the tool")
+	if _, err := os.Stat(filepath.Join(dir, "skills", "boxer", "references", "BRIEF.md")); err != nil {
+		t.Error("the long-form brief belongs in references/, loaded on demand")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bin")); err == nil {
+		t.Error("shims are generated by `boxer shim install`, not published in the package")
 	}
 }
 
 func TestUnknownHarness(t *testing.T) {
-	if _, err := Render("emacs", config.Defaults(), "t", t.TempDir()); err == nil {
+	if _, err := Render("emacs", "t", t.TempDir()); err == nil {
 		t.Fatal("unknown harness must fail")
 	}
 }
 
 func TestVersionIsStampedIntoManifestsAndSkill(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Render(Package, config.Defaults(), "0.9.1-test", dir); err != nil {
+	if _, err := Render(Package, "0.9.1-test", dir); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{"plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".grok-plugin/plugin.json", "gemini-extension.json", "skills/boxer/SKILL.md", "AGENTS.md"} {

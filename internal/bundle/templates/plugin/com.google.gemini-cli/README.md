@@ -18,6 +18,6 @@ gemini extensions install ./gemini-cli   # this view: hooks are at hooks/hooks.j
 | Lifecycle hooks | `com.google.gemini-cli/hooks/hooks.json`, copied to `hooks/hooks.json` in this view (Gemini reads only that fixed path; the full package keeps it in the namespace because another client auto-loads `hooks/hooks.json` and rejects the `BeforeTool` key) | `SessionStart` provisions and injects `additionalContext`; `SessionEnd` reclaims per `destroy_on` |
 | Intercept hook | `BeforeTool` on `run_shell_command` | Mode `rewrite`: `hookSpecificOutput.tool_input.command`. Mode `tool`: top-level `decision: deny` |
 | Run tool | `mcpServers.boxer` | `boxer_run`, `boxer_status` |
-| Gap closer | `excludeTools: ["run_shell_command"]`[[if not .ToolMode]] (not rendered: mode = [[.Mode]])[[end]] | Removes the shell tool entirely in `tool` mode; the agent never forms the intent |
+| Gap closer | `excludeTools: ["run_shell_command"]`, written into `.gemini/settings.json` by `boxer install gemini-cli` in `tool` mode | Removes the shell tool entirely in `tool` mode; the agent never forms the intent |
 
-Mode at render time: `[[.Mode]]`.
+The mode in force is a property of the checkout, not of this package: run `boxer brief` to see it.

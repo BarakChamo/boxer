@@ -50,6 +50,17 @@ type Server struct {
 	Version string
 }
 
+// briefURI serves the same brief the hooks inject and `boxer brief` prints, so published content
+// never has to carry a rendered copy of anyone's configuration.
+const briefURI = "boxer://brief"
+
+var resources = []map[string]any{{
+	"uri":         briefURI,
+	"name":        "boxer brief",
+	"description": "How commands run in this repository: the sandbox, where the worktree is mounted, which programs are intercepted, and which run on the host.",
+	"mimeType":    "text/markdown",
+}}
+
 var tools = []map[string]any{
 	{
 		"name":        "boxer_run",
@@ -104,11 +115,29 @@ func (s *Server) handle(req request) response {
 		s.sessionStart()
 		res.Result = map[string]any{
 			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "boxer", "version": s.Version},
 		}
 	case "ping":
 		res.Result = map[string]any{}
+	case "resources/list":
+		res.Result = map[string]any{"resources": resources}
+	case "resources/read":
+		var p struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.URI != briefURI {
+			res.Error = &rpcError{-32602, "unknown resource; the only resource is " + briefURI}
+			return res
+		}
+		e, err := s.Resolve("", s.Harness, scope.Identity{})
+		if err != nil {
+			res.Error = &rpcError{-32603, err.Error()}
+			return res
+		}
+		res.Result = map[string]any{"contents": []map[string]any{
+			{"uri": briefURI, "mimeType": "text/markdown", "text": box.InstructionsFor(e.Cfg, "")},
+		}}
 	case "tools/list":
 		res.Result = map[string]any{"tools": tools}
 	case "tools/call":

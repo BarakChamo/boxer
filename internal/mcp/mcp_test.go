@@ -150,3 +150,35 @@ func text(r map[string]any) string {
 	c := r["result"].(map[string]any)["content"].([]any)[0].(map[string]any)
 	return c["text"].(string)
 }
+
+// The third transport for the one brief: published content is static, so a harness that reads
+// neither hooks nor `boxer brief` can still fetch the configuration as a resource.
+func TestBriefResource(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"mount_at = \"/src\"\n")
+	in := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"resources/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"boxer://brief"}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"boxer://nope"}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	if err := s.Serve(strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var r map[string]any
+	json.Unmarshal([]byte(lines[0]), &r)
+	if len(r["result"].(map[string]any)["resources"].([]any)) != 1 {
+		t.Fatalf("resources/list: %s", lines[0])
+	}
+	json.Unmarshal([]byte(lines[1]), &r)
+	c := r["result"].(map[string]any)["contents"].([]any)[0].(map[string]any)
+	if !strings.Contains(c["text"].(string), "/src") {
+		t.Fatalf("the resource must carry the resolved brief: %s", lines[1])
+	}
+	json.Unmarshal([]byte(lines[2]), &r)
+	if r["error"] == nil {
+		t.Fatalf("an unknown resource must be an error: %s", lines[2])
+	}
+}

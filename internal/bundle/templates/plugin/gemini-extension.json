@@ -8,6 +8,5 @@
       "command": "boxer",
       "args": ["mcp", "--harness", "gemini-cli"]
     }
-  }[[if .ToolMode]],
-  "excludeTools": ["run_shell_command"][[end]]
+  }
 }

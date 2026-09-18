@@ -7,7 +7,7 @@ One directory, valid for every client at once ([Agent Plugins 1.0.0](https://age
 | Path | Standard | Purpose |
 | --- | --- | --- |
 | `plugin.json` | Agent Plugins manifest | name, version, description |
-| `skills/boxer/SKILL.md` | Agent Skills | the instruction: how execution works here |
+| `skills/boxer/` | Agent Skills | `SKILL.md`, `scripts/` (`run`, `task`, `status`, `brief`) and `references/BRIEF.md` |
 | `mcp.json` | Agent Plugins MCP config | the run tool: `boxer_run`, `boxer_status` (`boxer mcp`) |
 | `AGENTS.md` | agents.md | the same instruction for clients that read a context file |
 | `<reverse-domain>/` | client extension directories | hooks and shims per client; every other client must ignore them |
@@ -16,7 +16,7 @@ Client directories, each with its own README and install steps:
 
 | Client | Directory | Native files this directory also carries |
 | --- | --- | --- |
-| Claude Code | `com.anthropic.claude-code/` | `.claude-plugin/plugin.json`, `agents/boxed.md`, `bin/` shims |
+| Claude Code | `com.anthropic.claude-code/` | `.claude-plugin/plugin.json`, `agents/boxed.md` |
 | Codex CLI | `com.openai.codex/` | `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` (local marketplace wrapper) |
 | Grok Build | `ai.x.grok/` | `.grok-plugin/plugin.json` |
 | Gemini CLI | `com.google.gemini-cli/` | `gemini-extension.json` (hooks copied to `hooks/` in the `gemini-cli` view only) |
@@ -30,5 +30,6 @@ a reverse-domain form. `boxer package <client>` renders the subset of this direc
 client reads (its view); `boxer install <client>` writes the same files into a repository's own
 configuration. `boxer` must be on `PATH`; hooks and the MCP server call it by name.
 
-Rendered from the repository's base `boxer.toml`; per-client `[harness.<name>]` overrides apply to
-`boxer package <client>` and `boxer install`, not to this shared package.
+Nothing here is rendered from anyone's configuration: every file is byte-identical for every user
+apart from the release version. Configuration reaches the agent at run time, through `boxer brief`,
+the session-start hooks, and the `boxer://brief` MCP resource.

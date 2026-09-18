@@ -22,4 +22,4 @@ Copy into the repository root (`boxer install pi` does this):
 | Run tool | `pi.registerTool("boxer_run")` | Explicit path |
 | Gap closer | block + PATH shims via `boxer shim install` | pi has no per-agent tool removal |
 
-Mode at render time: `[[.Mode]]`.
+The mode in force is a property of the checkout, not of this package: run `boxer brief` to see it.

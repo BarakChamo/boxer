@@ -202,7 +202,7 @@ func TestUnknownHarness(t *testing.T) {
 	}
 }
 
-func TestInstalledVersionsTrackTheBinary(t *testing.T) {
+func TestInstalledContentIsVerbatimAndDriftIsDetected(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults()
 	for _, h := range []string{"claude-code", "gemini-cli", "pi"} {
@@ -210,25 +210,37 @@ func TestInstalledVersionsTrackTheBinary(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := InstalledVersions(root)
-	for _, f := range []string{".claude/skills/boxer/SKILL.md", "GEMINI.md", "AGENTS.md"} {
-		if got[f] != "0.1.0" {
-			t.Errorf("%s: want 0.1.0, got %q (all: %v)", f, got[f], got)
-		}
+	// The skill is the whole spec directory, scripts included, and the scripts stay runnable.
+	script := filepath.Join(root, ".claude", "skills", "boxer", "scripts", "task")
+	st, err := os.Stat(script)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A newer binary refreshes the marker in copied skills and in appended sections alike.
+	if st.Mode()&0o111 == 0 {
+		t.Fatal("the skill's scripts must be installed executable")
+	}
+	if d := Drift(root, "0.1.0"); len(d) != 0 {
+		t.Fatalf("a fresh install drifts: %v", d)
+	}
+	// A second install changes nothing, and the appended context section is not duplicated.
 	for _, h := range []string{"claude-code", "gemini-cli", "pi"} {
-		if _, err := Install(h, cfg, "0.2.0-rc1", root); err != nil {
+		if _, err := Install(h, cfg, "0.1.0", root); err != nil {
 			t.Fatal(err)
-		}
-	}
-	for f, v := range InstalledVersions(root) {
-		if v != "0.2.0-rc1" {
-			t.Errorf("%s: marker not refreshed: %q", f, v)
 		}
 	}
 	if n := strings.Count(string(mustRead(t, filepath.Join(root, "AGENTS.md"))), sectionMarker); n != 1 {
 		t.Fatalf("AGENTS.md section appended %d times", n)
+	}
+	// Another release wrote it, or a hand edit did: both are drift, because nothing rewrites
+	// installed content in place any more.
+	if d := Drift(root, "9.9.9"); len(d) == 0 {
+		t.Fatal("content from another version must be reported as drift")
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if d := Drift(root, "0.1.0"); len(d) != 1 || d[0] != ".claude/skills/boxer/scripts/task" {
+		t.Fatalf("edited script not reported: %v", d)
 	}
 }
 

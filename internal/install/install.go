@@ -9,6 +9,7 @@
 package install
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -33,7 +34,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		return Result{}, err
 	}
 	defer os.RemoveAll(tmp)
-	if _, err := bundle.Render(harness, cfg, version, tmp); err != nil {
+	if _, err := bundle.Render(harness, version, tmp); err != nil {
 		return Result{}, err
 	}
 	r := &Result{}
@@ -51,12 +52,12 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(skill, filepath.Join(root, ".claude", "skills", "boxer", "SKILL.md"))
+		r.copyTree(skill, filepath.Join(root, ".claude", "skills", "boxer"))
 		r.copy(filepath.Join(tmp, "agents", "boxed.md"), filepath.Join(root, ".claude", "agents", "boxed.md"))
 		r.Notes = append(r.Notes, "PATH shims are not part of project settings; run `boxer shim install` where the agent's shell starts.")
 	case "codex":
 		r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json"))
-		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		r.Notes = append(r.Notes,
 			"Codex loads project hooks only after they are trusted: run /hooks once, or pass --dangerously-bypass-hook-trust to `codex exec`.",
 			"Add the run tool to .codex/config.toml:\n  [mcp_servers.boxer]\n  command = \"boxer\"\n  args = [\"mcp\", \"--harness\", \"codex\"]")
@@ -104,7 +105,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		r.Notes = append(r.Notes, "Grok Build runs project hooks only after the folder is trusted: launch with --trust once, or set GROK_FOLDER_TRUST=0 for headless runs.")
 	case "pi":
 		r.copy(filepath.Join(ns, "extensions", "boxer.ts"), filepath.Join(root, ".pi", "extensions", "boxer.ts"))
@@ -116,7 +117,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		}); err != nil {
 			return *r, err
 		}
-		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		toml, _ := os.ReadFile(filepath.Join(ns, "hooks.toml"))
 		r.Notes = append(r.Notes,
 			"Kimi hooks live in the user config only; append this to ~/.kimi-code/config.toml:\n"+strings.TrimSpace(string(toml)),
@@ -124,7 +125,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	case "dsh":
 		r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml"))
 		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))
-		r.copy(skill, filepath.Join(root, ".agents", "skills", "boxer", "SKILL.md"))
+		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		r.Notes = append(r.Notes,
 			"DSH has no project-level plugin config: boot it with the patch layer, `dsh --profile headless --patch .dsh/cordis.patch.yml \"<task>\"`, or copy those rows into $DSH_HOME/cordis.patch.yml to apply them to every profile.",
 			"The patch mounts @deepseek-ai/dsh-hooks-claude-code over .dsh/hooks.json; that bridge honours deny and ask but ignores updatedInput, so DSH cannot rewrite a command. Set [harness.dsh] mode = \"tool\" in boxer.toml, or run `boxer shim install` and prepend the directory to PATH.")
@@ -143,7 +144,7 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 		return Result{}, err
 	}
 	defer os.RemoveAll(tmp)
-	if _, err := bundle.Render(harness, cfg, version, tmp); err != nil {
+	if _, err := bundle.Render(harness, version, tmp); err != nil {
 		return Result{}, err
 	}
 	r := &Result{}
@@ -172,13 +173,13 @@ func User(harness string, cfg config.Config, version string) (Result, error) {
 }
 
 // parts locates one harness's pieces in its rendered view: the extension directory, its hooks
-// file, the shared skill and AGENTS.md, and the shared MCP server entry with `--harness` added
+// file, the shared skill directory and AGENTS.md, and the shared MCP server entry with `--harness` added
 // so the [harness.<name>] overrides apply.
 func parts(tmp, harness string) (ns, hooksFile string, hooks map[string]any, skill, agents string, server map[string]any) {
 	ns = filepath.Join(tmp, bundle.Namespace(harness))
 	hooksFile = filepath.Join(ns, "hooks", "hooks.json")
 	hooks = readJSON(hooksFile)
-	skill = filepath.Join(tmp, "skills", "boxer", "SKILL.md")
+	skill = filepath.Join(tmp, "skills", "boxer")
 	agents = filepath.Join(tmp, "AGENTS.md")
 	servers, _ := readJSON(filepath.Join(tmp, "mcp.json"))["mcpServers"].(map[string]any)
 	server, _ = servers["boxer"].(map[string]any)
@@ -336,15 +337,32 @@ func setIn(m map[string]any, section, key string, v any) {
 	m[section] = s
 }
 
+// copyTree copies a published directory verbatim, executable bits included: the skill's scripts
+// are code the agent runs.
+func (r *Result) copyTree(src, dst string) {
+	_ = filepath.WalkDir(src, func(p string, de os.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		r.copy(p, filepath.Join(dst, rel))
+		return nil
+	})
+}
+
 func (r *Result) copy(src, dst string) {
 	b, err := os.ReadFile(src)
 	if err != nil {
 		return
 	}
+	mode := os.FileMode(0o644)
+	if st, err := os.Stat(src); err == nil && st.Mode()&0o111 != 0 {
+		mode = 0o755
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return
 	}
-	if err := os.WriteFile(dst, b, 0o644); err == nil {
+	if err := os.WriteFile(dst, b, mode); err == nil {
 		r.Written = append(r.Written, dst)
 	}
 }
@@ -359,15 +377,8 @@ func (r *Result) appendSection(dst, src string) {
 	}
 	cur, _ := os.ReadFile(dst)
 	if strings.Contains(string(cur), sectionMarker) {
-		// The section is already there; only the version marker moves with the binary.
-		if old, ok := versionMarker(string(cur)); ok {
-			if fresh, ok := versionMarker(string(body)); ok && old != fresh {
-				updated := strings.Replace(string(cur), versionPrefix+old, versionPrefix+fresh, 1)
-				if err := os.WriteFile(dst, []byte(updated), 0o644); err == nil {
-					r.Written = append(r.Written, dst)
-				}
-			}
-		}
+		// Installed content is never edited in place: `doctor` reports drift and a re-install by
+		// hand is the fix, because this file belongs to the repository, not to boxer.
 		return
 	}
 	sep := ""
@@ -379,41 +390,69 @@ func (r *Result) appendSection(dst, src string) {
 	}
 }
 
-const versionPrefix = "boxer_version: "
-
-// versionMarker finds the `boxer_version: <v>` the bundle renders into SKILL.md front matter and
-// the instruction sections; that marker is what lets doctor compare an install with the binary.
-func versionMarker(s string) (string, bool) {
-	i := strings.Index(s, versionPrefix)
-	if i < 0 {
-		return "", false
+// Drift lists the installed files under root whose bytes differ from what this binary would
+// write. Published content is static, so a comparison is the whole check: nothing rewrites an
+// installed file in place, and a mismatch means the repository was configured by another release
+// (R-PKG-9).
+func Drift(root, version string) []string {
+	tmp, err := os.MkdirTemp("", "boxer-drift-")
+	if err != nil {
+		return nil
 	}
-	rest := s[i+len(versionPrefix):]
-	if j := strings.IndexAny(rest, "\n "); j >= 0 {
-		rest = rest[:j]
+	defer os.RemoveAll(tmp)
+	if _, err := bundle.Render(bundle.Package, version, tmp); err != nil {
+		return nil
 	}
-	v := strings.Trim(rest, "\"'")
-	return v, v != ""
-}
-
-// installedFiles are the project-layer files that carry a version marker, relative to the root.
-var installedFiles = []string{
-	".claude/skills/boxer/SKILL.md", ".agents/skills/boxer/SKILL.md", "GEMINI.md", "AGENTS.md",
-}
-
-// InstalledVersions maps each installed marker file under root to the boxer version that wrote it.
-func InstalledVersions(root string) map[string]string {
-	out := map[string]string{}
-	for _, rel := range installedFiles {
-		b, err := os.ReadFile(filepath.Join(root, rel))
+	var stale []string
+	for _, dir := range []string{".claude/skills/boxer", ".agents/skills/boxer"} {
+		stale = append(stale, treeDrift(filepath.Join(tmp, "skills", "boxer"), root, dir)...)
+	}
+	for _, f := range [][2]string{
+		{".claude/agents/boxed.md", "agents/boxed.md"},
+		{"GEMINI.md", "AGENTS.md"},
+		{"AGENTS.md", "AGENTS.md"},
+	} {
+		cur, err := os.ReadFile(filepath.Join(root, f[0]))
 		if err != nil {
 			continue
 		}
-		if v, ok := versionMarker(string(b)); ok {
-			out[rel] = v
+		want, err := os.ReadFile(filepath.Join(tmp, f[1]))
+		if err != nil {
+			continue
+		}
+		// A context file belongs to the repository and only carries boxer's section, so an
+		// untouched one is not drift; the question is whether that section is the current one.
+		if f[1] == "AGENTS.md" && !strings.Contains(string(cur), sectionMarker) {
+			continue
+		}
+		if !bytes.Contains(cur, bytes.TrimSpace(want)) {
+			stale = append(stale, f[0])
 		}
 	}
-	return out
+	slices.Sort(stale)
+	return stale
+}
+
+// treeDrift compares every file of the published skill with its installed copy, ignoring a
+// directory that was never installed.
+func treeDrift(src, root, dir string) []string {
+	if _, err := os.Stat(filepath.Join(root, dir)); err != nil {
+		return nil
+	}
+	var stale []string
+	_ = filepath.WalkDir(src, func(p string, de os.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		want, _ := os.ReadFile(p)
+		got, gerr := os.ReadFile(filepath.Join(root, dir, rel))
+		if gerr != nil || !bytes.Equal(want, got) {
+			stale = append(stale, filepath.Join(dir, rel))
+		}
+		return nil
+	})
+	return stale
 }
 
 func toStrings(v any) []string {

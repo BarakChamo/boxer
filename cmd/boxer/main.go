@@ -39,6 +39,9 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer ls                         list boxer sandboxes
   boxer gc [--dry-run]             delete sandboxes whose worktree is gone, idle sandboxes and packs
   boxer doctor                     explain the resolved configuration and state
+  boxer brief [--json]             the agent brief for this checkout: mount, mode, intercept, tasks
+  boxer tasks [--json]             the command lines this repository declares in [tasks]
+  boxer run --task <name>          run one of them in the sandbox
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
@@ -106,7 +109,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return lsCmd(rest, stdout, stderr)
 	case "gc":
 		return gcCmd(rest, stdout, stderr)
-	case "up", "run", "down", "status", "doctor":
+	case "up", "run", "down", "status", "doctor", "brief", "tasks":
 		return scoped(cmd, rest, stdin, stdout, stderr)
 	case "shell", "acp":
 		return insideCmd(cmd, rest, stdin, stdout, stderr)
@@ -133,6 +136,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	scopeName := fs.String("scope", "", "sandbox name from `boxer ls` (down): act on it without resolving a worktree")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
+	task := fs.String("task", "", "name of a [tasks] entry in boxer.toml to run (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
@@ -165,6 +169,11 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return 1
 	}
 	switch cmd {
+	case "brief":
+		return briefCmd(e, *asJSON, stdout)
+	case "tasks":
+		emitTasks(e, *asJSON, stdout)
+		return 0
 	case "status":
 		return statusCmd(e, *asJSON, stdout, stderr)
 	case "up":
@@ -211,6 +220,19 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return 0
 	case "run":
 		argv := fs.Args()
+		if *task != "" {
+			line, err := taskLine(e, *task)
+			if err != nil {
+				emit(stdout, errorRow(err), *asJSON)
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			if len(argv) > 0 || *shellLine != "" {
+				fmt.Fprintln(stderr, "boxer run: --task names the whole command; do not add -c or arguments")
+				return 2
+			}
+			argv = []string{"sh", "-c", line}
+		}
 		if *shellLine != "" {
 			if len(argv) > 0 {
 				fmt.Fprintln(stderr, "boxer run: use either -c '<shell>' or -- <prog> [args], not both")
@@ -361,26 +383,26 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 // doctorReport is everything `doctor` knows; the human form prints it in the order it was
 // always printed, --json emits it whole.
 type doctorReport struct {
-	Version       string            `json:"version"`
-	Inside        bool              `json:"inside"`
-	Smolvm        string            `json:"smolvm"`
-	SmolvmError   string            `json:"smolvm_error,omitempty"`
-	BoxerPath     string            `json:"boxer_path"`
-	Git           *doctorGit        `json:"git,omitempty"`
-	ConfigFiles   []string          `json:"config_files"`
-	Settings      []doctorSetting   `json:"settings"`
-	Scope         *scopeJSON        `json:"scope,omitempty"`
-	Image         string            `json:"image,omitempty"`
-	ImageReason   string            `json:"image_reason,omitempty"`
-	ImageWarning  string            `json:"image_warning,omitempty"`
-	Sandbox       *machineJSON      `json:"sandbox"`
-	SandboxError  string            `json:"sandbox_error,omitempty"`
-	Shims         *doctorShims      `json:"shims,omitempty"`
-	Installed     map[string]string `json:"installed_versions,omitempty"`
-	Signals       []hook.Signal     `json:"signals,omitempty"`
-	Warnings      []string          `json:"warnings"`
-	Error         string            `json:"error,omitempty"`
-	resolved      bool              // Env exists (config could be loaded)
+	Version       string          `json:"version"`
+	Inside        bool            `json:"inside"`
+	Smolvm        string          `json:"smolvm"`
+	SmolvmError   string          `json:"smolvm_error,omitempty"`
+	BoxerPath     string          `json:"boxer_path"`
+	Git           *doctorGit      `json:"git,omitempty"`
+	ConfigFiles   []string        `json:"config_files"`
+	Settings      []doctorSetting `json:"settings"`
+	Scope         *scopeJSON      `json:"scope,omitempty"`
+	Image         string          `json:"image,omitempty"`
+	ImageReason   string          `json:"image_reason,omitempty"`
+	ImageWarning  string          `json:"image_warning,omitempty"`
+	Sandbox       *machineJSON    `json:"sandbox"`
+	SandboxError  string          `json:"sandbox_error,omitempty"`
+	Shims         *doctorShims    `json:"shims,omitempty"`
+	Drift         []string        `json:"drift,omitempty"`
+	Signals       []hook.Signal   `json:"signals,omitempty"`
+	Warnings      []string        `json:"warnings"`
+	Error         string          `json:"error,omitempty"`
+	resolved      bool            // Env exists (config could be loaded)
 	configPrinted bool
 }
 
@@ -504,12 +526,13 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	r.Warnings = append(r.Warnings, e.Warnings...)
 	r.Signals = hook.Signals(e.Cfg.Isolation, install.GitInstalled(e.Scope.Root))
-	r.Installed = install.InstalledVersions(e.Scope.Root)
-	for _, p := range sortedKeys(r.Installed) {
-		if v := r.Installed[p]; v != Version {
-			r.Warnings = append(r.Warnings, fmt.Sprintf("%s was installed by boxer %s; this is %s (boxer install <harness> refreshes it)", p, v, Version))
-		}
+	// Installed content is published verbatim and never edited afterwards, so the drift check is
+	// a comparison against this binary's own copy.
+	r.Drift = install.Drift(e.Scope.Root, Version)
+	for _, p := range r.Drift {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("%s differs from the copy in boxer %s (boxer install <harness> rewrites it)", p, Version))
 	}
+	r.Warnings = append(r.Warnings, e.Cfg.Warnings...)
 	return r
 }
 
@@ -862,21 +885,16 @@ func packageCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	target := pos[0]
-	cfg, err := config.Load(cwdRoot())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 	names := []string{target}
 	if target == "all" {
 		names = append([]string{bundle.Package}, bundle.Harnesses()...)
 	}
 	for _, h := range names {
-		cfgH, dir := cfg, filepath.Join(*out, "boxer") // the whole package, named after the plugin
+		dir := filepath.Join(*out, "boxer") // the whole package, named after the plugin
 		if h != bundle.Package {
-			cfgH, dir = cfg.ForHarness(h), filepath.Join(*out, h)
+			dir = filepath.Join(*out, h)
 		}
-		files, err := bundle.Render(h, cfgH, Version, dir)
+		files, err := bundle.Render(h, Version, dir)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -967,4 +985,79 @@ func cwdRoot() (string, string) {
 		return "", ""
 	}
 	return g.Toplevel, filepath.Dir(g.CommonDir)
+}
+
+// briefJSON is `boxer brief --json`: the facts the brief states, so a harness or a dashboard can
+// present them instead of parsing prose.
+type briefJSON struct {
+	Brief       string            `json:"brief"`
+	Scope       *scopeJSON        `json:"scope"`
+	Isolation   string            `json:"isolation"`
+	MountAt     string            `json:"mount_at"`
+	Mode        string            `json:"mode"`
+	Enforcement string            `json:"enforcement"`
+	Intercept   []string          `json:"intercept"`
+	Passthrough []string          `json:"passthrough"`
+	Tasks       map[string]string `json:"tasks"`
+}
+
+// briefCmd is the run-time half of static published content: the skill and the hooks say to run
+// this, so no rendered file has to carry anyone's configuration.
+func briefCmd(e *box.Env, asJSON bool, stdout io.Writer) int {
+	if emit(stdout, briefJSON{
+		Brief: e.Instructions(), Scope: scopeRow(e.Scope), Isolation: e.Cfg.Isolation, MountAt: e.MountAt(),
+		Mode: e.Cfg.Mode, Enforcement: e.Cfg.Enforcement, Intercept: e.Cfg.Intercept,
+		Passthrough: e.Cfg.Passthrough, Tasks: tasksOrEmpty(e.Cfg.Tasks),
+	}, asJSON) {
+		return 0
+	}
+	fmt.Fprintln(stdout, e.Instructions())
+	if names := e.Cfg.TaskNames(); len(names) > 0 {
+		fmt.Fprintf(stdout, "\nTasks (boxer run --task <name>): %s\n", strings.Join(names, ", "))
+	}
+	return 0
+}
+
+type taskJSON struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
+func emitTasks(e *box.Env, asJSON bool, stdout io.Writer) {
+	rows := []taskJSON{}
+	for _, n := range e.Cfg.TaskNames() {
+		rows = append(rows, taskJSON{n, e.Cfg.Tasks[n]})
+	}
+	if emit(stdout, rows, asJSON) {
+		return
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(stdout, "boxer: this repository declares no tasks; add a [tasks] table to boxer.toml")
+		return
+	}
+	for _, t := range rows {
+		fmt.Fprintf(stdout, "%-16s %s\n", t.Name, t.Command)
+	}
+}
+
+// taskLine resolves a task name, refusing an unknown one in the shape an agent can act on.
+func taskLine(e *box.Env, name string) (string, error) {
+	if line, ok := e.Cfg.Tasks[name]; ok {
+		return line, nil
+	}
+	known := "none declared; add a [tasks] table to boxer.toml"
+	if names := e.Cfg.TaskNames(); len(names) > 0 {
+		known = "boxer run --task " + strings.Join(names, " | ")
+	}
+	return "", &box.Error{
+		Reason: fmt.Sprintf("no task named %q in boxer.toml", name),
+		Cause:  "NO_SUCH_TASK", Scope: e.Scope, Fix: known,
+	}
+}
+
+func tasksOrEmpty(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }

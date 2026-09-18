@@ -1,5 +1,8 @@
 // Package bundle renders boxer's Agent Plugins 1.0.0 package from one template tree (R-LVL-6,
-// R-PKG-1, R-PKG-5). The portable core is plugin.json, skills/boxer/SKILL.md and mcp.json; each
+// R-PKG-1, R-PKG-5). The package is published content: every file is byte-identical for every
+// user apart from the release version, because it is written into other people's repositories and
+// read by people who never ran the packager (R-PKG-9). Configuration reaches the agent at run
+// time instead, through `boxer brief`, the hooks, and the MCP resource. The portable core is plugin.json, skills/boxer/SKILL.md and mcp.json; each
 // client's hooks live in its reverse-domain extension directory, next to the native manifests the
 // client's loader reads today. A per-harness bundle is a view: the subset of that tree one client
 // reads, rendered with that harness's configuration overrides.
@@ -16,10 +19,6 @@ import (
 	"sort"
 	"strings"
 	"text/template"
-
-	"github.com/BarakChamo/boxer/internal/box"
-	"github.com/BarakChamo/boxer/internal/config"
-	"github.com/BarakChamo/boxer/internal/shim"
 )
 
 //go:embed all:templates
@@ -28,21 +27,9 @@ var templates embed.FS
 // Package is the Render target that produces the whole spec-shaped directory.
 const Package = "plugin"
 
-// Data is what every template sees.
+// Data is what every template sees: the release version and nothing else.
 type Data struct {
-	Harness      string
-	Version      string
-	Mode         string
-	Enforcement  string
-	Intercept    []string
-	Passthrough  []string
-	MountAt      string
-	Instructions string
-	// ToolMode is true when the shell path should be removed or denied for this harness.
-	ToolMode bool
-	// Shims is true when the bundle should carry PATH shims.
-	Shims         bool
-	InterceptJSON string
+	Version string
 }
 
 // view is what one client reads out of the package.
@@ -88,24 +75,12 @@ func Namespace(harness string) string { return views[harness].Namespace }
 
 // Render writes the package (harness == Package) or one harness's view into dir and returns the
 // files written.
-func Render(harness string, cfg config.Config, version, dir string) ([]string, error) {
+func Render(harness, version, dir string) ([]string, error) {
 	v, ok := views[harness]
 	if !ok && harness != Package {
 		return nil, fmt.Errorf("no bundle for harness %q; known: %s, %s", harness, Package, strings.Join(Harnesses(), ", "))
 	}
-	ij, _ := json.Marshal(cfg.Intercept)
-	d := Data{
-		Harness: harness, Version: version, Mode: cfg.Mode, Enforcement: cfg.Enforcement,
-		Intercept: cfg.Intercept, Passthrough: cfg.Passthrough, MountAt: cfg.MountAt,
-		Instructions:  box.Instructions(cfg),
-		ToolMode:      cfg.Mode == "tool",
-		Shims:         cfg.Enforcement == "shim" || cfg.Enforcement == "both",
-		InterceptJSON: string(ij),
-	}
-	partials, err := template.New("").Delims("[[", "]]").ParseFS(templates, "templates/_partials/*")
-	if err != nil {
-		return nil, err
-	}
+	d := Data{Version: version}
 	wants := func(rel string) bool {
 		if harness == Package {
 			return true
@@ -119,7 +94,7 @@ func Render(harness string, cfg config.Config, version, dir string) ([]string, e
 	}
 	rendered := map[string][]byte{}
 	const root = "templates/" + Package
-	err = fs.WalkDir(templates, root, func(path string, de fs.DirEntry, err error) error {
+	err := fs.WalkDir(templates, root, func(path string, de fs.DirEntry, err error) error {
 		if err != nil || de.IsDir() {
 			return err
 		}
@@ -131,15 +106,12 @@ func Render(harness string, cfg config.Config, version, dir string) ([]string, e
 		if err != nil {
 			return err
 		}
-		t, err := partials.Clone()
+		t, err := template.New(rel).Delims("[[", "]]").Parse(string(src))
 		if err != nil {
-			return err
-		}
-		if _, err := t.New(rel).Parse(string(src)); err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		var buf bytes.Buffer
-		if err := t.ExecuteTemplate(&buf, rel, d); err != nil {
+		if err := t.Execute(&buf, d); err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		if strings.HasSuffix(rel, ".json") {
@@ -163,19 +135,16 @@ func Render(harness string, cfg config.Config, version, dir string) ([]string, e
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return written, err
 		}
-		if err := os.WriteFile(out, body, 0o644); err != nil {
+		// The skill's scripts are the spec's executable layer; they have to be runnable as copied.
+		mode := os.FileMode(0o644)
+		if strings.HasPrefix(rel, "skills/boxer/scripts/") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(out, body, mode); err != nil {
 			return written, err
 		}
 		written = append(written, out)
 	}
 	sort.Strings(written)
-	// Gap closer for the client that puts a bundle directory on the shell's PATH.
-	if d.Shims && (harness == "claude-code" || harness == Package) {
-		paths, err := shim.Install(filepath.Join(dir, "bin"), cfg.Intercept)
-		if err != nil {
-			return written, err
-		}
-		written = append(written, paths...)
-	}
 	return written, nil
 }
