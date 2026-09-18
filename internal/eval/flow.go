@@ -1,11 +1,13 @@
 package eval
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,6 +35,7 @@ func (Flow) Available(tier string) (bool, string) {
 	if tier != "flow" {
 		return false, "the flow tier runs on demand and before a release, never in the default gate"
 	}
+	// The agent cell needs a live model; the mechanics cell does not. Reported per cell below.
 	// It needs the npm registry in the guest, which needs the host to have a network.
 	if _, err := net.LookupHost("registry.npmjs.org"); err != nil {
 		return false, "no network: the flow tier installs a real project from the npm registry"
@@ -41,8 +44,13 @@ func (Flow) Available(tier string) (bool, string) {
 }
 
 func (Flow) Cells(tier string) []Cell {
-	return []Cell{{Harness: "flow", Mode: "rewrite", Entry: "project", Isolation: "worktree",
-		Compliant: true, Tier: tier, Scenario: "flow"}}
+	mk := func(scenario string) Cell {
+		return Cell{Harness: "flow", Mode: "rewrite", Entry: "project", Isolation: "worktree",
+			Compliant: true, Tier: tier, Scenario: scenario}
+	}
+	// The mechanics cell proves the sandbox can host a development environment; the agent cell
+	// proves an agent can work in one, reading the running app's own MCP tools from the guest.
+	return []Cell{mk("flow"), mk("flow-agent")}
 }
 
 // Prepare writes a repository whose boxer.toml describes a development environment: an image with
@@ -81,6 +89,7 @@ ports = ["%d:%d"]
 // checks the observable results.
 func (d Flow) Run(env *Env, c Cell, _ string) (Transcript, error) {
 	var log strings.Builder
+	agent := c.Scenario == "flow-agent"
 	step := func(name string, f func() error) error {
 		start := time.Now()
 		err := f()
@@ -120,6 +129,17 @@ func (d Flow) Run(env *Env, c Cell, _ string) (Transcript, error) {
 		return err
 	}); err != nil {
 		return Transcript{Raw: log.String()}, err
+	}
+
+	// 5. The agent cell stops here and hands over to a live model, which reads the app through
+	// the MCP server running in the guest.
+	if agent {
+		if _, why := gatewayKey(); why != "" {
+			return Transcript{Raw: log.String()}, SkipError{"the agent cell needs a live model: " + why}
+		}
+		tr, err := d.runAgent(env, c)
+		tr.Raw = log.String() + "\n--- agent ---\n" + tr.Raw
+		return tr, err
 	}
 
 	// 5. It survives a restart: dependencies from the environment pack, the server started again.
@@ -203,4 +223,37 @@ func httpOK(url string, timeout time.Duration) error {
 		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("%s never answered: %w", url, last)
+}
+
+// agentFlow is the same session with an agent in it. The mechanics cell proves the sandbox can
+// host a development environment; this one proves an agent can work in it — reading the running
+// app's own MCP tools, which live in the guest, through an ordinary `.mcp.json` entry.
+//
+// It costs one live turn, so it skips without a gateway key rather than failing.
+func (d Flow) runAgent(env *Env, c Cell) (Transcript, error) {
+	claude := Claude{}
+	if err := claude.Prepare(env, Cell{Harness: "claude-code", Entry: "project", Tier: env.Tier}); err != nil {
+		return Transcript{}, err
+	}
+	// The dev server's own tools, running beside the code — which is inside the sandbox.
+	mcp := `{"mcpServers":{"next-devtools":{"command":"boxer","args":["run","--","npx","-y","next-devtools-mcp@latest"]}}}`
+	path := filepath.Join(env.Repo, ".mcp-flow.json")
+	if err := os.WriteFile(path, []byte(mcp), 0o644); err != nil {
+		return Transcript{}, err
+	}
+	prompt := "Using the next-devtools MCP server, list this app's routes. Answer with the routes only."
+	cmd := exec.Command("claude", "-p", prompt, "--permission-mode", "bypassPermissions",
+		"--mcp-config", path, "--output-format", "stream-json", "--verbose", "--max-turns", "8")
+	cmd.Dir = env.Repo
+	cmd.Env = append(env.BaseEnv(), claude.modelEnv(env)...)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := wait(cmd, "claude"); err != nil {
+		return Transcript{Raw: out.String()}, err
+	}
+	tr := parseClaudeStream(out.String())
+	if q := quotaError(out.String()); tr.Answer == "" && q != "" {
+		return tr, SkipError{q}
+	}
+	return tr, nil
 }

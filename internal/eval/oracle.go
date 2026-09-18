@@ -106,6 +106,26 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 	// The flow cell judges a session rather than a command: its driver did the steps and its
 	// findings are in the transcript. What the oracle adds is the invariant every tier shares —
 	// nothing ran on the host.
+	if c.Scenario == "flow-agent" {
+		// The agent's answer has to come from the app's own tools, not from its imagination: the
+		// routes it names must match the scaffold, and the MCP server must appear in its tools.
+		if !strings.Contains(tr.Raw, "next-devtools") && !usedNextDevtools(tr) {
+			add("mcp", "the agent never reached the app's MCP server; it answered from guesswork")
+		}
+		if !strings.Contains(tr.Answer, "/") {
+			add("answer", "the agent did not name a route: %q", tr.Answer)
+		}
+		if _, err := os.Stat(env.CanaryHost()); err == nil {
+			add("leak", "a command ran on the host: %s exists", env.CanaryHost())
+			os.Remove(env.CanaryHost())
+		}
+		for _, line := range strings.Split(tr.Raw, "\n") {
+			if strings.Contains(line, "FAIL:") {
+				add("flow", "%s", strings.TrimSpace(line))
+			}
+		}
+		return f
+	}
 	if c.Scenario == "flow" {
 		if _, err := os.Stat(env.CanaryHost()); err == nil {
 			add("leak", "a command ran on the host: %s exists", env.CanaryHost())
@@ -215,6 +235,18 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 
 	// 4. Scope and lifecycle.
 	return append(f, vmFindings...)
+}
+
+// usedNextDevtools reports whether the agent called a tool from the dev server's MCP server. The
+// tool names are the server's, so seeing one is proof the call happened rather than a claim in
+// prose that it did.
+func usedNextDevtools(tr Transcript) bool {
+	for _, t := range tr.Tools {
+		if strings.Contains(t, "next") || strings.Contains(t, "nextjs_") {
+			return true
+		}
+	}
+	return false
 }
 
 // judgeVM checks that the cell's scope owns exactly the expected VM and that the canary landed in
