@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,22 +14,6 @@ import (
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
-
-func repo(t *testing.T, toml string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-	}
-	os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("require_worktree = \"off\"\n"+toml), 0o644)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	r, _ := filepath.EvalSymlinks(dir)
-	return r
-}
 
 func call(t *testing.T, harness string, in map[string]any) (map[string]any, string, int) {
 	t.Helper()
@@ -59,7 +42,7 @@ func hso(m map[string]any) map[string]any {
 
 func TestClaudeFamilyRewrite(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	for _, h := range []string{"claude-code", "codex", "grok"} {
 		tool := Dialects[h].ShellTool
 		out, _, code := call(t, h, map[string]any{"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": map[string]any{"command": "bun test", "description": "tests"}, "cwd": dir, "session_id": "s"})
@@ -80,7 +63,7 @@ func TestClaudeFamilyRewrite(t *testing.T) {
 
 func TestGeminiDialect(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	out, _, _ := call(t, "gemini-cli", map[string]any{"hook_event_name": "BeforeTool", "tool_name": "run_shell_command", "tool_input": map[string]any{"command": "npm ci"}, "cwd": dir})
 	ti, _ := hso(out)["tool_input"].(map[string]any)
 	if ti["command"] != "boxer run -c 'npm ci'" {
@@ -95,12 +78,12 @@ func TestGeminiDialect(t *testing.T) {
 
 func TestOpenCodeDialect(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	out, _, _ := call(t, "opencode", map[string]any{"hook_event_name": "tool.execute.before", "tool_name": "bash", "tool_input": map[string]any{"command": "go test ./..."}, "cwd": dir, "session_id": "s"})
 	if out["command"] != "boxer run -c 'go test ./...'" {
 		t.Fatalf("opencode rewrite: %v", out)
 	}
-	dir = repo(t, "mode = \"tool\"\n")
+	dir = vmtest.Repo(t, vmtest.NoWorktreeCheck+"mode = \"tool\"\n")
 	out, _, _ = call(t, "opencode", map[string]any{"hook_event_name": "tool.execute.before", "tool_name": "bash", "tool_input": map[string]any{"command": "go test"}, "cwd": dir})
 	if d, _ := out["deny"].(string); !strings.Contains(d, "boxer run -c 'go test'") {
 		t.Fatalf("opencode deny: %v", out)
@@ -109,7 +92,7 @@ func TestOpenCodeDialect(t *testing.T) {
 
 func TestToolModeDenies(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "mode = \"tool\"\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"mode = \"tool\"\n")
 	out, _, _ := call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}, "cwd": dir})
 	r, _ := hso(out)["permissionDecisionReason"].(string)
 	if hso(out)["permissionDecision"] != "deny" || !strings.Contains(r, "fix: boxer run -c 'npm test'") {
@@ -125,11 +108,11 @@ func TestBlockOnlyHarness(t *testing.T) {
 	vmtest.Install(t)
 	// DSH's shell tool is named `bash`, lowercase (verified 2026-09-18 against 0.1.5-rc.2).
 	in := map[string]any{"hook_event_name": "PreToolUse", "tool_name": "bash", "tool_input": map[string]any{"command": "npm test"}}
-	in["cwd"] = repo(t, "") // enforcement=both: shims cover it, so allow
+	in["cwd"] = vmtest.Repo(t, vmtest.NoWorktreeCheck) // enforcement=both: shims cover it, so allow
 	if out, _, _ := call(t, "dsh", in); out != nil {
 		t.Fatalf("dsh with shims must allow: %v", out)
 	}
-	in["cwd"] = repo(t, "enforcement = \"hook\"\n")
+	in["cwd"] = vmtest.Repo(t, vmtest.NoWorktreeCheck+"enforcement = \"hook\"\n")
 	out, _, _ := call(t, "dsh", in)
 	r, _ := hso(out)["permissionDecisionReason"].(string)
 	if hso(out)["permissionDecision"] != "deny" || !strings.Contains(r, "boxer run -c 'npm test'") {
@@ -139,7 +122,7 @@ func TestBlockOnlyHarness(t *testing.T) {
 
 func TestSessionStartProvisionsAndInstructs(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	out, errs, code := call(t, "claude-code", map[string]any{"hook_event_name": "SessionStart", "source": "startup", "cwd": dir, "session_id": "s1"})
 	ctx, _ := hso(out)["additionalContext"].(string)
 	if code != 0 || !strings.Contains(ctx, "boxer sandbox") || hso(out)["hookEventName"] != "SessionStart" {
@@ -157,7 +140,7 @@ func TestSessionStartProvisionsAndInstructs(t *testing.T) {
 
 func TestSessionEndReclaimsOnlyWhenConfigured(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "destroy_on = [\"session_end\"]\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"destroy_on = [\"session_end\"]\n")
 	call(t, "codex", map[string]any{"hook_event_name": "SessionStart", "cwd": dir, "session_id": "s1"})
 	e, _ := box.Resolve(dir, "codex", scope.Identity{SessionID: "s1"})
 	if _, ok, _ := e.Exists(); !ok {
@@ -171,7 +154,7 @@ func TestSessionEndReclaimsOnlyWhenConfigured(t *testing.T) {
 
 func TestSubagentIsolation(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "isolation = \"subagent\"\ncreate_on = [\"subagent_start\"]\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"isolation = \"subagent\"\ncreate_on = [\"subagent_start\"]\n")
 	call(t, "claude-code", map[string]any{"hook_event_name": "SubagentStart", "cwd": dir, "session_id": "s1", "agent_id": "a1", "agent_type": "Explore"})
 	b, _ := os.ReadFile(log)
 	if !strings.Contains(string(b), "--label boxer.isolation=subagent") {
@@ -191,7 +174,7 @@ func TestOutsideRepoIsSilentForIntercept(t *testing.T) {
 
 func TestInsideGuestIsSilent(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	t.Setenv("BOXER_INSIDE", "1")
 	out, _, code := call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}, "cwd": dir})
 	if code != 0 || out != nil {
@@ -215,13 +198,13 @@ func TestUnknownHarnessAndBadJSON(t *testing.T) {
 
 func TestSessionIsolationRewriteCarriesIdentity(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "isolation = \"subagent\"\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"isolation = \"subagent\"\n")
 	out, _, _ := call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s1", "agent_id": "a1"})
 	u, _ := hso(out)["updatedInput"].(map[string]any)
 	if u["command"] != "boxer run --session s1 --agent a1 -c 'bun test'" {
 		t.Fatalf("identity not threaded: %v", u["command"])
 	}
-	dir = repo(t, "")
+	dir = vmtest.Repo(t, vmtest.NoWorktreeCheck)
 	out, _, _ = call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "bun test"}, "cwd": dir, "session_id": "s1"})
 	u, _ = hso(out)["updatedInput"].(map[string]any)
 	if u["command"] != "boxer run -c 'bun test'" {
@@ -231,7 +214,7 @@ func TestSessionIsolationRewriteCarriesIdentity(t *testing.T) {
 
 func TestWarmOnSessionStartDoesNotBlock(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "warm_on_session_start = true\nisolation = \"session\"\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"warm_on_session_start = true\nisolation = \"session\"\n")
 	marker := filepath.Join(t.TempDir(), "ran")
 	script := filepath.Join(t.TempDir(), "boxer")
 	os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > "+marker+"\n"), 0o755)

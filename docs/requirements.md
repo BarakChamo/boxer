@@ -400,12 +400,6 @@ mode               = "rewrite"
 mode               = "tool"       # closes the gap by excluding the shell tool
 [harness.dsh]
 mode               = "tool"       # block-only hooks; shims installed by `boxer shim install`
-
-# Branching (see §10; inert until enabled)
-[branch]
-enabled            = false
-base               = ""
-warm               = []
 ```
 
 - **R-CFG-1.** `boxer doctor` prints the fully resolved configuration and the file each value came
@@ -827,11 +821,13 @@ no devcontainer support.
 
 ### Backends
 
-`vm.Client` is already the seam: list, status, create, start, exec, stop, delete, branch, with
+`vm.Client` is already the seam: list, status, create, start, exec, stop, delete, pack, with
 labels as the only state.
 
-- **R-BE-1.** The seam becomes a `Backend` interface selected by `backend = "smolvm"`; branching is
-  a capability flag, not an assumption.
+- **R-BE-1.** The seam becomes a `Backend` interface selected by `backend = "smolvm"`. Capabilities
+  a backend may lack (packing, branching) are flags, not assumptions. The `[branch]` table and
+  `vm.Branch` were removed in v0.3.0: smolvm branching was measured and works, but nothing in boxer
+  used it, and an unused configuration key is a promise we had not kept.
 - **R-BE-2.** Estimates, not commitments: Docker backend one to two days (`docker run -v` at the
   host path, labels, `exec`; weaker isolation, identical agent experience); Firecracker one to two
   weeks and Linux-only (OCI to rootfs, jailer, tap networking, no branching).

@@ -3,6 +3,7 @@ package vmtest
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -96,4 +97,52 @@ func Install(t *testing.T) (vm.Client, string) {
 	t.Setenv("FAKE_STATE", filepath.Join(dir, "state"))
 	t.Setenv("BOXER_SMOLVM", bin)
 	return vm.Client{Bin: bin}, log
+}
+
+// Repo makes a git repository in a temporary directory, writes boxer.toml, and isolates the
+// process from the developer's own configuration and state: XDG_CONFIG_HOME so no user boxer.toml
+// leaks in, XDG_STATE_HOME so locks, last-used stamps and image packs stay inside the test. It
+// returns the symlink-resolved path, because macOS temporary directories are symlinks and git
+// reports the resolved form.
+//
+// The TOML is written exactly as given: a fixture that quietly adds configuration would change
+// what a test means. Most callers want NoWorktreeCheck, because a temporary directory is a main
+// checkout and would otherwise warn.
+//
+// Every test that needs a repository uses this; when the isolation has to change, it changes here.
+// NoWorktreeCheck is the configuration most tests want: a temporary directory is a main checkout,
+// not a linked worktree, and boxer warns about that by default.
+const NoWorktreeCheck = "require_worktree = \"off\"\n"
+
+func Repo(t *testing.T, toml string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+// RepoIn is Repo for a subject that reads the process working directory rather than taking a path.
+func RepoIn(t *testing.T, toml string) string {
+	t.Helper()
+	dir := Repo(t, toml)
+	t.Chdir(dir)
+	return dir
 }

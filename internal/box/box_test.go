@@ -15,28 +15,9 @@ import (
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
 
-func repo(t *testing.T, toml string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-	}
-	if toml != "" {
-		os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644)
-	}
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no user config leaks in
-	t.Setenv("XDG_STATE_HOME", t.TempDir())  // locks, last-used and packs stay in the test
-	r, _ := filepath.EvalSymlinks(dir)
-	return r
-}
-
 func TestRunProvisionsLazilyAndPropagatesExit(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "setup = [\"echo installing\"]\nrequire_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "setup = [\"echo installing\"]\n"+vmtest.NoWorktreeCheck)
 	os.WriteFile(filepath.Join(dir, "bun.lock"), nil, 0o644)
 	sub := filepath.Join(dir, "apps", "api")
 	os.MkdirAll(sub, 0o755)
@@ -84,7 +65,7 @@ func TestRunProvisionsLazilyAndPropagatesExit(t *testing.T) {
 
 func TestRunRefusesWhenCreateNotAllowed(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "create_on = [\"session_start\"]\nrequire_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "create_on = [\"session_start\"]\n"+vmtest.NoWorktreeCheck)
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +83,7 @@ func TestRunRefusesWhenCreateNotAllowed(t *testing.T) {
 
 func TestSetupFailureDeletesVM(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "setup = [\"exit 5\"]\nrequire_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "setup = [\"exit 5\"]\n"+vmtest.NoWorktreeCheck)
 	e, _ := Resolve(dir, "", scope.Identity{})
 	e.Stderr = &bytes.Buffer{}
 	_, err := e.Ensure(true, false)
@@ -117,13 +98,13 @@ func TestSetupFailureDeletesVM(t *testing.T) {
 
 func TestRequireWorktree(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"require\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"require\"\n")
 	_, err := Resolve(dir, "", scope.Identity{})
 	be, ok := err.(*Error)
 	if !ok || be.Cause != "WORKTREE_REQUIRED" {
 		t.Fatalf("want WORKTREE_REQUIRED, got %v", err)
 	}
-	dir = repo(t, "")
+	dir = vmtest.Repo(t, "") // the default is "warn", so a main checkout resolves with a warning
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil || len(e.Warnings) != 1 {
 		t.Fatalf("warn default: %v %v", err, e.Warnings)
@@ -132,7 +113,7 @@ func TestRequireWorktree(t *testing.T) {
 
 func TestHarnessOverrideAndInstructions(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n[harness.gemini-cli]\nmode = \"tool\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n[harness.gemini-cli]\nmode = \"tool\"\n")
 	e, _ := Resolve(dir, "gemini-cli", scope.Identity{})
 	if e.Cfg.Mode != "tool" || !strings.Contains(e.Instructions(), "boxer_run tool") {
 		t.Fatalf("override: %s\n%s", e.Cfg.Mode, e.Instructions())
@@ -145,7 +126,7 @@ func TestHarnessOverrideAndInstructions(t *testing.T) {
 
 func TestGuestWorkdirThroughSymlinkedCwd(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n")
 	os.MkdirAll(filepath.Join(dir, "apps", "web"), 0o755)
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(dir, link); err != nil {
@@ -162,7 +143,7 @@ func TestGuestWorkdirThroughSymlinkedCwd(t *testing.T) {
 
 func TestConcurrentEnsureCreatesOnce(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
@@ -198,7 +179,7 @@ func TestOutsideRepo(t *testing.T) {
 func TestCreatePacksImageOncePerHost(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	_, log := vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n")
 	for i := 0; i < 2; i++ {
 		e, err := Resolve(dir, "", scope.Identity{})
 		if err != nil {
@@ -219,7 +200,7 @@ func TestCreatePacksImageOncePerHost(t *testing.T) {
 func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	_, log := vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\nintegration = \"inside\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\nintegration = \"inside\"\n")
 	e, err := Resolve(dir, "claude", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +238,7 @@ func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
 
 func TestWorktreeDetectSharesRepoSandbox(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n[worktree]\nmanage = \"detect\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n[worktree]\nmanage = \"detect\"\n")
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil || e.Scope.Isolation != "repo" || len(e.Warnings) != 1 {
 		t.Fatalf("detect in main checkout: %v %+v %v", err, e.Scope, e.Warnings)
@@ -275,7 +256,7 @@ func TestWorktreeDetectSharesRepoSandbox(t *testing.T) {
 
 func TestUpDetachedSpawnsWithoutWaiting(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n")
 	marker := filepath.Join(t.TempDir(), "ran")
 	script := filepath.Join(t.TempDir(), "boxer")
 	os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.3\necho \"$@\" > "+marker+"\n"), 0o755)
@@ -311,7 +292,7 @@ func TestUpDetachedSpawnsWithoutWaiting(t *testing.T) {
 // its shell) both try to create the scope; smolvm rejects the second, which must wait, not fail.
 func TestCreateWaitsForAConcurrentCreator(t *testing.T) {
 	_, _ = vmtest.Install(t)
-	dir := repo(t, "require_worktree = \"off\"\n")
+	dir := vmtest.Repo(t, "require_worktree = \"off\"\n")
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)

@@ -4,8 +4,8 @@
 # coverage, so its floor is deliberately low and rises as its pure logic gets tests.
 internal/box       75
 internal/bundle    84
-internal/config    53
-internal/decide    94
+internal/config    65
+internal/decide    99
 internal/eval      12
 internal/fakellm   81
 internal/hook      80

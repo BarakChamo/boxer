@@ -32,6 +32,8 @@ func TestDecide(t *testing.T) {
 		{"compound all passthrough", with("git add -A && git commit -m x", nil), Decision{Action: Allow}},
 		{"already boxed", with("boxer run -c 'npm test'", nil), Decision{Action: Allow}},
 		{"quotes escaped", with("node -e 'console.log(1)'", nil), Decision{Action: Rewrite, Command: `boxer run -c 'node -e '\''console.log(1)'\'''`}},
+		{"subshell and negation prefixes", with("( ! npm test )", nil), Decision{Action: Rewrite, Command: `boxer run -c '( ! npm test )'`}},
+		{"only environment assignments", with("FOO=1 BAR=2", nil), Decision{Action: Allow}},
 		{"mode off", with("npm test", func(i *Input) { i.Mode = "off" }), Decision{Action: Allow}},
 		{"mode tool blocks with fix", with("npm test", func(i *Input) { i.Mode = "tool" }), Decision{
 			Action: Block,

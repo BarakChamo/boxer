@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,13 +18,6 @@ type Network struct {
 	Mode       string   `toml:"mode"`
 	AllowHosts []string `toml:"allow_hosts"`
 	Ports      []string `toml:"ports"`
-}
-
-// Branch mirrors the [branch] table. Inert in v1.
-type Branch struct {
-	Enabled bool     `toml:"enabled"`
-	Base    string   `toml:"base"`
-	Warm    []string `toml:"warm"`
 }
 
 // Worktree mirrors the [worktree] table. Manage is "off" (boxer only reacts to worktrees others
@@ -71,11 +65,10 @@ type Config struct {
 	Secrets        []string `toml:"secrets"`
 
 	Network  Network             `toml:"network"`
-	Branch   Branch              `toml:"branch"`
 	Worktree Worktree            `toml:"worktree"`
 	Harness  map[string]Override `toml:"harness"`
 
-	// Sources maps a top-level key to the file or "env" or "default" it came from.
+	// Sources maps a top-level key to the file, the BOXER_* variable, or "default" it came from.
 	Sources map[string]string `toml:"-"`
 	// Files lists the configuration files that were read, lowest priority first.
 	Files []string `toml:"-"`
@@ -216,7 +209,9 @@ func (c *Config) applyEnv() {
 	for name, set := range envKeys {
 		if v, ok := os.LookupEnv(name); ok {
 			if err := set(c, v); err == nil {
-				c.Sources[strings.ToLower(strings.TrimPrefix(name, "BOXER_"))] = "env"
+				// Name the variable, not just "env": doctor's job is to explain a value well
+				// enough that the reader knows what to change.
+				c.Sources[strings.ToLower(strings.TrimPrefix(name, "BOXER_"))] = name
 			}
 		}
 	}
@@ -262,22 +257,22 @@ func (c Config) Validate() error {
 		{"worktree.manage", c.Worktree.Manage, []string{"off", "detect"}},
 	}
 	for _, ch := range checks {
-		if !oneOf(ch.val, ch.allowed) {
+		if !slices.Contains(ch.allowed, ch.val) {
 			return fmt.Errorf("%s = %q; allowed: %s", ch.key, ch.val, strings.Join(ch.allowed, " | "))
 		}
 	}
 	for _, e := range c.CreateOn {
-		if !oneOf(e, []string{"session_start", "subagent_start", "run", "mcp"}) {
+		if !slices.Contains([]string{"session_start", "subagent_start", "run", "mcp"}, e) {
 			return fmt.Errorf("create_on contains %q; allowed: session_start | subagent_start | run | mcp", e)
 		}
 	}
 	for _, e := range c.DestroyOn {
-		if !oneOf(e, []string{"session_end", "subagent_stop", "never"}) {
+		if !slices.Contains([]string{"session_end", "subagent_stop", "never"}, e) {
 			return fmt.Errorf("destroy_on contains %q; allowed: session_end | subagent_stop | never", e)
 		}
 	}
 	for name, o := range c.Harness {
-		if o.Mode != "" && !oneOf(o.Mode, []string{"rewrite", "tool", "off"}) {
+		if o.Mode != "" && !slices.Contains([]string{"rewrite", "tool", "off"}, o.Mode) {
 			return fmt.Errorf("harness.%s.mode = %q", name, o.Mode)
 		}
 	}
@@ -307,14 +302,5 @@ func MemoryMiB(s string) (int, error) {
 
 // Has reports whether list contains v.
 func Has(list []string, v string) bool {
-	return oneOf(v, list)
-}
-
-func oneOf(v string, allowed []string) bool {
-	for _, a := range allowed {
-		if a == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, v)
 }

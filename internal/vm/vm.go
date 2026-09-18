@@ -51,8 +51,6 @@ type Machine struct {
 	Image      string            `json:"image"`
 	Labels     map[string]string `json:"labels"`
 	CreatedAt  int64             `json:"created_at"`
-	PID        *int              `json:"pid"`
-	Branchable bool              `json:"branchable"`
 }
 
 // Running reports whether the machine can accept exec.
@@ -183,12 +181,8 @@ func (c Client) PackFromVM(name, stub string) (string, error) {
 }
 
 // Start boots a defined machine.
-func (c Client) Start(name string, branchable bool) error {
-	args := []string{"machine", "start", "-n", name}
-	if branchable {
-		args = append(args, "--branchable")
-	}
-	_, err := c.output(args...)
+func (c Client) Start(name string) error {
+	_, err := c.output("machine", "start", "-n", name)
 	return err
 }
 
@@ -204,12 +198,6 @@ func (c Client) Stop(name string) error {
 // Delete removes a machine and any children branched from it.
 func (c Client) Delete(name string) error {
 	_, err := c.output("machine", "delete", "-n", name, "--force", "--cascade")
-	return err
-}
-
-// Branch forks a running branchable machine.
-func (c Client) Branch(from, name string) error {
-	_, err := c.output("machine", "branch", "--from", from, "-n", name)
 	return err
 }
 

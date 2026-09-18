@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BarakChamo/boxer/internal/bundle"
@@ -71,7 +72,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 				if tools == nil {
 					tools = map[string]any{}
 				}
-				tools["exclude"] = appendUnique(toStrings(tools["exclude"]), "run_shell_command")
+				tools["exclude"] = appendOnce(toStrings(tools["exclude"]), "run_shell_command")
 				m["tools"] = tools
 			}
 		}); err != nil {
@@ -219,7 +220,7 @@ func codexHooksTOML(hooks any) (string, error) {
 	for e := range events {
 		names = append(names, e)
 	}
-	sortStrings(names)
+	slices.Sort(names)
 	var b strings.Builder
 	b.WriteString(blockStart + "\n")
 	for _, event := range names {
@@ -273,14 +274,6 @@ func (r *Result) replaceBlock(path, blockStart, blockEnd, block string) error {
 	}
 	r.Written = append(r.Written, path)
 	return nil
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }
 
 // --- helpers --------------------------------------------------------------------------------
@@ -435,11 +428,11 @@ func toStrings(v any) []string {
 	return out
 }
 
-func appendUnique(list []string, s string) []string {
-	for _, x := range list {
-		if x == s {
-			return list
-		}
+// appendOnce adds s unless the list already has it; order is meaningful in the files we merge, so
+// this is not a set.
+func appendOnce(list []string, s string) []string {
+	if slices.Contains(list, s) {
+		return list
 	}
 	return append(list, s)
 }

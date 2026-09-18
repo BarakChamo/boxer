@@ -230,7 +230,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	} else if m.Running() {
 		return false, nil
 	}
-	if err := e.VM.Start(e.Scope.Key, e.Cfg.Branch.Enabled); err != nil {
+	if err := e.VM.Start(e.Scope.Key); err != nil {
 		return created, &Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"}
 	}
 	if err := e.setup(); err != nil {
@@ -376,7 +376,7 @@ func (e *Env) PackHarness() {
 	if err == nil {
 		_, err = e.VM.PackFromVM(e.Scope.Key, stub)
 	}
-	if serr := e.VM.Start(e.Scope.Key, e.Cfg.Branch.Enabled); serr != nil && err == nil {
+	if serr := e.VM.Start(e.Scope.Key); serr != nil && err == nil {
 		err = serr
 	}
 	if err != nil {

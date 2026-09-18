@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func TestEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "off" || cfg.Sources["mode"] != "env" || cfg.CPUs != 1 {
+	if cfg.Mode != "off" || cfg.Sources["mode"] != "BOXER_MODE" || cfg.CPUs != 1 {
 		t.Fatalf("env: %+v", cfg)
 	}
 	t.Setenv("BOXER_MODE", "bogus")
@@ -119,5 +120,56 @@ func TestTimingKeys(t *testing.T) {
 	}
 	if Defaults().WarmOnSessionStart || Defaults().Worktree.Manage != "off" {
 		t.Fatal("defaults: warm off, manage off")
+	}
+}
+
+// Load is the real entry point: user file, then repository, then worktree, then the environment,
+// each overriding the last, with provenance recorded so `doctor` can explain every value.
+func TestLoadLayersUserRepoWorktreeAndEnv(t *testing.T) {
+	userDir := t.TempDir()
+	os.MkdirAll(filepath.Join(userDir, "boxer"), 0o755)
+	os.WriteFile(filepath.Join(userDir, "boxer", "boxer.toml"),
+		[]byte("memory = \"1G\"\ncpus = 1\nisolation = \"repo\"\n"), 0o644)
+	t.Setenv("XDG_CONFIG_HOME", userDir)
+
+	repoRoot := t.TempDir()
+	os.WriteFile(filepath.Join(repoRoot, "boxer.toml"), []byte("cpus = 2\nmode = \"tool\"\n"), 0o644)
+
+	worktree := t.TempDir()
+	os.WriteFile(filepath.Join(worktree, "boxer.toml"), []byte("mode = \"off\"\n"), 0o644)
+
+	t.Setenv("BOXER_MEMORY", "8G")
+
+	cfg, err := Load(worktree, repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ got, want, why string }{
+		{cfg.Isolation, "repo", "user file wins where nothing else sets the key"},
+		{fmt.Sprint(cfg.CPUs), "2", "repository overrides the user file"},
+		{cfg.Mode, "off", "worktree overrides the repository"},
+		{cfg.Memory, "8G", "the environment overrides every file"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q", c.why, c.got, c.want)
+		}
+	}
+	if len(cfg.Files) != 3 {
+		t.Errorf("every layer that existed should be recorded: %v", cfg.Files)
+	}
+	if src := cfg.Sources["mode"]; !strings.Contains(src, worktree) {
+		t.Errorf("provenance for mode should name the worktree file, got %q", src)
+	}
+	if src := cfg.Sources["memory"]; src != "BOXER_MEMORY" {
+		t.Errorf("provenance for memory should name the variable, got %q", src)
+	}
+}
+
+// A repository with no boxer.toml anywhere is the common case and must not error.
+func TestLoadWithNoFilesIsDefaults(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg, err := Load(t.TempDir(), t.TempDir())
+	if err != nil || cfg.Isolation != Defaults().Isolation || len(cfg.Files) != 0 {
+		t.Fatalf("%v %+v", err, cfg.Files)
 	}
 }

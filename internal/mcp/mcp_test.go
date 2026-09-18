@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,24 +13,6 @@ import (
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
-
-func repo(t *testing.T, toml string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-	}
-	os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("require_worktree = \"off\"\n"+toml), 0o644)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	r, _ := filepath.EvalSymlinks(dir)
-	t.Chdir(r) // the server's own working directory is the session's scope
-	return r
-}
 
 func serve(t *testing.T, lines ...string) []string {
 	t.Helper()
@@ -48,7 +29,7 @@ const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pro
 // R-SIG: initialize warms the scope when create_on lists "mcp"; EOF records the last use.
 func TestLifecycleSignals(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "create_on = [\"mcp\"]\n")
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"create_on = [\"mcp\"]\n")
 	// The warm-up is a detached `boxer up`; a script stands in for the binary and records argv.
 	spawned := filepath.Join(t.TempDir(), "spawned")
 	script := filepath.Join(t.TempDir(), "boxer")
@@ -78,7 +59,7 @@ func TestLifecycleSignals(t *testing.T) {
 
 	for _, toml := range []string{"create_on = [\"run\"]\n", "create_on = [\"mcp\"]\nisolation = \"session\"\n"} {
 		os.Remove(spawned)
-		repo(t, toml)
+		vmtest.RepoIn(t, toml)
 		serve(t, initialize)
 		time.Sleep(50 * time.Millisecond)
 		if _, err := os.Stat(spawned); err == nil {
@@ -91,7 +72,7 @@ func TestLifecycleSignals(t *testing.T) {
 // guest working directory or falls back to the server's scope with a note.
 func TestRunCwdMapping(t *testing.T) {
 	_, log := vmtest.Install(t)
-	dir := repo(t, "mount_at = \"/workspace\"\ncreate_on = [\"run\"]\n")
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"mount_at = \"/workspace\"\ncreate_on = [\"run\"]\n")
 	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
 	call := func(cwd string) string {
 		return `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"` + cwd + `"}}}`
@@ -119,7 +100,7 @@ func TestRunCwdMapping(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t, "create_on = [\"run\"]\n")
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"create_on = [\"run\"]\n")
 	in := strings.Join([]string{
 		initialize,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,

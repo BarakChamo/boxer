@@ -4,6 +4,7 @@
 package decide
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -68,10 +69,10 @@ func needsSandbox(cmd string, intercept, passthrough []string) bool {
 	all := len(intercept) == 1 && intercept[0] == "*"
 	for _, seg := range splitSegments(cmd) {
 		prog := firstProgram(seg)
-		if prog == "" || contains(passthrough, prog) {
+		if prog == "" || slices.Contains(passthrough, prog) {
 			continue
 		}
-		if all || contains(intercept, prog) {
+		if all || slices.Contains(intercept, prog) {
 			return true
 		}
 	}
@@ -106,15 +107,6 @@ func firstProgram(seg string) string {
 
 func isBoxer(cmd string) bool {
 	return firstProgram(cmd) == "boxer"
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // shellQuote wraps s in single quotes for a POSIX shell.

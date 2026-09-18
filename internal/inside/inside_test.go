@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestTableIsConsistent(t *testing.T) {
 		}
 	}
 	hosts := AllowHosts()
-	if hosts[0] != "registry.npmjs.org" || !contains(hosts, "deb.debian.org") || !contains(hosts, "api.anthropic.com") || !contains(hosts, "api.openai.com") {
+	if hosts[0] != "registry.npmjs.org" || !slices.Contains(hosts, "deb.debian.org") || !slices.Contains(hosts, "api.anthropic.com") || !slices.Contains(hosts, "api.openai.com") {
 		t.Fatalf("allow hosts: %v", hosts)
 	}
 }
@@ -94,15 +95,6 @@ func TestGuestEnv(t *testing.T) {
 	if a := Harnesses["codex"].Args; len(a) != 2 || a[0] != "-c" {
 		t.Fatalf("codex shell args must turn its nested sandbox off: %v", a)
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestLoginHintOnlyWithoutCredentials(t *testing.T) {

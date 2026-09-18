@@ -4,31 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/BarakChamo/boxer/internal/vmtest"
 )
-
-func repo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-	}
-	os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("require_worktree = \"off\"\n"), 0o644)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	r, _ := filepath.EvalSymlinks(dir)
-	t.Chdir(r)
-	return r
-}
 
 // call runs the CLI and decodes stdout as JSON into v when v is non-nil.
 func call(t *testing.T, v any, args ...string) (int, string) {
@@ -45,7 +25,7 @@ func call(t *testing.T, v any, args ...string) (int, string) {
 
 func TestJSONOutputsAndStatusExitCodes(t *testing.T) {
 	vmtest.Install(t)
-	dir := repo(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
 
 	var st map[string]any
 	if code, _ := call(t, &st, "status", "--json"); code != exitAbsent || st["exists"] != false || st["state"] != "absent" {
@@ -83,7 +63,7 @@ func TestJSONOutputsAndStatusExitCodes(t *testing.T) {
 
 func TestStatusStoppedExitCodeAndHumanDoctor(t *testing.T) {
 	client, _ := vmtest.Install(t)
-	repo(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
 	call(t, nil, "up")
 	var st map[string]any
 	call(t, &st, "status", "--json")
@@ -109,7 +89,7 @@ func TestStatusStoppedExitCodeAndHumanDoctor(t *testing.T) {
 
 func TestDoctorWarnsOnInstalledVersionMismatch(t *testing.T) {
 	vmtest.Install(t)
-	repo(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
 	if code, out := call(t, nil, "install", "claude-code"); code != 0 {
 		t.Fatal(out)
 	}

@@ -101,7 +101,6 @@ type Input struct {
 	ToolInput     map[string]any `json:"tool_input"`
 	SessionID     string         `json:"session_id"`
 	AgentID       string         `json:"agent_id"`
-	AgentType     string         `json:"agent_type"`
 	CWD           string         `json:"cwd"`
 	Source        string         `json:"source"`
 	Reason        string         `json:"reason"`

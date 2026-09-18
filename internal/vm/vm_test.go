@@ -22,7 +22,7 @@ func TestLifecycleAgainstFake(t *testing.T) {
 	if !ok || m.Running() {
 		t.Fatalf("created but stopped expected: %+v", m)
 	}
-	if err := c.Start("sb-x", false); err != nil {
+	if err := c.Start("sb-x"); err != nil {
 		t.Fatal(err)
 	}
 	m, _, _ = c.Status("sb-x")
