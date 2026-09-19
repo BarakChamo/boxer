@@ -63,14 +63,16 @@ refuses to scaffold into a directory that already contains `boxer.toml`, and say
 blame the directory rather than the file. Anything that writes a root-level configuration file has
 this problem; worth knowing before telling someone to run a scaffolder in a prepared repository.
 
-**4. Each worktree needs its own port, and nothing arranges that.** `boxer.toml` is committed, so
-every worktree inherits the same `network.ports`. Here the runner writes a distinct port per
-worktree, but a person doing this by hand would collide on the second one, and the failure would
-look like a dev server that will not start. A per-worktree override, or a port range, is the
-obvious gap.
+**4. Each worktree needed its own port and nothing arranged that — fixed.** `boxer.toml` is
+committed, so every worktree asked for the same host port, and the second to start failed with a
+message about a busy address rather than about worktrees. `network.ports` now takes `"auto:3000"`:
+boxer asks the operating system for a free host port and `boxer status` prints where it landed.
+Two repositories with identical configuration were given 55426 and 55465.
 
 **5. Not a boxer problem, but worth recording.** An error boundary legitimately serves HTTP 500
-while rendering correctly; a browser tool that refuses non-200 pages will call that a failure.
+while rendering correctly, and it renders on the client, so neither a browser tool that refuses
+non-200 pages nor a raw fetch of the HTML sees the result. Navigating first and reading afterwards
+does, which is also what a person does.
 
 ## What it did not find
 

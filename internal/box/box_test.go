@@ -998,3 +998,37 @@ func TestSetupOutOfMemoryExplainsItself(t *testing.T) {
 		t.Fatalf("an ordinary failure is not an OOM: %q", other.Reason)
 	}
 }
+
+// boxer.toml is committed, so every worktree of a repository asks for the same host port. The
+// second one to start would fail with a message about a busy address rather than about worktrees,
+// which is the wrong end of the problem. "auto:<guest>" asks for a free one instead, and the
+// mapping is recorded on the machine so a person can find out where their server is.
+func TestAutomaticPortsDoNotCollide(t *testing.T) {
+	fixed, chosen, err := allocatePorts([]string{"8080:80", "auto:3000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixed[0] != "8080:80" {
+		t.Fatalf("a fixed mapping is left alone: %v", fixed)
+	}
+	host := chosen["3000"]
+	if host == "" || !strings.HasSuffix(fixed[1], ":3000") || !strings.HasPrefix(fixed[1], host) {
+		t.Fatalf("the resolved mapping must use the chosen host port: %v %v", fixed, chosen)
+	}
+	// Two allocations in a row must differ, or concurrent worktrees would collide again.
+	_, second, err := allocatePorts([]string{"auto:3000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second["3000"] == host {
+		t.Fatalf("two allocations returned the same port %s", host)
+	}
+	// And the mapping survives onto the machine, which is how `status` reports it.
+	m := vm.Machine{Labels: map[string]string{vm.LabelPrefix + "port.3000": host, vm.LabelPrefix + "scope": "sb-x"}}
+	if got := PortsOf(m); got["3000"] != host {
+		t.Fatalf("PortsOf: %v", got)
+	}
+	if PortsOf(vm.Machine{Labels: map[string]string{vm.LabelPrefix + "scope": "sb-x"}}) != nil {
+		t.Fatal("a machine with no forwarded ports reports none")
+	}
+}

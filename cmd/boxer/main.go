@@ -430,6 +430,9 @@ type statusJSON struct {
 	// Resources is what this sandbox costs, measured when it exists. One sandbox is cheap to
 	// measure, so unlike `ls` this does not need asking for.
 	Resources *box.Resources `json:"resources,omitempty"`
+	// Ports maps a guest port to the host port it was given, which is the only way to find an
+	// automatically allocated one.
+	Ports map[string]string `json:"ports,omitempty"`
 }
 
 // Exit codes of `boxer status`.
@@ -437,6 +440,16 @@ const (
 	exitStopped = 3
 	exitAbsent  = 4
 )
+
+// sortedMapKeys keeps printed output stable, because a map is not.
+func sortedMapKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
 
 func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 	m, ok, err := e.Exists()
@@ -465,6 +478,7 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 			r.MeasuredAll = false
 		}
 		s.Resources = &r
+		s.Ports = box.PortsOf(m)
 		if s.Labels == nil {
 			s.Labels = map[string]string{}
 		}
@@ -480,6 +494,10 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "boxer: %s absent (image would be %s: %s)\n", s.Scope, img, why)
 	} else {
 		fmt.Fprintf(stdout, "boxer: %s %s, image %s, mounted %s -> %s\n", s.Scope, s.State, s.Image, s.Worktree, s.MountAt)
+		// Where the forwarded ports actually landed: with `auto` this is the only way to know.
+		for _, guest := range sortedMapKeys(s.Ports) {
+			fmt.Fprintf(stdout, "  port:      guest %s -> http://127.0.0.1:%s\n", guest, s.Ports[guest])
+		}
 	}
 	return code
 }
@@ -613,7 +631,8 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	r.Scope = scopeRow(e.Scope)
 	r.Image, r.ImageReason = e.Image()
-	if len(e.Cfg.Setup) > 0 && r.Image != "" {
+	// The cache is of the image half: `setup` prepares the worktree and is never packed.
+	if len(e.Cfg.ImageSetup) > 0 && r.Image != "" {
 		key := box.EnvKey(r.Image, e.Cfg)
 		pack := box.PackPath(key)
 		_, err := os.Stat(pack)

@@ -245,7 +245,7 @@ func TestDoctorReportsTheEnvironmentCache(t *testing.T) {
 	vmtest.Install(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("BOXER_PACKS", t.TempDir())
-	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo hi\"]\n")
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nimage_setup = [\"echo hi\"]\n")
 
 	var r map[string]any
 	if code, out := call(t, &r, "doctor", "--json"); code != 0 {
@@ -269,7 +269,7 @@ func TestDoctorReportsTheEnvironmentCache(t *testing.T) {
 	if code, out := call(t, nil, "doctor"); code != 0 || !strings.Contains(out, "environment:") || !strings.Contains(out, "skips setup") {
 		t.Fatalf("doctor must say the environment is cached: %d %s", code, out)
 	}
-	// A repository with no setup has no environment to report. (A fresh map: unmarshalling into
+	// A repository with no image_setup has no environment to report. (A fresh map: unmarshalling into
 	// one that already has keys merges rather than replaces, which would silently keep the old
 	// answer.)
 	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n")
@@ -397,7 +397,7 @@ func TestUpRebuildDropsTheCachedEnvironment(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	packs := t.TempDir()
 	t.Setenv("BOXER_PACKS", packs)
-	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo installing\"]\n")
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nimage_setup = [\"echo installing\"]\n")
 
 	if code, out := call(t, nil, "up"); code != 0 {
 		t.Fatalf("up: %d %s", code, out)
@@ -451,5 +451,30 @@ func TestWatchCarriesEventsAsWellAsStateChanges(t *testing.T) {
 		case <-deadline:
 			t.Fatal("the stream must carry events, not only state changes")
 		}
+	}
+}
+
+// Where a forwarded port landed is only discoverable from status, and with "auto" it is the only
+// way to know at all.
+func TestStatusReportsForwardedPorts(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n[network]\nmode = \"allowlist\"\nports = [\"auto:3000\", \"8080:80\"]\n")
+
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	var st map[string]any
+	if code, out := call(t, &st, "status", "--json"); code != 0 {
+		t.Fatalf("status: %d %s", code, out)
+	}
+	ports, _ := st["ports"].(map[string]any)
+	host, _ := ports["3000"].(string)
+	if host == "" || host == "3000" {
+		t.Fatalf("an automatic port must be reported, and must not be the guest's: %v", st["ports"])
+	}
+	if code, out := call(t, nil, "status"); code != 0 || !strings.Contains(out, "guest 3000 -> http://127.0.0.1:"+host) {
+		t.Fatalf("the human form must say where to point a browser: %d %s", code, out)
 	}
 }

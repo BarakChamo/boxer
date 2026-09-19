@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -329,6 +330,18 @@ func (e *Env) create() error {
 			labels[vm.LabelPrefix+k] = v
 		}
 	}
+	// Ports are per worktree, and boxer.toml is committed: every worktree of a repository would
+	// otherwise ask for the same host port, and the second one to start would fail with a message
+	// about a busy address rather than about worktrees. "auto:3000" asks for a free host port
+	// instead, and the mapping is recorded on the machine so `status` can say which one it got.
+	ports, chosen, err := allocatePorts(e.Cfg.Network.Ports)
+	if err != nil {
+		return e.fail(&Error{Reason: err.Error(), Cause: "NO_FREE_PORT", Scope: e.Scope,
+			Fix: "free a port, or give `network.ports` fixed host ports"})
+	}
+	for guest, host := range chosen {
+		labels[vm.LabelPrefix+"port."+guest] = host
+	}
 	volumes := []string{e.Scope.Root + ":" + e.MountAt()}
 	for _, m := range e.Cfg.Mounts {
 		volumes = append(volumes, expandMount(m))
@@ -367,7 +380,7 @@ func (e *Env) create() error {
 		MemoryMiB:  mem,
 		Network:    e.Cfg.Network.Mode,
 		AllowHosts: hosts,
-		Ports:      e.Cfg.Network.Ports,
+		Ports:      ports,
 	}
 	if err = e.VM.Create(spec); err != nil && from != "" && !vm.IsAlreadyExists(err) {
 		// A pack can be truncated: an interrupted `pack create` leaves a file smaller than its
@@ -562,6 +575,54 @@ func harnessKey(image, harness string) string {
 
 // harnessPack returns the pack of image with this harness installed when one exists, so a new
 // inside-mode VM skips the install (R-GUEST-4).
+// PortsOf reads back the guest-to-host port mapping a machine was created with.
+func PortsOf(m vm.Machine) map[string]string {
+	var out map[string]string
+	for k, v := range m.Labels {
+		if guest, found := strings.CutPrefix(k, vm.LabelPrefix+"port."); found {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[guest] = v
+		}
+	}
+	return out
+}
+
+// allocatePorts turns the configured list into what smolvm takes, resolving any "auto:<guest>"
+// entry to a free host port. It returns the resolved list and the guest-to-host mapping, so the
+// machine can carry it as labels and a person can find out where their dev server actually is.
+func allocatePorts(spec []string) (resolved []string, chosen map[string]string, err error) {
+	chosen = map[string]string{}
+	for _, p := range spec {
+		host, guest, found := strings.Cut(p, ":")
+		if !found || host != "auto" {
+			resolved = append(resolved, p)
+			continue
+		}
+		free, err := freePort()
+		if err != nil {
+			return nil, nil, fmt.Errorf("no free host port for guest port %s: %w", guest, err)
+		}
+		chosen[guest] = free
+		resolved = append(resolved, free+":"+guest)
+	}
+	return resolved, chosen, nil
+}
+
+// freePort asks the operating system for one, which is the only answer that is true at the moment
+// it is given. A scan of a range would be a guess, and two boxers starting together would make the
+// same guess.
+func freePort() (string, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer l.Close() //nolint:errcheck // the listener exists only to learn a free port number
+	_, port, err := net.SplitHostPort(l.Addr().String())
+	return port, err
+}
+
 // packReady reports whether a pack file is present and whole. A zero-length or truncated pack is
 // what an interrupted `pack create` leaves behind, and smolvm reports it as a checkpoint footer
 // error at create time rather than as a missing file. A pack that is present but truncated past

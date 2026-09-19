@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -315,23 +314,19 @@ func browserRead(url string) (string, error) {
 		return out.String(), nil
 	}
 	// A page can be correct and not be 200: an error boundary renders its message *with* a 500,
-	// which is the whole point of an error boundary. The browser refuses to read those, so the
-	// body is fetched directly and judged on what it says rather than on its status.
-	body, status, err := fetchBody(url)
-	if err != nil {
-		return out.String(), fmt.Errorf("browser: %s; fetch: %v", lastOf(out.String(), 120), err)
+	// which is the whole point of one. `read <url>` refuses those, but navigating and then reading
+	// renders it — which is also what a person does. Fetching the HTML instead would not do: the
+	// boundary is client-rendered, so the server's body is an empty shell.
+	if err := waitFor(exec.Command("agent-browser", "open", url), "agent-browser", 2*time.Minute); err != nil {
+		return out.String(), fmt.Errorf("browser open: %v", err)
 	}
-	return fmt.Sprintf("[http %d]\n%s", status, body), nil
-}
-
-func fetchBody(url string) (string, int, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", 0, err
+	var second bytes.Buffer
+	read := exec.Command("agent-browser", "read")
+	read.Stdout, read.Stderr = &second, &second
+	if err := waitFor(read, "agent-browser", 2*time.Minute); err != nil {
+		return second.String(), fmt.Errorf("browser read after open: %v: %s", err, lastOf(second.String(), 200))
 	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	return string(b), resp.StatusCode, err
+	return second.String(), nil
 }
 
 func firstLine(s string) string {

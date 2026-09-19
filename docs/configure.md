@@ -37,6 +37,7 @@ build = "bun run build"
 [network]
 mode        = "allowlist"       # the registry hosts your image needs are always allowed
 allow_hosts = ["registry.npmjs.org"]
+ports       = ["auto:3000"]     # a free host port for guest 3000; "3000:3000" pins both
 
 [worktree]
 manage      = "off"             # detect: a session in the main checkout shares the repository
@@ -140,6 +141,17 @@ the environment pack — so put secrets in `secrets` or `env_passthrough`, which
 host at run time and never snapshotted. `mounts` adds host directories beside the worktree,
 `"host:guest"` or `"host:guest:ro"`, with `~` expanded; a shared dependency cache is the usual
 reason.
+
+**`network.ports`** forwards a guest port to the host. `"3000:3000"` pins both sides, which is
+fine until a second worktree of the same repository starts: `boxer.toml` is committed, so they ask
+for the same host port and the second one fails with a message about a busy address rather than
+about worktrees. `"auto:3000"` asks the operating system for a free host port instead, and
+`boxer status` prints where it landed:
+
+```
+boxer: sb-6288a8a1bfaa running, image …
+  port:      guest 3000 -> http://127.0.0.1:55426
+```
 
 **`network`** is off by default, in keeping with smolvm. `allowlist` opens named hosts; the
 registry hosts your image needs are always allowed, so a package install works without you listing
