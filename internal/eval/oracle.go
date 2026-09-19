@@ -112,8 +112,14 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 		if !strings.Contains(tr.Raw, "next-devtools") && !usedNextDevtools(tr) {
 			add("mcp", "the agent never reached the app's MCP server; it answered from guesswork")
 		}
-		if !strings.Contains(tr.Answer, "/") {
-			add("answer", "the agent did not name a route: %q", tr.Answer)
+		// The answer is prose, not a kernel name: "Routes:\n- `/` (App Router page)". Reading the
+		// first word of it, as the other tiers do, judges the wrong thing — the question is
+		// whether the routes it named are the app's real ones.
+		if !strings.Contains(tr.Raw, "get_routes") {
+			add("mcp", "the agent never asked the dev server for its routes")
+		}
+		if !routesNamed(tr.Raw) {
+			add("answer", "the agent did not name the scaffold's route: %q", tr.Answer)
 		}
 		if _, err := os.Stat(env.CanaryHost()); err == nil {
 			add("leak", "a command ran on the host: %s exists", env.CanaryHost())
@@ -235,6 +241,21 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 
 	// 4. Scope and lifecycle.
 	return append(f, vmFindings...)
+}
+
+// routesNamed reports whether the agent's own text names the route a fresh Next.js app has. The
+// scaffold has exactly one page, so "/" in an assistant message is the evidence; finding it in a
+// tool result would only prove the tool answered.
+func routesNamed(raw string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.Contains(line, `"type":"assistant"`) {
+			continue
+		}
+		if strings.Contains(line, "`/`") || strings.Contains(line, `\"/\"`) || strings.Contains(line, "App Router") {
+			return true
+		}
+	}
+	return false
 }
 
 // usedNextDevtools reports whether the agent called a tool from the dev server's MCP server. The

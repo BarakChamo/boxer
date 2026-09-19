@@ -239,8 +239,13 @@ func httpOK(url string, timeout time.Duration) error {
 //
 // It costs one live turn, so it skips without a gateway key rather than failing.
 func (d Flow) runAgent(env *Env, c Cell) (Transcript, error) {
+	// The agent cell is a live cell whatever the tier is called: the Claude driver decides how to
+	// reach a model from env.Tier, and "flow" is not "t2", so without this it sends a fake key to
+	// the real API and retries ten 401s before giving up.
+	live := *env
+	live.Tier = "t2"
 	claude := Claude{}
-	if err := claude.Prepare(env, Cell{Harness: "claude-code", Entry: "project", Tier: env.Tier}); err != nil {
+	if err := claude.Prepare(&live, Cell{Harness: "claude-code", Entry: "project", Tier: "t2"}); err != nil {
 		return Transcript{}, err
 	}
 	// The dev server's own tools, running beside the code — which is inside the sandbox.
@@ -259,7 +264,7 @@ func (d Flow) runAgent(env *Env, c Cell) (Transcript, error) {
 		"--mcp-config", path, "--strict-mcp-config",
 		"--output-format", "stream-json", "--verbose", "--max-turns", "8")
 	cmd.Dir = env.Repo
-	cmd.Env = append(env.BaseEnv(), claude.modelEnv(env)...)
+	cmd.Env = append(live.BaseEnv(), claude.modelEnv(&live)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := wait(cmd, "claude"); err != nil {

@@ -69,13 +69,20 @@ served by `start`, waited for by `ready`, reached from the host through a forwar
 its tools over MCP by `next-devtools-mcp` running *in the guest* and addressed through `boxer run`,
 then restarted to prove the environment pack made the install unnecessary.
 
-**Pass, 54 s** on 2026-09-19 with a warm environment pack; 3 m 34 s cold, which is what the pack
-saves. It is slow and network-heavy, so it runs on demand and before a release, never in the
-default gate. Report: [eval-flow.md](eval-flow.md).
+Two cells, both **pass** on 2026-09-19: the mechanics in 40 s, and a live agent in 1 m 40 s for
+$0.0117. Report: [eval-flow.md](eval-flow.md). Slow and network-heavy, so it runs on demand and
+before a release, never in the default gate.
 
-It is also the only cell that proves the capability boxer had and never claimed: an MCP server that
-must live beside the code runs in the sandbox, and an ordinary `.mcp.json` entry reaches it —
-`{"command": "boxer", "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"]}`.
+The agent cell is the one that settles the capability boxer had and never claimed. Claude Code was
+given an ordinary entry — `{"command": "boxer", "args": ["run", "--", "next-devtools-mcp"]}` —
+and its own session record reports the server **connected**, listing
+`mcp__next-devtools__nextjs_index`, `nextjs_call`, `nextjs_docs` and `browser_eval` beside its own
+tools with boxer's skill loaded. It then made eleven calls to them, found the dev server on its
+port, asked for `get_routes`, and answered with the scaffold's real routes. It also read boxer's
+injected brief mid-session and moved from a host path to `/workspace`.
+
+**An MCP server that must live beside the code runs in the sandbox, and the harness cannot tell the
+difference.**
 
 ## Adherence
 
