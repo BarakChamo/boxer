@@ -82,7 +82,7 @@ func main() {
 			var picked []eval.MatrixConfig
 			for _, c := range configs {
 				if (*cell == "" || strings.Contains(c.Name, *cell)) &&
-					(*harness == "" || strings.Contains(*harness, c.Driver.Name())) {
+					(*harness == "" || strings.Contains(*harness, c.Driver().Name())) {
 					picked = append(picked, c)
 				}
 			}

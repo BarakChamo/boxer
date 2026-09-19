@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,6 +49,11 @@ func (d *Herdr) sock(env *Env) string { return filepath.Join(env.Work, "herdr.so
 // eval's PATH and trace file plus the Claude Code cell's private config dir and model endpoint.
 func (d *Herdr) env(env *Env) []string {
 	return append(append(env.BaseEnv(), Claude{}.modelEnv(env)...),
+		// The pane's Claude Code must read the eval's own config directory: that is where the key is
+		// approved and the project trusted. Without it the pane reads the real user config, meets
+		// the trust dialog, and herdr reports the agent as "blocked during startup" — which looks
+		// like a herdr fault and is not one.
+		"CLAUDE_CONFIG_DIR="+filepath.Join(env.Work, "claude-home"),
 		"HERDR_SOCKET_PATH="+d.sock(env),
 		"HERDR_HOME="+filepath.Join(env.Work, "herdr-home"),
 		"HERDR_CONFIG_PATH="+filepath.Join(env.Work, "herdr-config.toml"),
@@ -90,6 +96,21 @@ func (d *Herdr) Prepare(env *Env, c Cell) error {
 	// interactively, where the workspace-trust question blocks startup. Accepting it in the
 	// private config dir is what a human does once.
 	if err := trustProject(filepath.Join(env.Work, "claude-home", ".claude.json"), env.Repo); err != nil {
+		return err
+	}
+	// The headless drivers pass --permission-mode bypassPermissions on the command line, but herdr
+	// starts Claude Code itself, in a pane, so there is no command line to add it to. Without some
+	// grant every tool call stops on a permission prompt and the agent never reaches idle.
+	//
+	// The grant is an allow list rather than bypassPermissions: an interactive Claude Code asked to
+	// bypass permissions opens a full-screen "you accept all responsibility" confirmation and waits
+	// for a keypress, so that setting replaces one blocking dialog with another. An allow list
+	// prompts for nothing and shows nothing.
+	local := filepath.Join(env.Repo, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(local, []byte(`{"enableAllProjectMcpServers": true, "permissions": {"allow": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "mcp__boxer"]}}`+"\n"), 0o644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(env.Work, "herdr-home"), 0o755); err != nil {
@@ -155,10 +176,20 @@ func (d *Herdr) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	if _, raw, err = d.cli(env, "agent", "wait", "boxeval", "--until", "idle", "--timeout", "120000"); err != nil {
 		tr.Raw += raw
+		// What the pane is actually showing is the only thing that explains "blocked during
+		// startup": the harness is sitting on a dialog, and its text names which one.
+		if _, pane, perr := d.cli(env, "pane", "read", paneID); perr == nil {
+			tr.Raw += "\n--- pane ---\n" + pane
+			return tr, fmt.Errorf("%v; the pane showed: %s", err, lastOf(pane, 600))
+		}
 		return tr, err
 	}
 	tr.Raw += raw
-	_, raw, err = d.cli(env, "agent", "prompt", "boxeval", prompt, "--wait", "--until", "idle", "--timeout", "240000")
+	// herdr wants its own deadline in milliseconds, and a development session needs far longer than
+	// a single-answer cell. A private budget that overrides the caller's is how the OpenHands cell
+	// silently failed too, so this reads the tier's.
+	_, raw, err = d.cli(env, "agent", "prompt", "boxeval", prompt, "--wait", "--until", "idle",
+		"--timeout", strconv.FormatInt(env.timeoutOr(4*time.Minute).Milliseconds(), 10))
 	tr.Raw += raw
 	if err != nil {
 		return tr, err

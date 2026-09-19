@@ -1,6 +1,8 @@
 package eval
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -9,6 +11,11 @@ import (
 // another level's coverage, or a level that disappears, is the failure worth catching.
 func TestTheMatrixCoversEveryIntegrationLevel(t *testing.T) {
 	want := []string{"rewrite", "tool", "shims", "shell", "inside", "orchestrator"}
+	// Two cells of the same configuration run at the same time, so a configuration that handed
+	// out one shared driver instance would race; the factory has to make a new one each call.
+	if c := MatrixConfigs("t2")[0]; c.Driver() == nil {
+		t.Fatal("a configuration's driver factory returned nothing")
+	}
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for _, c := range MatrixConfigs("t2") {
@@ -48,32 +55,44 @@ func TestEveryConfigurationDevelopsTheSameApplication(t *testing.T) {
 func TestASignatureFailsWhenItsLevelDidNotCarryTheWork(t *testing.T) {
 	linux, mac := "linux", "darwin"
 	runTool := Transcript{Tools: []string{"boxer_run"}}
+	layered := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(layered, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layered, ".claude", "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name string
-		sig  func(trace, Transcript, string) (string, error)
-		tr   trace
-		tx   Transcript
-		host string
+		sig  func(evidence) (string, error)
+		ev   evidence
 		ok   bool
 	}{
-		{"rewrite with a rewrite", sigRewrite, trace{rewrites: 1}, Transcript{}, linux, true},
-		{"rewrite where the agent typed it", sigRewrite, trace{inputs: []string{"boxer run npm i"}}, Transcript{}, linux, true},
-		{"rewrite proved only by the transcript", sigRewrite, trace{}, Transcript{Raw: "$ boxer run node -e x"}, linux, true},
-		{"rewrite with no evidence at all", sigRewrite, trace{denies: 2}, Transcript{}, linux, false},
-		{"rewrite that never left the host", sigRewrite, trace{rewrites: 1}, Transcript{}, mac, false},
+		{"rewrite with a rewrite", sigRewrite, evidence{t: trace{rewrites: 1}, guest: linux}, true},
+		{"rewrite where the agent typed it", sigRewrite, evidence{t: trace{inputs: []string{"cd app && boxer run npm i"}}, guest: linux}, true},
+		{"rewrite proved only by the transcript", sigRewrite, evidence{tr: Transcript{Raw: "$ boxer run node -e x"}, guest: linux}, true},
+		{"rewrite with no evidence at all", sigRewrite, evidence{t: trace{denies: 2}, guest: linux}, false},
+		{"rewrite that never left the host", sigRewrite, evidence{t: trace{rewrites: 1}, guest: mac}, false},
 		// A compliant agent in tool mode is never denied anything: it just uses the run tool. A
 		// signature that insisted on a denial would fail the level for working properly.
-		{"tool with the run tool and no denial", sigTool, trace{}, runTool, linux, true},
-		{"tool with a denial", sigTool, trace{denies: 1}, Transcript{}, linux, true},
-		{"tool that did neither", sigTool, trace{}, Transcript{}, linux, false},
-		{"shims with no rewrites", sigShims, trace{}, Transcript{}, linux, true},
-		{"shims that were really hooks", sigShims, trace{rewrites: 3}, Transcript{}, linux, false},
-		{"inside with a silent hook", sigInside, trace{}, Transcript{}, linux, true},
-		{"inside with a hook firing", sigInside, trace{events: []string{"PreToolUse"}}, Transcript{}, linux, false},
-		{"no platform recorded at all", sigShims, trace{}, Transcript{}, "", false},
+		{"tool with the run tool and no denial", sigTool, evidence{tr: runTool, guest: linux}, true},
+		{"tool with a denial", sigTool, evidence{t: trace{denies: 1}, guest: linux}, true},
+		// Several harnesses never name the MCP tools they called; boxer's own trace does.
+		{"tool proved only by the trace", sigTool, evidence{t: trace{raw: `{"name":"boxer_run"}`}, guest: linux}, true},
+		{"tool that did neither", sigTool, evidence{guest: linux}, false},
+		{"shims with no rewrites", sigShims, evidence{guest: linux}, true},
+		{"shims that were really hooks", sigShims, evidence{t: trace{rewrites: 3}, guest: linux}, false},
+		{"inside with a silent hook", sigInside, evidence{guest: linux}, true},
+		{"inside with a hook firing", sigInside, evidence{t: trace{events: []string{"PreToolUse"}}, guest: linux}, false},
+		{"no platform recorded at all", sigShims, evidence{}, false},
+		// An orchestrator's launcher passes no trace through, so the worktree it cut is the
+		// evidence: boxer's layer in it, and the work having run in the guest.
+		{"orchestrator with the layer in its worktree", sigOrchestrator, evidence{guest: linux, dir: layered}, true},
+		{"orchestrator with no layer anywhere", sigOrchestrator, evidence{guest: linux, dir: t.TempDir()}, false},
+		{"orchestrator that ran on the host", sigOrchestrator, evidence{guest: mac, dir: layered}, false},
 	}
 	for _, c := range cases {
-		how, err := c.sig(c.tr, c.tx, c.host)
+		how, err := c.sig(c.ev)
 		if (err == nil) != c.ok {
 			t.Errorf("%s: wanted ok=%v, got %v", c.name, c.ok, err)
 		}

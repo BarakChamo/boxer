@@ -273,7 +273,12 @@ func runLifecycle(boxerBin, base string, task SDLCTask, port int, log io.Writer)
 	}
 
 	// A linked worktree, which is what an orchestrator makes and what boxer keys a sandbox to.
-	wt := filepath.Join(filepath.Dir(base), "sdlc-"+task.Name)
+	// Under the base repository's own directory rather than the shared temp root, so a run that
+	// dies does not leave a directory the next run collides with.
+	wt := filepath.Join(base+"-worktrees", task.Name)
+	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
+		return fail("worktree directory: %v", err)
+	}
 	if out, err := runIn(base, "git", "worktree", "add", "-q", "-b", "task/"+task.Name, wt); err != nil {
 		return fail("git worktree add: %v\n%s", err, out)
 	}
@@ -410,8 +415,20 @@ When you are done, answer with the single word DONE.`, task.Prompt, guestPort, h
 // browserRead reads a page the way a person would: a real browser, on the host, through the
 // forwarded port. `read` returns the rendered text rather than the HTML source, so a page that
 // compiles but renders nothing fails here, which is the point.
-func browserRead(url string) (string, error) {
-	cmd := exec.Command("agent-browser", "read", url)
+func browserRead(url string) (string, error) { return browserReadIn("", url) }
+
+// browserReadIn reads in a named, isolated browser session. The session matters under concurrency:
+// the fallback below navigates and then reads "the current page", and with one shared session a
+// neighbouring cell's navigation is what gets read — or the two collide and `open` simply fails.
+// Sessions are per cell, so no cell can see another's tab.
+func browserReadIn(session, url string) (string, error) {
+	ab := func(args ...string) *exec.Cmd {
+		if session != "" {
+			args = append([]string{"--session", session}, args...)
+		}
+		return exec.Command("agent-browser", args...)
+	}
+	cmd := ab("read", url)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := waitFor(cmd, "agent-browser", 2*time.Minute); err == nil {
@@ -421,11 +438,15 @@ func browserRead(url string) (string, error) {
 	// which is the whole point of one. `read <url>` refuses those, but navigating and then reading
 	// renders it — which is also what a person does. Fetching the HTML instead would not do: the
 	// boundary is client-rendered, so the server's body is an empty shell.
-	if err := waitFor(exec.Command("agent-browser", "open", url), "agent-browser", 2*time.Minute); err != nil {
-		return out.String(), fmt.Errorf("browser open: %v", err)
+	// Keep what the browser said: "exit status 1" alone sends the reader back for another run.
+	var opened bytes.Buffer
+	openCmd := ab("open", url)
+	openCmd.Stdout, openCmd.Stderr = &opened, &opened
+	if err := waitFor(openCmd, "agent-browser", 2*time.Minute); err != nil {
+		return out.String(), fmt.Errorf("browser open: %v: %s", err, lastOf(opened.String(), 300))
 	}
 	var second bytes.Buffer
-	read := exec.Command("agent-browser", "read")
+	read := ab("read")
 	read.Stdout, read.Stderr = &second, &second
 	if err := waitFor(read, "agent-browser", 2*time.Minute); err != nil {
 		return second.String(), fmt.Errorf("browser read after open: %v: %s", err, lastOf(second.String(), 200))

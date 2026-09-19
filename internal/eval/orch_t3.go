@@ -134,6 +134,7 @@ func (d *T3) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		"T3_TOKEN="+strings.TrimSpace(string(token)),
 		"T3_REPO="+env.Repo,
 		"T3_BRANCH="+strings.TrimSpace(string(branch)),
+		"T3_WORK_BRANCH=boxer-eval-"+env.RunID,
 		"T3_PROMPT="+prompt,
 		"T3_MODEL="+model,
 	)
@@ -146,7 +147,7 @@ func (d *T3) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err = <-done:
-	case <-time.After(12 * time.Minute): // worktree checkout, fresh VM, and for inside the harness install
+	case <-time.After(env.timeoutOr(12 * time.Minute)): // worktree checkout, fresh VM, and for inside the harness install
 		cmd.Process.Kill()
 		err = fmt.Errorf("t3 turn timed out")
 	}
@@ -246,7 +247,9 @@ ws.addEventListener("open", async () => {
       runtimeMode: "full-access", interactionMode: "default", createdAt: now(),
       bootstrap: {
         createThread: { projectId, title: "uname", modelSelection, runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null, createdAt: now() },
-        prepareWorktree: { projectCwd: env.T3_REPO, baseBranch: env.T3_BRANCH, branch: "boxer-eval" },
+        // Unique per cell: a fixed branch name makes two cells running at once collide when git
+        // adds the worktree, and the second one dies before the harness ever starts.
+        prepareWorktree: { projectCwd: env.T3_REPO, baseBranch: env.T3_BRANCH, branch: env.T3_WORK_BRANCH },
       },
     });
     // The turn ends when the session drops its activeTurnId again; the text arrives on the

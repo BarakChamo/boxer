@@ -5,6 +5,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BurntSushi/toml"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -327,5 +328,46 @@ func TestConductorSettings(t *testing.T) {
 	}
 	if _, err := Conductor(root, ""); err == nil {
 		t.Fatal("no shim directory must be an error")
+	}
+}
+
+// Codex reads project configuration from the main repository, so hooks installed only in a linked
+// worktree are never loaded and every command runs on the host, unsandboxed and without a word.
+// Orchestrators work almost entirely in linked worktrees, so this is the ordinary case.
+func TestCodexHooksReachTheMainRepositoryFromAWorktree(t *testing.T) {
+	main := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run(main, "init", "-q", "-b", "main")
+	run(main, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+	wt := filepath.Join(t.TempDir(), "wt")
+	run(main, "worktree", "add", "-q", wt, "-b", "task")
+
+	if _, err := Install("codex", config.Defaults(), "t", wt); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	for _, p := range []string{
+		filepath.Join(wt, ".codex", "hooks.json"),
+		filepath.Join(main, ".codex", "hooks.json"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("codex hooks are missing at %s: %v", p, err)
+		}
+	}
+
+	// In an ordinary checkout there is no second place to write, and nothing outside it is touched.
+	plain := t.TempDir()
+	run(plain, "init", "-q", "-b", "main")
+	if _, err := Install("codex", config.Defaults(), "t", plain); err != nil {
+		t.Fatalf("install in a plain checkout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(plain, ".codex", "hooks.json")); err != nil {
+		t.Errorf("codex hooks are missing in a plain checkout: %v", err)
 	}
 }

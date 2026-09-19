@@ -169,6 +169,11 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	all := fs.Bool("all", false, "every boxer sandbox (down)")
 	scopeName := fs.String("scope", "", "sandbox name from `boxer ls` (down): act on it without resolving a worktree")
 	shellLine := fs.String("c", "", "shell command line to run with sh -c (run)")
+	// A harness that replaces its terminal's shell with boxer-bash drives it over pipes, not a
+	// terminal, so the automatic detection below says "no TTY" and bash starts non-interactive: it
+	// prints no prompt, and a harness that delimits command output by the prompt (OpenHands does)
+	// sees nothing and waits forever. Such a caller asks for a terminal explicitly.
+	forceTTY := fs.Bool("tty", false, "allocate a terminal in the guest even when stdin is not one (run)")
 	task := fs.String("task", "", "name of a [tasks] entry in boxer.toml to run (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
@@ -291,7 +296,13 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if vm.Inside() {
 			return hostRun(argv, stdin, stdout, stderr) // already in the guest; run directly
 		}
-		tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+		tty := *forceTTY || (isTerminal(os.Stdin) && isTerminal(os.Stdout))
+		if *forceTTY {
+			// A caller that asked for a terminal explicitly is driving this shell, and it may write
+			// to it before the guest exists. Capture that input rather than let the guest terminal
+			// discard it when it opens.
+			stdin = readEarly(stdin)
+		}
 		code, err := e.Run(argv, box.RunOpts{Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty})
 		if err != nil {
 			if code == -1 { // passthrough policy: run on the host

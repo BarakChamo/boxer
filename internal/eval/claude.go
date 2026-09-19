@@ -82,6 +82,13 @@ func (d Claude) Prepare(env *Env, c Cell) error {
 			return err
 		}
 	}
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	// Without this the row silently measured the hook instead of the shim, and read as a pass.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	switch c.Entry {
 	case "project", "both":
 		if out, err := env.boxer(env.Repo, "install", "claude-code"); err != nil {
@@ -112,6 +119,9 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		cmd.Dir = env.Worktree() // the session opens in the worktree an orchestrator made
 	}
 	cmd.Env = append(env.BaseEnv(), d.modelEnv(env)...)
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := waitFor(cmd, "claude", env.timeout()); err != nil {

@@ -1,58 +1,69 @@
-# boxer eval report — tier matrix — 2026-09-19T14:58:20+08:00
+# boxer eval report — tier matrix — 2026-09-19T18:21:55+08:00
 
-The same Next.js development workload, across integration levels and harnesses: 18 cells,
+The same Next.js development workload, across integration levels and harnesses: 29 cells,
 3 at a time, each in its own git worktree with its own sandbox and its own automatic host
 port. A cell passes only when the page renders in a real browser, the change is in the
 worktree, and — for the prove-and-install task — the level itself is shown to have carried the work.
 
-**15/18 passed** (0 skipped), $0.53.
+**26/27 passed** (2 skipped), $0.86.
 
 | cell | level | status | guest | host port | turns | time | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| claude/rewrite/add-a-page | rewrite | pass | — | 52194 | 10 | 45s |  |
-| claude/rewrite/prove-and-install | rewrite | pass | linux | 51043 | 10 | 1m9s |  |
-| claude/tool/add-a-page | tool | pass | — | 52107 | 9 | 43s |  |
-| claude/tool/prove-and-install | tool | pass | linux | 51044 | 15 | 56s |  |
-| codex/rewrite/add-a-page | rewrite | pass | — | 51528 | 0 | 1m59s |  |
-| codex/rewrite/prove-and-install | rewrite | fail | linux | 51627 | 0 | 46s | signature: rewrite level, but nothing rewrote and nothing typed `boxer run` (0 denials, 0 allowed) |
-| opencode/plugin/add-a-page | rewrite | pass | — | 51775 | 0 | 46s |  |
-| opencode/plugin/prove-and-install | rewrite | fail | linux | 51928 | 0 | 42s | signature: rewrite level, but nothing rewrote and nothing typed `boxer run` (0 denials, 3 allowed) |
-| copilot/user/add-a-page | rewrite | pass | — | 51934 | 0 | 42s |  |
-| copilot/user/prove-and-install | rewrite | pass | linux | 52105 | 0 | 57s |  |
-| kimi/tool/add-a-page | tool | pass | — | 51459 | 0 | 34s |  |
-| kimi/tool/prove-and-install | tool | pass | linux | 52402 | 0 | 1m10s |  |
-| claude/shims/add-a-page | shims | pass | — | 52404 | 5 | 35s |  |
-| claude/shims/prove-and-install | shims | pass | linux | 52333 | 12 | 46s |  |
-| openhands/shell/prove-and-install | shell | fail | — | 52565 | 0 | 15m22s | agent: openhands timed out (transcript: /var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-openhands-shell-prove-and-install.agent.log) |
-| inside/claude/add-a-page | inside | pass | — | 52562 | 11 | 1m11s |  |
-| inside/claude/prove-and-install | inside | pass | linux | 52762 | 10 | 2m11s |  |
-| t3/orchestrator/prove-and-install | orchestrator | pass | linux | 51379 | 0 | 3m55s |  |
+| claude/rewrite/add-a-page | rewrite | pass | — | 57530 | 9 | 53s |  |
+| claude/rewrite/prove-and-install | rewrite | pass | linux | 57445 | 8 | 37s |  |
+| claude/tool/add-a-page | tool | pass | — | 57957 | 4 | 32s |  |
+| claude/tool/prove-and-install | tool | pass | linux | 58629 | 9 | 51s |  |
+| codex/rewrite/add-a-page | rewrite | pass | — | 57149 | 0 | 56s |  |
+| codex/rewrite/prove-and-install | rewrite | pass | linux | 57665 | 0 | 49s |  |
+| opencode/plugin/add-a-page | rewrite | pass | — | 57587 | 0 | 41s |  |
+| opencode/plugin/prove-and-install | rewrite | pass | linux | 57805 | 0 | 57s |  |
+| copilot/user/add-a-page | rewrite | pass | — | 57812 | 0 | 43s |  |
+| copilot/user/prove-and-install | rewrite | pass | linux | 57148 | 0 | 1m24s |  |
+| kimi/tool/add-a-page | tool | pass | — | 58065 | 0 | 45s |  |
+| kimi/tool/prove-and-install | tool | pass | linux | 58146 | 0 | 1m11s |  |
+| claude/shims/add-a-page | shims | pass | — | 58296 | 8 | 47s |  |
+| claude/shims/prove-and-install | shims | pass | linux | 58320 | 17 | 1m3s |  |
+| gemini/rewrite/add-a-page | rewrite | skip | — | — | 0 | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
+| gemini/rewrite/prove-and-install | rewrite | skip | — | — | 0 | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
+| grok/rewrite/add-a-page | rewrite | pass | — | 58468 | 0 | 33s |  |
+| grok/rewrite/prove-and-install | rewrite | pass | linux | 58545 | 0 | 55s |  |
+| pi/rewrite/add-a-page | rewrite | pass | — | 58062 | 0 | 43s |  |
+| pi/rewrite/prove-and-install | rewrite | pass | linux | 58849 | 0 | 48s |  |
+| dsh/tool/add-a-page | tool | pass | — | 58947 | 0 | 1m11s |  |
+| dsh/tool/prove-and-install | tool | pass | linux | 59042 | 0 | 54s |  |
+| openhands/shell/prove-and-install | shell | pass | linux | 59142 | 0 | 50s |  |
+| inside/claude/add-a-page | inside | fail | — | 58632 | 8 | 1m42s | browser: browser open: exit status 1 |
+| inside/claude/prove-and-install | inside | pass | linux | 59214 | 8 | 1m7s |  |
+| t3/orchestrator/add-a-page | orchestrator | pass | — | 59843 | 0 | 2m1s |  |
+| t3/orchestrator/prove-and-install | orchestrator | pass | linux | 59505 | 0 | 3m46s |  |
+| paperclip/orchestrator/prove-and-install | orchestrator | pass | linux | 59687 | 0 | 2m55s |  |
+| herdr/orchestrator/prove-and-install | orchestrator | pass | linux | 57154 | 0 | 1m16s |  |
 
 ## By level
 
 | level | passed |
 | --- | --- |
-| rewrite | 6/8 |
-| tool | 4/4 |
+| rewrite | 12/14 |
+| tool | 6/6 |
 | shims | 2/2 |
-| shell | 0/1 |
-| inside | 2/2 |
-| orchestrator | 1/1 |
+| shell | 1/1 |
+| inside | 1/2 |
+| orchestrator | 4/4 |
 
 ## What each agent did
 
 ### claude/rewrite — add-a-page
 
-- level `rewrite`, pass in 45s, 10 tool calls
-- tools: Bash×8, Read×1, Write×1
+- level `rewrite`, pass in 53s, 9 tool calls
+- tools: Bash×7, Read×1, Write×1
 - changed: boxer.toml, .mcp.json, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-add-a-page.trace.log`
 
 ### claude/rewrite — prove-and-install
 
-- level `rewrite`, pass in 1m9s, 10 tool calls
-- tools: Bash×9, Write×1
+- level `rewrite`, pass in 37s, 8 tool calls
+- tools: Bash×6, Write×2
 - the guest reported platform `linux`
 - the level carried it: the hook rewrote the command into `boxer run`
 - changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
@@ -61,16 +72,16 @@ worktree, and — for the prove-and-install task — the level itself is shown t
 
 ### claude/tool — add-a-page
 
-- level `tool`, pass in 43s, 9 tool calls
-- tools: Bash×6, Read×2, Write×1
+- level `tool`, pass in 32s, 4 tool calls
+- tools: Bash×3, Write×1
 - changed: boxer.toml, .mcp.json, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-add-a-page.trace.log`
 
 ### claude/tool — prove-and-install
 
-- level `tool`, pass in 56s, 15 tool calls
-- tools: Read×1, Write×2, mcp__boxer__boxer_run×11, mcp__boxer__boxer_status×1
+- level `tool`, pass in 51s, 9 tool calls
+- tools: Bash×3, Write×2, mcp__boxer__boxer_run×4
 - the guest reported platform `linux`
 - the level carried it: the agent used the `boxer_run` tool
 - changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
@@ -79,43 +90,46 @@ worktree, and — for the prove-and-install task — the level itself is shown t
 
 ### codex/rewrite — add-a-page
 
-- level `rewrite`, pass in 1m59s, 0 tool calls
+- level `rewrite`, pass in 56s, 0 tool calls
 - changed: boxer.toml, .agents/, .codex/, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-add-a-page.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-add-a-page.trace.log`
 
 ### codex/rewrite — prove-and-install
 
-- level `rewrite`, fail in 46s, 0 tool calls
+- level `rewrite`, pass in 49s, 0 tool calls
 - the guest reported platform `linux`
-- **the level did not prove itself**: rewrite level, but nothing rewrote and nothing typed `boxer run` (0 denials, 0 allowed)
+- the level carried it: the hook rewrote the command into `boxer run`
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-prove-and-install.trace.log`
 
 ### opencode/plugin — add-a-page
 
-- level `rewrite`, pass in 46s, 0 tool calls
+- level `rewrite`, pass in 41s, 0 tool calls
 - changed: boxer.toml, .opencode/, AGENTS.md, app/app/about/, opencode.json
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-add-a-page.trace.log`
 
 ### opencode/plugin — prove-and-install
 
-- level `rewrite`, fail in 42s, 0 tool calls
+- level `rewrite`, pass in 57s, 0 tool calls
 - the guest reported platform `linux`
-- **the level did not prove itself**: rewrite level, but nothing rewrote and nothing typed `boxer run` (0 denials, 3 allowed)
+- the level carried it: the integration layer carried it, though boxer logged no rewrite (it does not log one here)
+- changed: app/package-lock.json, app/package.json, boxer.toml, .opencode/, AGENTS.md, app/app/clsx/, opencode.json, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-prove-and-install.trace.log`
 
 ### copilot/user — add-a-page
 
-- level `rewrite`, pass in 42s, 0 tool calls
+- level `rewrite`, pass in 43s, 0 tool calls
 - changed: boxer.toml, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-add-a-page.trace.log`
 
 ### copilot/user — prove-and-install
 
-- level `rewrite`, pass in 57s, 0 tool calls
+- level `rewrite`, pass in 1m24s, 0 tool calls
 - the guest reported platform `linux`
 - the level carried it: the hook rewrote the command into `boxer run`
 - changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
@@ -124,68 +138,142 @@ worktree, and — for the prove-and-install task — the level itself is shown t
 
 ### kimi/tool — add-a-page
 
-- level `tool`, pass in 34s, 0 tool calls
+- level `tool`, pass in 45s, 0 tool calls
 - changed: boxer.toml, .agents/, .kimi-code/, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-add-a-page.trace.log`
 
 ### kimi/tool — prove-and-install
 
-- level `tool`, pass in 1m10s, 0 tool calls
+- level `tool`, pass in 1m11s, 0 tool calls
 - the guest reported platform `linux`
 - the level carried it: the agent used the `boxer_run` tool
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, node_modules/, package-lock.json, package.json, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-prove-and-install.trace.log`
 
 ### claude/shims — add-a-page
 
-- level `shims`, pass in 35s, 5 tool calls
-- tools: Bash×4, Write×1
+- level `shims`, pass in 47s, 8 tool calls
+- tools: Bash×6, Read×1, Write×1
 - changed: boxer.toml, .mcp.json, app/app/about/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-add-a-page.trace.log`
 
 ### claude/shims — prove-and-install
 
-- level `shims`, pass in 46s, 12 tool calls
-- tools: Bash×7, Skill×1, Write×1, mcp__boxer__boxer_run×2, mcp__boxer__boxer_status×1
+- level `shims`, pass in 1m3s, 17 tool calls
+- tools: Bash×14, Read×1, Skill×1, Write×1
 - the guest reported platform `linux`
 - the level carried it: a PATH shim carried the bare command into the guest
 - changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-prove-and-install.trace.log`
 
+### grok/rewrite — add-a-page
+
+- level `rewrite`, pass in 33s, 0 tool calls
+- changed: boxer.toml, .agents/, .grok/, .mcp.json, app/app/about/
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-add-a-page.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-add-a-page.trace.log`
+
+### grok/rewrite — prove-and-install
+
+- level `rewrite`, pass in 55s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: the hook rewrote the command into `boxer run`
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .grok/, .gstack/, .mcp.json, app/app/clsx/, where.txt
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-prove-and-install.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-prove-and-install.trace.log`
+
+### pi/rewrite — add-a-page
+
+- level `rewrite`, pass in 43s, 0 tool calls
+- changed: boxer.toml, .pi/, AGENTS.md, app/app/about/
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-add-a-page.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-add-a-page.trace.log`
+
+### pi/rewrite — prove-and-install
+
+- level `rewrite`, pass in 48s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: the hook rewrote the command into `boxer run`
+- changed: app/package-lock.json, app/package.json, boxer.toml, .pi/, AGENTS.md, app/app/clsx/, where.txt
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-prove-and-install.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-prove-and-install.trace.log`
+
+### dsh/tool — add-a-page
+
+- level `tool`, pass in 1m11s, 0 tool calls
+- changed: boxer.toml, .agents/, .dsh/, app/app/about/
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-add-a-page.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-add-a-page.trace.log`
+
+### dsh/tool — prove-and-install
+
+- level `tool`, pass in 54s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: the agent used the `boxer_run` tool
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .dsh/, app/app/clsx/, where.txt
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-prove-and-install.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-prove-and-install.trace.log`
+
 ### openhands/shell — prove-and-install
 
-- level `shell`, fail in 15m22s, 0 tool calls
+- level `shell`, pass in 50s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: a PATH shim carried the bare command into the guest
+- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-openhands-shell-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-openhands-shell-prove-and-install.trace.log`
 
 ### inside/claude — add-a-page
 
-- level `inside`, pass in 1m11s, 11 tool calls
-- tools: Bash×10, Write×1
-- changed: boxer.toml, .boxer-eval/, app/app/about/
+- level `inside`, fail in 1m42s, 8 tool calls
+- tools: Bash×7, Write×1
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-add-a-page.trace.log`
 
 ### inside/claude — prove-and-install
 
-- level `inside`, pass in 2m11s, 10 tool calls
-- tools: Bash×8, Write×2
+- level `inside`, pass in 1m7s, 8 tool calls
+- tools: Bash×6, Write×2
 - the guest reported platform `linux`
 - the level carried it: the harness itself ran in the guest; nothing was intercepted
 - changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-prove-and-install.trace.log`
 
+### t3/orchestrator — add-a-page
+
+- level `orchestrator`, pass in 2m1s, 0 tool calls
+- changed: app/app/about/, .mcp.json, boxer.toml
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-add-a-page.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-add-a-page.trace.log`
+
 ### t3/orchestrator — prove-and-install
 
-- level `orchestrator`, pass in 3m55s, 0 tool calls
+- level `orchestrator`, pass in 3m46s, 0 tool calls
 - the guest reported platform `linux`
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, app/app/clsx/, where.txt, .mcp.json, boxer.toml
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-prove-and-install.trace.log`
+
+### paperclip/orchestrator — prove-and-install
+
+- level `orchestrator`, pass in 2m55s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: the agent typed `boxer run` itself, from the installed agent contract
+- changed: .mcp.json, app/app/clsx/page.tsx, app/package-lock.json, app/package.json, boxer.toml, where.txt
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-paperclip-orchestrator-prove-and-install.agent.log`
+
+### herdr/orchestrator — prove-and-install
+
+- level `orchestrator`, pass in 1m16s, 0 tool calls
+- the guest reported platform `linux`
+- the level carried it: the hook rewrote the command into `boxer run`
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
+- transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-prove-and-install.agent.log`
+- trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-prove-and-install.trace.log`
 

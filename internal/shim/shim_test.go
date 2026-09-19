@@ -60,9 +60,22 @@ func TestShellWrapperExecsBashInTheSandbox(t *testing.T) {
 	bindir := t.TempDir()
 	os.WriteFile(filepath.Join(bindir, "boxer"), []byte("#!/bin/sh\necho \"boxer $*\"\n"), 0o755)
 	cmd := exec.Command(path, "-i")
-	cmd.Env = append(os.Environ(), "PATH="+bindir+":/usr/bin:/bin")
+	// PROMPT_COMMAND is what a harness driving a terminal relies on: it installs a prompt carrying
+	// a metadata block and reads the command's result back out of it. The wrapper has to carry it
+	// into the guest, and --norc has to stop the image's rc files reassigning the prompt after.
+	cmd.Env = append(os.Environ(), "PATH="+bindir+":/usr/bin:/bin", "PROMPT_COMMAND=export PS1=[MARK]", "TERM=xterm")
 	out, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(out)) != "boxer run -- bash -i" {
-		t.Fatalf("%q %v", out, err)
+	got := strings.TrimSpace(string(out))
+	for _, want := range []string{"boxer run --tty --", "PROMPT_COMMAND=export PS1=[MARK]", "TERM=xterm", "bash --noediting --norc -i"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the shell wrapper does not carry %q: %q %v", want, got, err)
+		}
+	}
+	// An unset variable must not arrive as an empty one, which would blank the prompt outright.
+	cmd = exec.Command(path, "-i")
+	cmd.Env = []string{"PATH=" + bindir + ":/usr/bin:/bin"}
+	out, _ = cmd.Output()
+	if strings.Contains(string(out), "PROMPT_COMMAND=") {
+		t.Fatalf("an unset PROMPT_COMMAND was passed anyway: %q", out)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,14 +23,18 @@ import (
 // a row. The harness knowledge stays in the existing drivers: a configuration is a Driver plus the
 // Cell that selects its level, which is why nothing here knows how to launch a harness.
 type MatrixConfig struct {
-	Name   string // the cell's name in the report
-	Level  string // rewrite | tool | shims | shell | inside | orchestrator
-	Driver Driver
+	Name  string // the cell's name in the report
+	Level string // rewrite | tool | shims | shell | inside | orchestrator
+	// Driver is a factory, not an instance: the orchestrator drivers carry per-session state (T3
+	// keeps a server handle), and the matrix runs cells at the same time, so one shared instance
+	// is a data race that surfaces as one cell's Run reaching into another cell's torn-down
+	// server. The older tiers run cells one after another and never saw it.
+	Driver func() Driver
 	Cell   Cell
 	// Signature reads the evidence that this level carried the work and says how it did: a hook
 	// rewrite, the run tool, a typed `boxer run`, a PATH shim. Naming the mechanism matters as much
 	// as passing, because two levels can both reach the guest by quite different roads.
-	Signature func(t trace, tr Transcript, guest string) (how string, err error)
+	Signature func(e evidence) (how string, err error)
 	Tasks     []string // lifecycles to run; empty means all of them
 }
 
@@ -42,31 +47,48 @@ func MatrixConfigs(tier string) []MatrixConfig {
 			Image: matrixImage, Intercept: []string{"npm", "node", "next"}}
 	}
 	return []MatrixConfig{
-		{Name: "claude/rewrite", Level: "rewrite", Driver: Claude{}, Signature: sigRewrite,
+		{Name: "claude/rewrite", Level: "rewrite", Driver: func() Driver { return Claude{} }, Signature: sigRewrite,
 			Cell: dev("claude-code", "rewrite", "project")},
-		{Name: "claude/tool", Level: "tool", Driver: Claude{}, Signature: sigTool,
+		{Name: "claude/tool", Level: "tool", Driver: func() Driver { return Claude{} }, Signature: sigTool,
 			Cell: dev("claude-code", "tool", "project")},
-		{Name: "codex/rewrite", Level: "rewrite", Driver: Codex{}, Signature: sigRewrite,
+		{Name: "codex/rewrite", Level: "rewrite", Driver: func() Driver { return Codex{} }, Signature: sigRewrite,
 			Cell: dev("codex", "rewrite", "project")},
-		{Name: "opencode/plugin", Level: "rewrite", Driver: OpenCode{}, Signature: sigRewrite,
+		{Name: "opencode/plugin", Level: "rewrite", Driver: func() Driver { return OpenCode{} }, Signature: sigRewrite,
 			Cell: dev("opencode", "rewrite", "plugin")},
-		{Name: "copilot/user", Level: "rewrite", Driver: Copilot{}, Signature: sigRewrite,
+		{Name: "copilot/user", Level: "rewrite", Driver: func() Driver { return Copilot{} }, Signature: sigRewrite,
 			Cell: dev("copilot", "rewrite", "user")},
-		{Name: "kimi/tool", Level: "tool", Driver: Kimi{}, Signature: sigTool,
+		{Name: "kimi/tool", Level: "tool", Driver: func() Driver { return Kimi{} }, Signature: sigTool,
 			Cell: dev("kimi", "tool", "user")},
 		// `mode = "off"` is the point of this row: no hook rewrites anything, so if the work still
 		// reaches the guest it was the shim on PATH that put it there.
-		{Name: "claude/shims", Level: "shims", Driver: Claude{}, Signature: sigShims,
+		{Name: "claude/shims", Level: "shims", Driver: func() Driver { return Claude{} }, Signature: sigShims,
 			Cell: func() Cell { c := dev("claude-code", "off", "project"); c.Shims = true; return c }()},
+
+		// The rest of the harnesses. Gemini and DSH are node programs, so their intercept list must
+		// not shadow their own runtime; DSH cannot rewrite at all, which makes tool mode its level.
+		{Name: "gemini/rewrite", Level: "rewrite", Driver: func() Driver { return Gemini{} }, Signature: sigRewrite,
+			Cell: dev("gemini-cli", "rewrite", "project")},
+		{Name: "grok/rewrite", Level: "rewrite", Driver: func() Driver { return Grok{} }, Signature: sigRewrite,
+			Cell: dev("grok", "rewrite", "project")},
+		{Name: "pi/rewrite", Level: "rewrite", Driver: func() Driver { return Pi{} }, Signature: sigRewrite,
+			Cell: dev("pi", "rewrite", "project")},
+		{Name: "dsh/tool", Level: "tool", Driver: func() Driver { return DSH{} }, Signature: sigTool,
+			Cell: func() Cell { c := dev("dsh", "tool", "project"); c.Intercept = []string{"next"}; return c }()},
 
 		// The levels with no boxer integration in the harness at all. OpenHands runs the one
 		// discriminating task only, because its loop is the slowest thing in the set.
-		{Name: "openhands/shell", Level: "shell", Driver: OpenHands{}, Signature: sigShims, Tasks: []string{proveTask},
+		{Name: "openhands/shell", Level: "shell", Driver: func() Driver { return OpenHands{} }, Signature: sigShims, Tasks: []string{proveTask},
 			Cell: func() Cell { c := dev("openhands", "off", "sdk"); c.Shims = true; return c }()},
-		{Name: "inside/claude", Level: "inside", Driver: Inside{}, Signature: sigInside,
+		{Name: "inside/claude", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside,
 			Cell: Cell{Harness: "inside-claude", Mode: "inside", Entry: "shell", Isolation: "worktree", Compliant: true, Tier: tier, Inside: "claude"}},
-		{Name: "t3/orchestrator", Level: "orchestrator", Driver: &T3{}, Signature: sigRewrite, Tasks: []string{proveTask},
+		// The orchestrators. Each one cuts its own worktree and launches a harness in it, so what is
+		// under test is whether boxer keys a sandbox to the worktree somebody else made.
+		{Name: "t3/orchestrator", Level: "orchestrator", Driver: func() Driver { return &T3{} }, Signature: sigOrchestrator,
 			Cell: dev("t3code", "rewrite", "project")},
+		{Name: "paperclip/orchestrator", Level: "orchestrator", Driver: func() Driver { return &Paperclip{} }, Signature: sigOrchestrator, Tasks: []string{proveTask},
+			Cell: dev("paperclip", "rewrite", "project")},
+		{Name: "herdr/orchestrator", Level: "orchestrator", Driver: func() Driver { return &Herdr{} }, Signature: sigOrchestrator, Tasks: []string{proveTask},
+			Cell: dev("herdr", "rewrite", "project")},
 	}
 }
 
@@ -121,22 +143,33 @@ func writeMatrixRepo(e *Env, c Cell, port int) error {
 	return os.WriteFile(filepath.Join(e.Repo, "boxer.toml"), []byte(matrixTOML(c, port)), 0o644)
 }
 
+// evidence is everything a signature may read. It is a struct rather than three parameters because
+// the orchestrator levels need the worktree too: a launcher that builds a clean environment for the
+// harness it starts does not pass boxer's trace variable through, so for those the filesystem is
+// the only place the answer exists.
+type evidence struct {
+	t     trace
+	tr    Transcript
+	guest string // what node reported as its platform
+	dir   string // the worktree that was judged
+}
+
 // The signatures. Each answers "did this level carry the work", which is not the same question as
 // "did the task pass": an agent can do the job on the host and render a perfectly good page.
 
-func sigRewrite(t trace, tr Transcript, guest string) (string, error) {
-	if err := guestIsLinux(guest); err != nil {
+func sigRewrite(e evidence) (string, error) {
+	if err := guestIsLinux(e.guest); err != nil {
 		return "", err
 	}
 	switch {
-	case t.rewrites > 0:
+	case e.t.rewrites > 0:
 		return "the hook rewrote the command into `boxer run`", nil
-	case typedAnywhere(t) || mentionsBoxerRun(tr.Raw):
+	case typedAnywhere(e.t) || mentionsBoxerRun(e.tr.Raw):
 		// The other half of the project layer: boxer installs an agent contract, and an agent that
 		// reads it types `boxer run` itself. The work is still in the guest by boxer's doing, so
 		// this is a pass — but a differently-shaped one, which is why the report says so.
 		return "the agent typed `boxer run` itself, from the installed agent contract", nil
-	case len(t.events) > 0 || len(t.allowed) > 0:
+	case len(e.t.events) > 0 || len(e.t.allowed) > 0:
 		// The OpenCode plugin rewrites in-process and writes no rewrite line, so the trace shows the
 		// layer loaded and the commands passing through it, and nothing more. Taken alone that would
 		// be weak evidence — but the caller has already established that the dependency really is
@@ -144,40 +177,43 @@ func sigRewrite(t trace, tr Transcript, guest string) (string, error) {
 		// fake both to reach this point. It is a pass with its mechanism named, not a silent one.
 		return "the integration layer carried it, though boxer logged no rewrite (it does not log one here)", nil
 	}
-	return "", fmt.Errorf("rewrite level, but nothing rewrote and nothing typed `boxer run` (%d denials, %d allowed)", t.denies, len(t.allowed))
+	return "", fmt.Errorf("rewrite level, but nothing rewrote and nothing typed `boxer run` (%d denials, %d allowed)", e.t.denies, len(e.t.allowed))
 }
 
-func sigTool(t trace, tr Transcript, guest string) (string, error) {
-	if err := guestIsLinux(guest); err != nil {
+func sigTool(e evidence) (string, error) {
+	if err := guestIsLinux(e.guest); err != nil {
 		return "", err
 	}
 	// A denial is what an agent that ignores the brief runs into; an agent that follows it simply
 	// uses the run tool and is never denied anything. Both prove the level, so both pass.
 	switch {
-	case usedRunTool(tr) || mentionsRunTool(tr.Raw):
+	case usedRunTool(e.tr) || mentionsRunTool(e.tr.Raw) || mentionsRunTool(e.t.raw):
+		// The trace counts as much as the transcript here: several harnesses do not name the MCP
+		// tools they called in their own output, and reading only the transcript failed a level
+		// whose evidence boxer had recorded itself.
 		return "the agent used the `boxer_run` tool", nil
-	case t.denies > 0:
+	case e.t.denies > 0:
 		return "the shell was denied and the work went through the run tool", nil
 	}
 	return "", fmt.Errorf("tool level, but the run tool was never used and nothing was ever denied")
 }
 
-func sigShims(t trace, tr Transcript, guest string) (string, error) {
-	if err := guestIsLinux(guest); err != nil {
+func sigShims(e evidence) (string, error) {
+	if err := guestIsLinux(e.guest); err != nil {
 		return "", err
 	}
-	if t.rewrites > 0 {
-		return "", fmt.Errorf("shim level, but the trace shows %d rewrites: a hook carried the work, not the shim", t.rewrites)
+	if e.t.rewrites > 0 {
+		return "", fmt.Errorf("shim level, but the trace shows %d rewrites: a hook carried the work, not the shim", e.t.rewrites)
 	}
 	return "a PATH shim carried the bare command into the guest", nil
 }
 
-func sigInside(t trace, tr Transcript, guest string) (string, error) {
-	if err := guestIsLinux(guest); err != nil {
+func sigInside(e evidence) (string, error) {
+	if err := guestIsLinux(e.guest); err != nil {
 		return "", err
 	}
-	if len(t.events) > 0 {
-		return "", fmt.Errorf("inside level, but the hook fired %d times: something outside was intercepting", len(t.events))
+	if len(e.t.events) > 0 {
+		return "", fmt.Errorf("inside level, but the hook fired %d times: something outside was intercepting", len(e.t.events))
 	}
 	return "the harness itself ran in the guest; nothing was intercepted", nil
 }
@@ -199,6 +235,30 @@ func typedAnywhere(t trace) bool {
 }
 
 func mentionsRunTool(raw string) bool { return strings.Contains(raw, "boxer_run") }
+
+// sigOrchestrator is for the launchers that start the harness themselves in a worktree they cut.
+// Paperclip builds a clean environment for that harness, so boxer's trace variable does not reach
+// it and no trace is written however well the interception worked. Absence of a trace therefore
+// says nothing here, and reading it as "nothing was intercepted" reports a working level as broken.
+// What does hold: the worktree the orchestrator made carries boxer's project layer, and the work
+// ran in the guest — which the caller has already corroborated against package.json.
+func sigOrchestrator(e evidence) (string, error) {
+	if err := guestIsLinux(e.guest); err != nil {
+		return "", err
+	}
+	if e.t.rewrites > 0 {
+		return "the hook rewrote the command into `boxer run`", nil
+	}
+	if typedAnywhere(e.t) || mentionsBoxerRun(e.tr.Raw) {
+		return "the agent typed `boxer run` itself, from the installed agent contract", nil
+	}
+	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".opencode"} {
+		if _, err := os.Stat(filepath.Join(e.dir, p)); err == nil {
+			return "the worktree the orchestrator cut carries boxer's project layer, and the work ran in the guest (its launcher passes no trace through, so there is nothing finer to read)", nil
+		}
+	}
+	return "", fmt.Errorf("the orchestrator's worktree carries no boxer layer, so nothing there could have sandboxed the work")
+}
 
 // guestIsLinux is the shared half of every signature: the agent recorded what `node` reported as
 // its platform, and on this host anything but linux means the command never left it.
@@ -303,45 +363,66 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		fmt.Fprintf(log, "  %s %-28s %s\n", mark(r.Status), name, strings.Join(r.Findings, "; "))
 		return r
 	}
-	if ok, why := cfg.Driver.Available("t2"); !ok {
+	driver := cfg.Driver()
+	if ok, why := driver.Available("t2"); !ok {
 		r.Status, r.Skipped = "skip", why
 		fmt.Fprintf(log, "  skip %-28s %s\n", name, why)
 		return r
 	}
 
 	slug := strings.NewReplacer("/", "-", ".", "-").Replace(name)
-	wt := filepath.Join(filepath.Dir(base), "matrix-"+slug)
+	// Under the base repository's own directory, not the shared temp root: a run that dies leaves
+	// its worktrees behind, and the next run then collides with a directory it did not make. The
+	// base is unique per run, so this cannot outlive it.
+	wt := filepath.Join(base+"-worktrees", slug)
+	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
+		return fail("worktree directory: %v", err)
+	}
 	if out, err := runIn(base, "git", "worktree", "add", "-q", "-b", "matrix/"+slug, wt); err != nil {
-		return fail("git worktree add: %v\n%s", err, lastOf(out, 200))
+		return fail("git worktree add: %v\n%s", err, lastOf(out, 300))
 	}
 	r.Worktree = wt
+	// A failed cell keeps its worktree: what a level did or did not do is answered by the files it
+	// left behind — the hooks it was installed with, the trace, the page — and removing them makes
+	// every failure a re-run. Passing cells are cleaned up.
 	defer func() {
 		_, _ = runIn(wt, boxerBin, "down")
-		_, _ = runIn(base, "git", "worktree", "remove", "--force", wt)
+		if r.Status == "pass" {
+			_, _ = runIn(base, "git", "worktree", "remove", "--force", wt)
+		}
 	}()
 
 	// The cell's own disposable world, with the worktree as its repository. NewEnv is not used
 	// here: it builds a repository of its own, and the whole point is to develop in this one.
+	// The scratch directory is short and outside the worktree on purpose: a unix socket path is
+	// limited to about 104 bytes, and herdr's control socket under a worktree named after its own
+	// cell does not fit. Keeping it out of the worktree also keeps it out of `git status`.
+	work, err := os.MkdirTemp("", "bxm-")
+	if err != nil {
+		return fail("scratch: %v", err)
+	}
+	defer func() {
+		if r.Status == "pass" {
+			_ = os.RemoveAll(work)
+		}
+	}()
 	env := &Env{
-		Work: filepath.Join(wt, ".matrix"), Repo: wt, Tier: "t2", Boxer: boxerBin, Log: log,
+		Work: work, Repo: wt, Tier: "t2", Boxer: boxerBin, Log: log,
 		RunID:        fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000_000),
 		MaxTurns:     40,
 		AgentTimeout: 15 * time.Minute,
 	}
 	env.Dist, env.Trace = filepath.Join(env.Work, "dist"), filepath.Join(env.Work, "trace.log")
-	if err := os.MkdirAll(env.Work, 0o755); err != nil {
-		return fail("scratch: %v", err)
-	}
 	if err := writeMatrixRepo(env, cfg.Cell, guestPort); err != nil {
 		return fail("write boxer.toml: %v", err)
 	}
 	if out, err := env.boxer(wt, "package", "all", "--out", env.Dist); err != nil {
 		return fail("boxer package: %v\n%s", err, lastOf(out, 200))
 	}
-	if err := cfg.Driver.Prepare(env, cfg.Cell); err != nil {
+	if err := driver.Prepare(env, cfg.Cell); err != nil {
 		return fail("prepare: %v", err)
 	}
-	defer cfg.Driver.Cleanup(env, cfg.Cell)
+	defer driver.Cleanup(env, cfg.Cell)
 
 	provision := time.Now()
 	if out, err := env.boxer(wt, "up"); err != nil {
@@ -366,7 +447,7 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 
 	agent := time.Now()
 	before := gatewayUsed()
-	tr, err := cfg.Driver.Run(env, cfg.Cell, matrixPrompt(task, r.HostPort))
+	tr, err := driver.Run(env, cfg.Cell, matrixPrompt(task, r.HostPort))
 	r.Agent, r.Spend, r.Raw = time.Since(agent), gatewayUsed()-before, tr.Raw
 	r.Turns, r.Tools, r.MCPTools, r.Browsed, r.Restarted = agentWork(tr.Raw)
 	r.UsedMCP, r.UsedBrowse = len(r.MCPTools) > 0, len(r.Browsed) > 0
@@ -390,6 +471,14 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	if env.Root != "" && env.Root != wt {
 		judged = env.Root
 		r.Worktree = judged
+		// That worktree is a sandbox of its own, and nothing has started its dev server: the
+		// orchestrator cut the worktree and ran an agent in it, which is not the same as bringing
+		// the environment up. Without this the check falls back to the cell's own port and reads a
+		// page in a worktree nobody changed — a 404 that says nothing about the orchestrator.
+		if out, err := env.boxer(judged, "up"); err != nil {
+			return fail("boxer up in the orchestrator's worktree: %v\n%s", err, lastOf(out, 300))
+		}
+		defer func() { _, _ = env.boxer(judged, "down") }()
 		if st, err := env.boxer(judged, "status", "--json"); err == nil {
 			var s struct {
 				Ports map[string]string `json:"ports"`
@@ -403,8 +492,17 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		}
 	}
 
-	body, berr := browserRead("http://127.0.0.1:" + r.HostPort + task.Route)
+	// Its own browser session, closed afterwards: cells run at the same time and a shared session
+	// is a shared tab.
+	defer func() { _ = exec.Command("agent-browser", "--session", slug, "close").Run() }()
+	body, berr := browserReadIn(slug, "http://127.0.0.1:"+r.HostPort+task.Route)
 	if berr != nil {
+		// A browser failure and a dead dev server look identical from here, and they have nothing to
+		// do with each other: one is the check's own tooling, the other is the agent having stopped
+		// the thing it was working on. Ask the port directly before blaming the browser.
+		if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 20*time.Second); err != nil {
+			return fail("the dev server stopped answering on %s (%v); the browser then also failed: %v", r.HostPort, err, berr)
+		}
 		return fail("browser: %v", berr)
 	}
 	r.Rendered = strings.Contains(body, task.Expect)
@@ -434,7 +532,7 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		if _, err := os.Stat(env.Trace); err != nil && cfg.Level != "inside" && cfg.Level != "shell" {
 			r.Signature = "the harness's hooks never ran: boxer was never invoked, so nothing could be intercepted"
 		}
-		how, err := cfg.Signature(readTrace(env.Trace), tr, r.Guest)
+		how, err := cfg.Signature(evidence{t: readTrace(env.Trace), tr: tr, guest: r.Guest, dir: judged})
 		if err != nil {
 			if r.Signature == "" {
 				r.Signature = err.Error()
@@ -444,11 +542,26 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		r.Signature, r.Carried = "", how
 	}
 
+	// Uncommitted work and committed work both count. An agent an orchestrator drives often commits
+	// what it did — Paperclip's does — and a check that only reads `git status` then reports a clean
+	// tree as "nothing happened", which is the opposite of the truth.
+	seen := map[string]bool{}
+	add := func(f string) {
+		if f == "" || seen[f] || strings.Contains(f, ".matrix") || strings.Contains(f, ".claude") {
+			return
+		}
+		seen[f] = true
+		r.Changed = append(r.Changed, f)
+	}
 	changes, _ := runIn(judged, "git", "status", "--porcelain")
 	for _, line := range strings.Split(strings.TrimSpace(changes), "\n") {
-		if f := strings.Fields(line); len(f) > 1 && !strings.Contains(line, ".matrix") && !strings.Contains(line, ".claude") {
-			r.Changed = append(r.Changed, f[len(f)-1])
+		if f := strings.Fields(line); len(f) > 1 {
+			add(f[len(f)-1])
 		}
+	}
+	committed, _ := runIn(judged, "git", "diff", "--name-only", "main...HEAD")
+	for _, f := range strings.Split(strings.TrimSpace(committed), "\n") {
+		add(strings.TrimSpace(f))
 	}
 	if len(r.Changed) == 0 {
 		return fail("the page renders but the worktree has no changes")

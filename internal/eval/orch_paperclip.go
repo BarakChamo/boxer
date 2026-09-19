@@ -74,6 +74,7 @@ func (d *Paperclip) api(env *Env) string {
 
 func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	api := d.api(env)
+	before := worktrees(env.Repo) // so the worktree Paperclip cuts can be named by difference
 	var companies, agents []struct {
 		ID string `json:"id"`
 	}
@@ -141,7 +142,7 @@ func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		Result json.RawMessage `json:"resultJson"`
 	}
 	var final run
-	deadline := time.Now().Add(8 * time.Minute)
+	deadline := time.Now().Add(env.timeoutOr(8 * time.Minute))
 	for time.Now().Before(deadline) && final.ID == "" {
 		time.Sleep(3 * time.Second)
 		var runs []run
@@ -156,7 +157,7 @@ func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 			}
 		}
 	}
-	env.Root = linkedWorktree(env.Repo)
+	env.Root = newWorktree(env.Repo, before)
 	raw := &strings.Builder{}
 	if final.ID == "" {
 		fmt.Fprintf(raw, "no heartbeat run finished\n%s", tail(d.srv.output(), 4000))
@@ -189,13 +190,30 @@ func commitAll(repo, msg string) error {
 }
 
 // linkedWorktree is the one linked worktree of repo, or "" when the orchestrator made none.
-func linkedWorktree(repo string) string {
+// worktrees is every working tree of repo's repository, resolved. It is taken before and after the
+// orchestrator runs so the one it created can be named by difference. Picking "the first one that
+// is not this one" was wrong in two ways that only appear under the matrix: the repository under
+// test is itself a linked worktree, so the main checkout matched first, and several cells run at
+// once, so a neighbouring cell's worktree could match instead. Both made the eval judge the wrong
+// directory and report a 404 against a page nobody had changed.
+func worktrees(repo string) map[string]bool {
 	out, _ := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain").Output()
+	set := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
-		if p, ok := strings.CutPrefix(line, "worktree "); ok && p != repo {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
 			if r, err := filepath.EvalSymlinks(p); err == nil {
-				return r
+				p = r
 			}
+			set[p] = true
+		}
+	}
+	return set
+}
+
+// newWorktree is the working tree that appeared since before was taken.
+func newWorktree(repo string, before map[string]bool) string {
+	for p := range worktrees(repo) {
+		if !before[p] && p != repo {
 			return p
 		}
 	}

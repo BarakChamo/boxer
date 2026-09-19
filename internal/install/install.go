@@ -19,7 +19,27 @@ import (
 
 	"github.com/BarakChamo/boxer/internal/bundle"
 	"github.com/BarakChamo/boxer/internal/config"
+	"github.com/BarakChamo/boxer/internal/scope"
 )
+
+// mainRepo is the main repository's working tree when root is a linked worktree, and "" otherwise
+// (including when root is not a git repository at all, or the main working tree cannot be reached —
+// a bare main repository has none).
+func mainRepo(root string) string {
+	g, err := scope.Detect(root)
+	if err != nil || !g.Linked {
+		return ""
+	}
+	// CommonDir is the main repository's .git directory; its parent is that working tree.
+	main := filepath.Dir(g.CommonDir)
+	if main == "" || main == root {
+		return ""
+	}
+	if fi, err := os.Stat(main); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return main
+}
 
 // Result reports what Install did. A write failure is kept here rather than returned at every
 // call site: the file writers are a long list of one-liners, and threading an error through each
@@ -70,6 +90,17 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	case "codex":
 		r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json"))
 		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
+		// Codex resolves project configuration to the *main* repository, so in a linked worktree it
+		// never reads the worktree's own .codex/hooks.json — and every command then runs on the
+		// host, unsandboxed and silently. Orchestrators work almost exclusively in linked
+		// worktrees, which makes this the common case rather than a corner. Verified against codex
+		// on 2026-09-19: hooks in the worktree alone fire not once; the same hooks in the main
+		// repository fire SessionStart, PreToolUse and SessionEnd.
+		if main := mainRepo(root); main != "" {
+			r.copy(hooksFile, filepath.Join(main, ".codex", "hooks.json"))
+			r.Notes = append(r.Notes,
+				"This is a linked worktree, and Codex reads project hooks from the main repository, so the hooks were installed in "+main+" as well.")
+		}
 		r.Notes = append(r.Notes,
 			"Codex loads project hooks only after they are trusted: run /hooks once, or pass --dangerously-bypass-hook-trust to `codex exec`.",
 			"Add the run tool to .codex/config.toml:\n  [mcp_servers.boxer]\n  command = \"boxer\"\n  args = [\"mcp\", \"--harness\", \"codex\"]")
