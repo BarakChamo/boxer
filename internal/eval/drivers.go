@@ -39,7 +39,11 @@ var harnessTimeout = 4 * time.Minute
 // own copy of this start/wait/kill dance, and they had drifted: some killed only the parent, some
 // reported the timeout without the output that explains it. The name is the harness, so the
 // timeout error reads as the driver's own.
-func wait(cmd *exec.Cmd, name string) error {
+func wait(cmd *exec.Cmd, name string) error { return waitFor(cmd, name, harnessTimeout) }
+
+// waitFor is wait with a caller-chosen bound: a development task is not one prompt, and the flow
+// and SDLC tiers need minutes where a single-answer cell needs four.
+func waitFor(cmd *exec.Cmd, name string, timeout time.Duration) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -48,7 +52,7 @@ func wait(cmd *exec.Cmd, name string) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(harnessTimeout):
+	case <-time.After(timeout):
 		_ = cmd.Process.Kill()
 		// Reap, but never wait forever for it: Wait blocks until every inherited pipe is closed,
 		// and a harness that spawns children hands them the same pipe, so killing the parent does
@@ -57,7 +61,7 @@ func wait(cmd *exec.Cmd, name string) error {
 		case <-done:
 		case <-time.After(5 * time.Second):
 		}
-		return fmt.Errorf("%s timed out after %s", name, harnessTimeout)
+		return fmt.Errorf("%s timed out after %s", name, timeout)
 	}
 }
 

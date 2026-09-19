@@ -23,6 +23,8 @@ import (
 )
 
 func main() {
+	parallel := flag.Int("parallel", 4, "sdlc: how many lifecycles run at once")
+	limit := flag.Int("limit", 0, "sdlc: run only the first n lifecycles")
 	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live), adherence (live; brief, recovery, multistep per harness), or flow (one real development session; slow, network-heavy, on demand)")
 	models := flag.String("models", "", "adherence: comma-separated gateway model ids to run every cell on; default BOXER_EVAL_MODEL")
 	jsonl := flag.String("jsonl", "", "adherence: append each result here and render the report from the whole file, so cells can run one at a time")
@@ -73,6 +75,36 @@ func main() {
 	}
 
 	drivers := eval.Drivers()
+	// The SDLC tier is its own runner: its lifecycles run at the same time on purpose, which the
+	// cell loop below deliberately does not do.
+	if *tier == "sdlc" {
+		tasks := eval.SDLCTasks()
+		if *cell != "" {
+			var picked []eval.SDLCTask
+			for _, t := range tasks {
+				if strings.Contains(t.Name, *cell) {
+					picked = append(picked, t)
+				}
+			}
+			tasks = picked
+		}
+		if *limit > 0 && *limit < len(tasks) {
+			tasks = tasks[:*limit]
+		}
+		rs := eval.RunSDLC(boxerBin, tasks, *parallel, os.Stderr)
+		report := eval.SDLCReport(rs, *parallel)
+		if *out != "" {
+			_ = os.WriteFile(*out, []byte(report), 0o644)
+		}
+		fmt.Println(report)
+		for _, r := range rs {
+			if r.Status != "pass" {
+				os.Exit(1)
+			}
+		}
+		return
+	}
+
 	adherence := *tier == "adherence"
 	if adherence {
 		drivers = eval.AdherenceDrivers(drivers)
