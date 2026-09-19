@@ -111,11 +111,17 @@ own trace (a rewrite, a denial, or the pointed absence of either), and `where.tx
 which is how a level that quietly ran on the host is caught. Tier and exclusions:
 [eval-matrix.md](eval-matrix.md).
 
-**15 of 18** on 2026-09-19 for $0.53: tool mode 4/4, shims 2/2, inside 2/2, orchestrator 1/1,
-rewrite 6/8, shell substitution 0/1. Two failures, both real: **Codex is never intercepted** — its
-hooks fire zero times across a whole session, and one run did the work on the host — and OpenHands
-executes through `boxer-bash` but cannot finish the workload in fifteen minutes. Codex's cause is
-still open; its hooks fire normally at t1 and in a live standalone repository and worktree.
+**27 of 27** on 2026-09-19 for $1.49, three at a time: hook rewrite, tool mode, PATH shims, shell
+substitution, inside mode and orchestrator all carry a development session, across nine harnesses
+and three orchestrators. Gemini is skipped: its CLI speaks only the Gemini API, which the gateway
+does not serve.
+
+Getting there found two faults in boxer that the single-command tiers could not see. **Codex was
+never intercepted in a linked worktree** — it resolves project configuration to the main repository,
+so the hooks installed into the worktree were never read and every command ran on the host; every
+orchestrator works in linked worktrees, so this was the ordinary case. And **`boxer run` discarded
+input written before the sandbox attached**, which silently lost the shell configuration a harness
+writes immediately after spawning its terminal. Both are fixed, with tests.
 
 Concurrency is the point: twelve worktrees, three sandboxes at a time, no clash in files, ports,
 packs or state, and no command reached the host. Four concurrent sandboxes cost about 4 GB of

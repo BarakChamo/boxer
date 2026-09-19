@@ -192,6 +192,12 @@ func (d *Herdr) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		"--timeout", strconv.FormatInt(env.timeoutOr(4*time.Minute).Milliseconds(), 10))
 	tr.Raw += raw
 	if err != nil {
+		// Same reason as the wait above: a timeout says only that the agent never went idle, and
+		// what the pane is showing says why.
+		if _, pane, perr := d.cli(env, "pane", "read", paneID); perr == nil {
+			tr.Raw += "\n--- pane ---\n" + pane
+			return tr, fmt.Errorf("%v; the pane showed: %s", err, lastOf(pane, 600))
+		}
 		return tr, err
 	}
 	_, raw, err = d.cli(env, "agent", "read", "boxeval", "--source", "recent-unwrapped", "--lines", "200")

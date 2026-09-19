@@ -25,9 +25,15 @@ bin/boxer-eval --tier matrix --cell claude/rewrite --limit 1   # one configurati
 | `copilot/user` | Copilot CLI | hooks, rewrite, user scope | its hooks exist only at user scope |
 | `kimi/tool` | Kimi Code | tool mode, user scope | cannot rewrite by design, so tool mode is its real path |
 | `claude/shims` | Claude Code | PATH shims | nothing hooks anything; the shim is the whole mechanism |
+| `gemini/rewrite` | Gemini CLI | hooks, rewrite, project | skipped here: it speaks only the Gemini API |
+| `grok/rewrite` | Grok Build | hooks, rewrite, project | a fourth hook dialect |
+| `pi/rewrite` | pi | hooks, rewrite, project | a fifth |
+| `dsh/tool` | DSH | tool mode | cannot rewrite; tool mode is its only level |
 | `openhands/shell` | OpenHands | shell substitution | the agent's entire shell is the sandbox |
 | `inside/claude` | `boxer shell claude` | inside | the harness runs in the guest, beside the dev server |
 | `t3/orchestrator` | T3 Code → Claude | orchestrator | the orchestrator cuts the worktree and launches the harness |
+| `paperclip/orchestrator` | Paperclip → Claude | orchestrator | launches with an environment of its own |
+| `herdr/orchestrator` | herdr → Claude | orchestrator | drives an interactive harness in a terminal pane |
 
 Each configuration runs in its own linked git worktree with its own sandbox and its own automatic
 host port, three at a time.
@@ -60,38 +66,43 @@ change is in the worktree, and the host leak canary is absent.
 
 ## Results, 2026-09-19
 
-**15 of 18** on the last full run ($0.53, three at a time), by level:
+**27 of 27**, three at a time, $1.49. Two Gemini cells skip: its CLI speaks only the Gemini API,
+which the AI Gateway does not serve, so it needs `GEMINI_API_KEY` to run at all.
 
-| level | passed | |
+| level | passed | carried by |
 | --- | --- | --- |
-| rewrite | 6/8 | codex fails; see below |
-| tool | 4/4 | both Claude Code and Kimi Code |
-| shims | 2/2 | |
-| inside | 2/2 | |
-| orchestrator | 1/1 | T3 Code driving Claude, in its own worktree |
-| shell substitution | 0/1 | OpenHands works but does not finish in 15 minutes |
+| hook rewrite | 12/12 run | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
+| tool mode | 6/6 | Claude Code, Kimi Code, DSH |
+| PATH shims | 2/2 | Claude Code with `mode = "off"` |
+| shell substitution | 1/1 | OpenHands, its terminal's shell replaced by `boxer-bash` |
+| inside | 2/2 | Claude Code in the guest |
+| orchestrator | 4/4 | T3 Code, Paperclip, herdr |
 
-Every cell ran on one model (`BOXER_EVAL_MODEL`), not each harness's own. That is deliberate — with
-the model held constant the integration level is the only variable — but it means these numbers are
-not comparable with tier t2, where each harness uses its own.
+Every cell runs on one model rather than each harness's own (`BOXER_EVAL_MODEL`). That is deliberate
+— with the model held constant the integration level is the only variable — but it means these
+numbers are not comparable with tier t2, where each harness uses its own.
 
-### Codex does not get intercepted
+### What this found
 
-`codex/rewrite` fails the discriminating task, reproducibly, on two different models: sixteen shell
-commands ran and **boxer's hook fired zero times** — no trace file was created at all. One run
-recorded platform `darwin`, meaning the dependency install and `node` ran on the host.
+Two faults in boxer, neither visible to a tier that asks one question and reads one answer:
 
-The passes codex does collect come from the agent reading the installed agent contract and typing
-`boxer run` itself. That is persuasion, not containment, and it is not a level.
+- **Codex was never intercepted in a linked worktree.** Codex resolves project configuration to the
+  main repository, so the hooks `boxer install codex` wrote into the worktree were never read: every
+  command ran on the host, and one run installed a dependency and ran `node` there. Every
+  orchestrator works in linked worktrees, so this was the ordinary case. The installer now writes
+  the hooks to the main repository as well.
+- **`boxer run` discarded input written before the sandbox attached**, and gave the guest a terminal
+  only when its own stdin already was one. A harness that replaces its terminal's shell got a
+  non-interactive shell that never printed a prompt; and because a sandbox takes about twenty
+  seconds to attach while OpenHands configures its shell one second after spawning it, the prompt it
+  parses command results out of was thrown away every time. `boxer run --tty` asks for a terminal
+  explicitly and captures stdin from the start; the wrapper requests it, carries `PROMPT_COMMAND`
+  across, and disables readline and rc files.
 
-What has been ruled out: the hooks fire correctly at tier t1, in a live standalone repository, and
-in a live linked git worktree (`SessionStart`, `PreToolUse` and a rewrite all appear in the trace).
-So it is not worktrees, not hook trust, and not the model. **The cause is still open.**
-
-### OpenHands is too slow rather than broken
-
-Shell substitution executes — the terminal really is `boxer-bash`, and the transcript shows commands
-running through it — but the loop does not finish this workload inside fifteen minutes.
+And several in the evals themselves, each of which had been reporting a pass for something it was
+not measuring — the shim row installed a rewriting hook beside the shim, the tool signature ignored
+boxer's own trace, orchestrator cells were judged in the wrong worktree, and a shared driver
+instance crashed the run once cells ran at the same time.
 
 ### What the evidence is worth
 
@@ -101,19 +112,18 @@ really be in `app/package.json`, and the level's own signature has to show boxer
 — and it is never read alone. An earlier version of this tier trusted it, and an agent that had
 installed nothing passed.
 
-The OpenCode plugin rewrites in-process and writes no rewrite line, so its evidence is the layer
-being loaded plus the corroboration above. The report names that mechanism rather than reporting it
-as an ordinary hook rewrite.
+Two levels need their evidence read differently, and the report names which mechanism it found. The
+OpenCode plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher builds a
+clean environment for the harness it starts, so boxer's trace variable never reaches it and no trace
+is written however well the interception worked; for those the worktree the orchestrator cut is the
+evidence.
 
 ## What this deliberately leaves out
 
-A representative sample, not a full cross product. Left out, with reasons:
+Every harness and orchestrator this machine can run is now in the matrix. What is still left out:
 
-- **Gemini** — needs your own key; the gateway has no Gemini protocol.
-- **DSH** — a plugin stack rather than a single binary: a profile patch plus the Claude hook bridge.
-- **Paperclip, herdr** — a config patch and an issue id; pane-driven, respectively.
-- **pi, Grok** — rewrite level, already covered by two rows, and Grok costs a denial on every first
-  command.
+- **Conductor** — has no command line at all; it needs the GUI, and its procedure is in
+  [orchestrators.md](orchestrators.md).
 - **MCP servers in the guest** — the SDLC tier covers those, with evidence; repeating them here
   would change two variables at once.
 
