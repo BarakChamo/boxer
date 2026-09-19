@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -310,10 +311,27 @@ func browserRead(url string) (string, error) {
 	cmd := exec.Command("agent-browser", "read", url)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := waitFor(cmd, "agent-browser", 2*time.Minute); err != nil {
-		return out.String(), fmt.Errorf("%v: %s", err, lastOf(out.String(), 200))
+	if err := waitFor(cmd, "agent-browser", 2*time.Minute); err == nil {
+		return out.String(), nil
 	}
-	return out.String(), nil
+	// A page can be correct and not be 200: an error boundary renders its message *with* a 500,
+	// which is the whole point of an error boundary. The browser refuses to read those, so the
+	// body is fetched directly and judged on what it says rather than on its status.
+	body, status, err := fetchBody(url)
+	if err != nil {
+		return out.String(), fmt.Errorf("browser: %s; fetch: %v", lastOf(out.String(), 120), err)
+	}
+	return fmt.Sprintf("[http %d]\n%s", status, body), nil
+}
+
+func fetchBody(url string) (string, int, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	return string(b), resp.StatusCode, err
 }
 
 func firstLine(s string) string {
