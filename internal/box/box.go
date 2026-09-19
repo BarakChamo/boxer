@@ -280,12 +280,17 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	if err := e.VM.Start(e.Scope.Key); err != nil {
 		return created, e.fail(&Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
 	}
-	ranSetup, err := e.setup()
+	// Two halves, in order. The image half changes the guest and is snapshotted; the worktree half
+	// prepares the files the host mounted, and a snapshot can never stand in for it.
+	ranImageSetup, err := e.imageSetup()
 	if err != nil {
 		return created, err
 	}
-	if ranSetup {
+	if ranImageSetup {
 		e.PackEnv()
+	}
+	if err := e.setup(); err != nil {
+		return created, err
 	}
 	// Services come after the snapshot: a pack should carry what is installed, not a process that
 	// was running when it was taken.
@@ -425,8 +430,10 @@ func PackPath(key string) string {
 // it today; the keys that 1.1 adds (start, env, mounts) join it as they land.
 func EnvKey(image string, cfg config.Config) string {
 	key := image + "\x00env"
-	for _, c := range cfg.Setup {
-		key += "\x00setup:" + c
+	// Only what the pack actually contains: the image and the commands that change it. `setup`
+	// prepares the worktree, which no pack carries, so it does not belong in the key.
+	for _, c := range cfg.ImageSetup {
+		key += "\x00image_setup:" + c
 	}
 	for _, k := range sortedKeys(cfg.Env) {
 		key += "\x00env:" + k + "=" + cfg.Env[k]
@@ -465,7 +472,7 @@ func sortedCopy(in []string) []string {
 
 // envPack returns the pack of image with this repository's setup already run, when one exists.
 func (e *Env) envPack(image string) string {
-	if len(e.Cfg.Setup) == 0 {
+	if len(e.Cfg.ImageSetup) == 0 {
 		return ""
 	}
 	side := PackPath(EnvKey(image, e.Cfg))
@@ -479,7 +486,7 @@ func (e *Env) envPack(image string) string {
 // returns the path it removed, or "" when there was nothing cached.
 func (e *Env) DropEnvPack() (string, error) {
 	image, _ := e.Image()
-	if image == "" || len(e.Cfg.Setup) == 0 {
+	if image == "" || len(e.Cfg.ImageSetup) == 0 {
 		return "", nil
 	}
 	side := PackPath(EnvKey(image, e.Cfg))
@@ -490,6 +497,8 @@ func (e *Env) DropEnvPack() (string, error) {
 		return "", err
 	}
 	_ = os.Remove(strings.TrimSuffix(side, ".smolmachine") + ".lock")
+	// A rebuild means "prepare this from scratch", which includes the worktree half.
+	_ = os.Remove(setupMarkerPath(e.Scope.Key, e.Cfg))
 	return side, nil
 }
 
@@ -501,7 +510,7 @@ func (e *Env) DropEnvPack() (string, error) {
 // once per host per environment. Failure is reported and never blocks the run.
 func (e *Env) PackEnv() {
 	image, _ := e.Image()
-	if image == "" || e.Cfg.Smolfile != "" || len(e.Cfg.Setup) == 0 || e.Inside() {
+	if image == "" || e.Cfg.Smolfile != "" || len(e.Cfg.ImageSetup) == 0 || e.Inside() {
 		return
 	}
 	side := PackPath(EnvKey(image, e.Cfg))
@@ -788,20 +797,58 @@ func (e *Env) waitReady() error {
 // quotes sooner or later.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-const setupMarker = "/var/lib/boxer/setup-done"
+// imageSetupMarker lives in the guest, so it travels in the pack: that is exactly what lets a new
+// VM skip work that is already in the image.
+const imageSetupMarker = "/var/lib/boxer/image-setup-done"
+
+// setup prepares the worktree the host mounted — installing dependencies into it, usually. Its
+// marker is on the host, keyed to the scope and to what the setup list says, because the work
+// lands in the worktree rather than in the guest: a pack cannot carry it, and a VM recreated for
+// the same worktree should not repeat it.
+func (e *Env) setup() error {
+	if len(e.Cfg.Setup) == 0 {
+		return nil
+	}
+	marker := setupMarkerPath(e.Scope.Key, e.Cfg)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	for _, cmd := range e.Cfg.Setup {
+		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
+		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
+			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
+		if err != nil || code != 0 {
+			// The VM stays: the guest is fine and the next attempt should not pay for a new one.
+			// An image-setup failure is the opposite — a half-built guest is worth throwing away.
+			return e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
+				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(marker, nil, 0o644)
+}
+
+// setupMarkerPath names the host-side record that this worktree has been prepared for this setup
+// list. Changing the list changes the path, so the new commands run.
+func setupMarkerPath(scopeKey string, cfg config.Config) string {
+	h := sha256.Sum256([]byte(strings.Join(cfg.Setup, "\x00")))
+	return filepath.Join(filepath.Dir(LastUsedDir()), "setup", scopeKey+"-"+hex.EncodeToString(h[:4]))
+}
 
 // setup runs the configured commands once per VM (R-GUEST-2). Failure deletes the VM.
-// setup runs the configured commands once per VM, recorded by a marker file inside the guest. It
-// reports whether it ran them, so the caller can snapshot the result: a VM created from an
-// environment pack carries the marker and runs nothing, which is the whole point of the pack.
-func (e *Env) setup() (ran bool, err error) {
-	if len(e.Cfg.Setup) == 0 {
+// imageSetup runs the commands that change the guest image, once per VM, recorded by a marker
+// inside the guest. It reports whether it ran them, so the caller can snapshot the result: a VM
+// created from an environment pack carries the marker and runs nothing, which is the pack's point.
+func (e *Env) imageSetup() (ran bool, err error) {
+	if len(e.Cfg.ImageSetup) == 0 {
 		return false, nil
 	}
 	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
 	// a VM that had already run them, which for a repository whose setup installs dependencies is
 	// minutes, not milliseconds.
-	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+setupMarker)
+	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+imageSetupMarker)
 	if err != nil || vm.TransportFailure(out) {
 		return false, e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
@@ -809,19 +856,19 @@ func (e *Env) setup() (ran bool, err error) {
 	if code == 0 {
 		return false, nil
 	}
-	for _, cmd := range e.Cfg.Setup {
-		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
+	for _, cmd := range e.Cfg.ImageSetup {
+		fmt.Fprintf(e.Stderr, "boxer: image setup: %s\n", cmd)
 		// Setup sees the same environment as every later command: a build that needs a registry
 		// token or a proxy setting needs it while installing, not only when running.
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
 			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
 		if err != nil || code != 0 {
 			_ = e.VM.Delete(e.Scope.Key)
-			return false, e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
-				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
+			return false, e.fail(&Error{Reason: fmt.Sprintf("image setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
+				Fix: "fix the `image_setup` list in boxer.toml, then: boxer up"})
 		}
 	}
-	_, code, err = e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+setupMarker)
+	_, code, err = e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+imageSetupMarker)
 	if err == nil && code != 0 {
 		err = fmt.Errorf("writing the setup marker exited %d", code)
 	}

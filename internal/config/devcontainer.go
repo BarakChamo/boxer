@@ -21,6 +21,7 @@ import (
 // cannot do — so boxer refuses them by name rather than ignoring them silently.
 type devcontainer struct {
 	Image             string            `json:"image"`
+	OnCreateCommand   any               `json:"onCreateCommand"`
 	PostCreateCommand any               `json:"postCreateCommand"`
 	PostStartCommand  any               `json:"postStartCommand"`
 	ForwardPorts      []any             `json:"forwardPorts"`
@@ -74,6 +75,10 @@ func (c *Config) mergeDevcontainer(path string) error {
 	if d.Image == "" {
 		delete(c.Sources, "image")
 	}
+	// onCreateCommand runs once when the container is built and is cacheable, which is exactly
+	// boxer's image_setup; postCreateCommand runs for the workspace, which is boxer's setup. The
+	// specification draws the line for the same reason boxer does.
+	set("image_setup", len(c.ImageSetup) > 0, func() { c.ImageSetup = commandList(d.OnCreateCommand) })
 	set("setup", len(c.Setup) > 0, func() { c.Setup = commandList(d.PostCreateCommand) })
 	set("start", len(c.Start) > 0, func() { c.Start = commandList(d.PostStartCommand) })
 	// A value still at its default was never set by anyone, so the devcontainer's answer is the

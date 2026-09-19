@@ -51,6 +51,7 @@ eval-adherence: build  ## does a live model follow the brief; four models, repor
 	  --jsonl docs/eval-adherence.jsonl --out docs/eval-adherence.md
 
 eval-flow: build  ## one real development session: scaffold, serve, MCP in the guest, restart (slow, needs the network)
+	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier flow --out docs/eval-flow.md
 
 package: build    ## render the package and every client view into dist/, and refresh the checked-in plugin/

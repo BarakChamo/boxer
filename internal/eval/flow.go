@@ -60,8 +60,16 @@ func (Flow) Prepare(env *Env, c Cell) error {
 	port := 3111
 	cfg := fmt.Sprintf(`require_worktree = "off"
 image = "mirror.gcr.io/library/node:24-bookworm-slim"
+
+# The image half: a global install, so it belongs in the pack and every later worktree has the MCP
+# server without fetching it again.
+image_setup = ["npm i -g next-devtools-mcp@latest"]
+
+# The worktree half: this writes into /workspace, which no pack carries, so it runs per worktree.
+# The guard makes it idempotent, because a worktree that already has the app must not be scaffolded
+# over.
 setup = [
-  "npx --yes create-next-app@%s app --yes --ts --app --no-eslint --no-tailwind --no-src-dir --no-import-alias --use-npm --skip-install",
+  "[ -d app ] || npx --yes create-next-app@%s app --yes --ts --app --no-eslint --no-tailwind --no-src-dir --no-import-alias --use-npm --skip-install",
   "cd app && npm install --no-audit --no-fund",
 ]
 start = ["cd app && npx next dev -p %d -H 0.0.0.0"]
@@ -152,8 +160,8 @@ func (d Flow) Run(env *Env, c Cell, _ string) (Transcript, error) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(out, "create-next-app") {
-			return fmt.Errorf("the environment pack must make the scaffold unnecessary on a restart")
+		if strings.Contains(out, "Creating a new Next.js app") {
+			return fmt.Errorf("a restart must not scaffold over the existing app")
 		}
 		return httpOK("http://127.0.0.1:3111/", 60*time.Second)
 	}); err != nil {
@@ -174,7 +182,7 @@ func (d Flow) mcpTools(env *Env) ([]string, error) {
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 	}, "\n") + "\n"
-	out, err := env.boxerStdin(env.Repo, in, "run", "--", "npx", "--yes", "next-devtools-mcp@latest")
+	out, err := env.boxerStdin(env.Repo, in, "run", "--", "next-devtools-mcp")
 	if err != nil {
 		return nil, fmt.Errorf("mcp through boxer run: %v\n%s", err, lastOf(out, 400))
 	}
@@ -236,14 +244,20 @@ func (d Flow) runAgent(env *Env, c Cell) (Transcript, error) {
 		return Transcript{}, err
 	}
 	// The dev server's own tools, running beside the code — which is inside the sandbox.
-	mcp := `{"mcpServers":{"next-devtools":{"command":"boxer","args":["run","--","npx","-y","next-devtools-mcp@latest"]}}}`
+	// Exactly what a user would write, except that the server runs in the sandbox: `boxer run`
+	// is the command, and the harness neither knows nor needs to.
+	mcp := `{"mcpServers":{"next-devtools":{"command":"boxer","args":["run","--","next-devtools-mcp"]}}}`
 	path := filepath.Join(env.Repo, ".mcp-flow.json")
 	if err := os.WriteFile(path, []byte(mcp), 0o644); err != nil {
 		return Transcript{}, err
 	}
-	prompt := "Using the next-devtools MCP server, list this app's routes. Answer with the routes only."
+	// Two tools, one session, exactly as a user would have them: boxer's own MCP server (installed
+	// into the repository by `boxer install`) and the app's dev-server tools running in the guest.
+	// The answer can only be right if the agent used the second one.
+	prompt := "Use the next-devtools MCP server to list this app's routes. Answer with the routes only."
 	cmd := exec.Command("claude", "-p", prompt, "--permission-mode", "bypassPermissions",
-		"--mcp-config", path, "--output-format", "stream-json", "--verbose", "--max-turns", "8")
+		"--mcp-config", path, "--strict-mcp-config",
+		"--output-format", "stream-json", "--verbose", "--max-turns", "8")
 	cmd.Dir = env.Repo
 	cmd.Env = append(env.BaseEnv(), claude.modelEnv(env)...)
 	var out bytes.Buffer

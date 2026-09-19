@@ -32,6 +32,7 @@ func TestDevcontainerRuntimePropertiesAreRead(t *testing.T) {
   // a real file has comments
   "name": "example",
   "image": "python:3.12",
+  "onCreateCommand": "apt-get install -y libpq-dev",
   "postCreateCommand": "pip install -r requirements.txt",
   "postStartCommand": ["python", "-m", "http.server", "8000"],
   "forwardPorts": [8000, "127.0.0.1:5432"],
@@ -52,6 +53,10 @@ func TestDevcontainerRuntimePropertiesAreRead(t *testing.T) {
 	}
 	if len(cfg.Setup) != 1 || cfg.Setup[0] != "pip install -r requirements.txt" {
 		t.Errorf("setup: %v", cfg.Setup)
+	}
+	// onCreateCommand is the cacheable half, and boxer keeps it that way.
+	if len(cfg.ImageSetup) != 1 || cfg.ImageSetup[0] != "apt-get install -y libpq-dev" {
+		t.Errorf("image_setup: %v", cfg.ImageSetup)
 	}
 	if len(cfg.Start) != 1 || cfg.Start[0] != "python -m http.server 8000" {
 		t.Errorf("start: %v", cfg.Start)

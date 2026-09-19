@@ -83,10 +83,20 @@ type Config struct {
 	Intercept            []string `toml:"intercept"`
 	Passthrough          []string `toml:"passthrough"`
 
-	Image    string   `toml:"image"`
-	Smolfile string   `toml:"smolfile"`
-	Setup    []string `toml:"setup"`
-	MountAt  string   `toml:"mount_at"`
+	Image    string `toml:"image"`
+	Smolfile string `toml:"smolfile"`
+	// ImageSetup changes the guest image and nothing else: apt packages, a global npm install, a
+	// toolchain. It runs once per VM, its result is snapshotted into the environment pack, and a
+	// new worktree starts from that pack without running it again.
+	//
+	// Setup is the other half: it prepares *this worktree*, usually by installing dependencies
+	// into it. A pack can never skip it, because a pack carries the guest's filesystem and the
+	// worktree is mounted from the host — a second worktree that skipped it would carry a marker
+	// saying "installed" and no node_modules. devcontainer.json draws the same line between
+	// onCreateCommand and postCreateCommand.
+	ImageSetup []string `toml:"image_setup"`
+	Setup      []string `toml:"setup"`
+	MountAt    string   `toml:"mount_at"`
 	// Env is set in the guest for every command. It is the project's own configuration, so it is
 	// baked into the environment pack; anything secret belongs in Secrets or EnvPassthrough, which
 	// are read from the host at run time and never snapshotted.

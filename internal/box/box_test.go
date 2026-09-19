@@ -86,7 +86,9 @@ func TestRunRefusesWhenCreateNotAllowed(t *testing.T) {
 
 func TestSetupFailureDeletesVM(t *testing.T) {
 	vmtest.Install(t)
-	dir := vmtest.Repo(t, "setup = [\"exit 5\"]\n"+vmtest.NoWorktreeCheck)
+	// The image half: a half-built guest is worth throwing away, because the next attempt would
+	// otherwise start from a VM in an unknown state.
+	dir := vmtest.Repo(t, "image_setup = [\"exit 5\"]\n"+vmtest.NoWorktreeCheck)
 	e, _ := Resolve(dir, "", scope.Identity{})
 	e.Stderr = &bytes.Buffer{}
 	_, err := e.Ensure(true, false)
@@ -95,7 +97,20 @@ func TestSetupFailureDeletesVM(t *testing.T) {
 		t.Fatalf("want SETUP_FAILED, got %v", err)
 	}
 	if _, exists, _ := e.Exists(); exists {
-		t.Fatal("failed setup must delete the VM")
+		t.Fatal("a failed image setup must delete the VM")
+	}
+
+	// The worktree half is the opposite: the guest is fine, the worktree is the problem, and
+	// throwing away a working VM would make the next attempt slower for no reason.
+	other := vmtest.Repo(t, "setup = [\"exit 5\"]\n"+vmtest.NoWorktreeCheck)
+	e2, _ := Resolve(other, "", scope.Identity{})
+	e2.Stderr = &bytes.Buffer{}
+	_, err = e2.Ensure(true, false)
+	if be, ok := err.(*Error); !ok || be.Cause != "SETUP_FAILED" {
+		t.Fatalf("want SETUP_FAILED, got %v", err)
+	}
+	if _, exists, _ := e2.Exists(); !exists {
+		t.Fatal("a failed worktree setup must leave the VM alone")
 	}
 }
 
@@ -381,11 +396,14 @@ func TestRegistryHosts(t *testing.T) {
 	}
 }
 
-// A dropped transport is not an absent marker: read as one, setup ran again on a VM that had
-// already run it.
+// An image setup that fails leaves a half-built guest, which is worth throwing away.
+// A worktree setup that fails does not: the guest is fine and the worktree is the problem.
+//
+// A dropped transport is not an absent marker: read as one, the image setup ran again on a VM
+// that had already run it, which for an apt install or a toolchain is minutes.
 func TestSetupMarkerProbeDistinguishesTransportFailure(t *testing.T) {
 	vmtest.Install(t)
-	dir := vmtest.Repo(t, "setup = [\"echo installing\"]\n"+vmtest.NoWorktreeCheck)
+	dir := vmtest.Repo(t, "image_setup = [\"echo installing\"]\n"+vmtest.NoWorktreeCheck)
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
@@ -394,8 +412,8 @@ func TestSetupMarkerProbeDistinguishesTransportFailure(t *testing.T) {
 	if _, err := e.Ensure(true, false); err != nil {
 		t.Fatal(err)
 	}
-	vmtest.FailExecOnce(t, "test -f /var/lib/boxer/setup-done")
-	_, err = e.setup()
+	vmtest.FailExecOnce(t, "test -f "+imageSetupMarker)
+	_, err = e.imageSetup()
 	be, ok := err.(*Error)
 	if !ok || be.Cause != "TRANSPORT_FAILED" {
 		t.Fatalf("want TRANSPORT_FAILED, got %v", err)
@@ -531,15 +549,16 @@ func TestLocalImagesNeedNoRegistryHosts(t *testing.T) {
 	}
 }
 
-// The environment pack is the release's reason to exist: without it every worktree of a repository
-// repeats `bun install` from scratch while a pack of the bare image sits beside it. The first
-// worktree pays setup once and snapshots the result; the second starts from that snapshot and runs
-// nothing. Changing a setup line invalidates it, exactly like a Docker layer.
-func TestEnvironmentPackSkipsSetupOnTheNextWorktree(t *testing.T) {
+// The environment pack caches what changes the *image*: an apt install, a toolchain, a global npm
+// package. The first worktree pays for it once and snapshots the result; the second starts from
+// that snapshot and runs nothing. Changing a line invalidates it, exactly like a Docker layer.
+//
+// It deliberately does not cache `setup`, which prepares the worktree — see the test below.
+func TestEnvironmentPackSkipsImageSetupOnTheNextWorktree(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("BOXER_PACKS", t.TempDir())
 	_, log := vmtest.Install(t)
-	toml := vmtest.NoWorktreeCheck + "image = \"alpine\"\nsetup = [\"echo installing-dependencies\"]\n"
+	toml := vmtest.NoWorktreeCheck + "image = \"alpine\"\nimage_setup = [\"echo installing-a-toolchain\"]\n"
 
 	first := vmtest.Repo(t, toml)
 	e, err := Resolve(first, "", scope.Identity{})
@@ -555,8 +574,8 @@ func TestEnvironmentPackSkipsSetupOnTheNextWorktree(t *testing.T) {
 		t.Fatalf("the first worktree must leave an environment pack at %s", pack)
 	}
 	b, _ := os.ReadFile(log)
-	if n := strings.Count(string(b), "echo installing-dependencies"); n != 1 {
-		t.Fatalf("setup runs once for the first worktree, ran %d times:\n%s", n, b)
+	if n := strings.Count(string(b), "echo installing-a-toolchain"); n != 1 {
+		t.Fatalf("image setup runs once for the first worktree, ran %d times:\n%s", n, b)
 	}
 
 	// A second worktree of the same repository: same key, so it is created from that pack and the
@@ -571,15 +590,15 @@ func TestEnvironmentPackSkipsSetupOnTheNextWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(log)
-	if n := strings.Count(string(b), "echo installing-dependencies"); n != 1 {
-		t.Fatalf("the second worktree must not repeat setup, it ran %d times total:\n%s", n, b)
+	if n := strings.Count(string(b), "echo installing-a-toolchain"); n != 1 {
+		t.Fatalf("the second worktree must not repeat image setup, it ran %d times total:\n%s", n, b)
 	}
 	if !strings.Contains(string(b), "--from "+pack) {
 		t.Fatalf("the second VM must be created from the environment pack:\n%s", b)
 	}
 
 	// Change a setup line: a different environment, so a different key and a fresh run.
-	third := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo something-else\"]\n")
+	third := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nimage_setup = [\"echo something-else\"]\n")
 	e3, err := Resolve(third, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
@@ -589,17 +608,17 @@ func TestEnvironmentPackSkipsSetupOnTheNextWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if EnvKey("alpine", e3.Cfg) == EnvKey("alpine", e.Cfg) {
-		t.Fatal("a changed setup line must change the key")
+		t.Fatal("a changed image_setup line must change the key")
 	}
 	b, _ = os.ReadFile(log)
 	if !strings.Contains(string(b), "echo something-else") {
-		t.Fatalf("a changed environment runs its own setup:\n%s", b)
+		t.Fatalf("a changed environment runs its own image setup:\n%s", b)
 	}
 }
 
-// A repository with no setup has no environment to cache, and packing an unchanged image twice
-// would be waste, not caching.
-func TestNoSetupMeansNoEnvironmentPack(t *testing.T) {
+// A repository with no image_setup has no environment to cache, and packing an unchanged image
+// twice would be waste, not caching.
+func TestNoImageSetupMeansNoEnvironmentPack(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	packs := t.TempDir()
 	t.Setenv("BOXER_PACKS", packs)
@@ -855,7 +874,7 @@ func TestDropEnvPack(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("BOXER_PACKS", t.TempDir())
 	vmtest.Install(t)
-	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo installing\"]\n")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nimage_setup = [\"echo adding-a-toolchain\"]\n")
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
@@ -876,13 +895,87 @@ func TestDropEnvPack(t *testing.T) {
 	if packReady(pack) {
 		t.Fatal("the pack must be gone")
 	}
-	// A repository with no setup has no environment to drop.
+	// A repository with no image_setup has no environment to drop.
 	plain := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n")
 	e2, err := Resolve(plain, "", scope.Identity{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, err := e2.DropEnvPack(); err != nil || got != "" {
-		t.Fatalf("no setup, nothing to drop: %q %v", got, err)
+		t.Fatalf("no image_setup, nothing to drop: %q %v", got, err)
+	}
+}
+
+// The bug this split exists to prevent, kept as a test because it is subtle and expensive.
+//
+// `setup` usually installs dependencies *into the worktree* — node_modules, .venv — and the
+// worktree is mounted from the host, so no pack can contain it. The first cut cached setup along
+// with the image: a second worktree then started from that pack, found the marker, skipped the
+// install, and had no dependencies at all. The flow evaluation caught it as a dev server that
+// could not start.
+func TestASecondWorktreeStillPreparesItself(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	toml := vmtest.NoWorktreeCheck + "image = \"alpine\"\n" +
+		"image_setup = [\"echo adding-a-toolchain\"]\n" +
+		"setup = [\"echo installing-into-the-worktree\"]\n"
+
+	for i, dir := range []string{vmtest.Repo(t, toml), vmtest.Repo(t, toml)} {
+		e, err := Resolve(dir, "", scope.Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.Stderr = io.Discard
+		if _, err := e.Ensure(true, false); err != nil {
+			t.Fatalf("worktree %d: %v", i, err)
+		}
+	}
+
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if n := strings.Count(s, "echo adding-a-toolchain"); n != 1 {
+		t.Fatalf("the image half is cached: ran %d times, want 1:\n%s", n, s)
+	}
+	if n := strings.Count(s, "echo installing-into-the-worktree"); n != 2 {
+		t.Fatalf("each worktree prepares itself: ran %d times, want 2:\n%s", n, s)
+	}
+}
+
+// And the same worktree does not repeat it, including after its VM is recreated: the work landed
+// in the worktree, which outlives the VM.
+func TestTheSameWorktreePreparesItselfOnce(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo preparing\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Ensure(true, true); err != nil { // recreate the VM
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "echo preparing"); n != 1 {
+		t.Fatalf("a recreated VM must not repeat the worktree's own setup: %d times", n)
+	}
+	// Changing the setup list is a different preparation, so it runs again.
+	changed := Resolve
+	e2, err := changed(vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo preparing-differently\"]\n"), "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2.Stderr = io.Discard
+	if _, err := e2.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(log)
+	if !strings.Contains(string(b), "echo preparing-differently") {
+		t.Fatal("a changed setup list runs")
 	}
 }

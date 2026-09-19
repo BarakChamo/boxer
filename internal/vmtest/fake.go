@@ -127,12 +127,12 @@ case "$verb" in
       case "$*" in
         # Guest marker files decide whether setup and the harness install run again, so the fake
         # models them per machine: without that, "once per VM" cannot be tested at all.
-        *"test -f /var/lib/boxer/setup-done"*) [ -f "$dir/$name.setup" ] && exit 0 || exit 1;;
+        *"test -f /var/lib/boxer/image-setup-done"*) [ -f "$dir/$name.setup" ] && exit 0 || exit 1;;
         # The start marker lives in the guest's memory-backed /tmp: it must not survive a restart,
         # and it must never touch the host, which is where an unmodelled marker would land.
         *"test -f /tmp/boxer-started"*) [ -f "$dir/$name.started" ] && exit 0 || exit 1;;
         *"touch /tmp/boxer-started"*) touch "$dir/$name.started"; exit 0;;
-        *"touch /var/lib/boxer/setup-done"*) touch "$dir/$name.setup"; exit 0;;
+        *"touch /var/lib/boxer/image-setup-done"*) touch "$dir/$name.setup"; exit 0;;
         *"test -f /var/lib/boxer/harness-"*)
           h=${*##*harness-}; [ -f "$dir/$name.harness-${h%% *}" ] && exit 0 || exit 1;;
         *"touch /var/lib/boxer/harness-"*)
