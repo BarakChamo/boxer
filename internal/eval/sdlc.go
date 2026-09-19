@@ -2,11 +2,13 @@ package eval
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +58,7 @@ type SDLCResult struct {
 	Task       string
 	Worktree   string
 	Port       int
+	HostPort   string // what the guest port was actually forwarded to
 	Status     string // pass | fail
 	Findings   []string
 	Rendered   bool
@@ -66,6 +69,75 @@ type SDLCResult struct {
 	Total      time.Duration
 	Spend      float64
 	Raw        string
+
+	// What the agent actually did, read from its own transcript rather than from its account of
+	// itself. This is the difference between "the task passed" and knowing whether the sandbox
+	// helped or was worked around.
+	Turns      int
+	Tools      map[string]int // tool name to number of calls
+	MCPTools   []string       // the sandboxed server's tools it reached for, in first-use order
+	Browsed    []string       // the pages it looked at
+	Restarted  bool           // did it restart the dev server
+	Changed    []string       // files the worktree ended up with, per git
+	Transcript string         // where the full session was kept
+}
+
+// agentWork reads a Claude session transcript and reports what the agent did. Counting tool calls
+// is the only honest way to tell whether the MCP server in the guest was used or merely available.
+func agentWork(raw string) (turns int, tools map[string]int, mcpTools, browsed []string, restarted bool) {
+	tools = map[string]int{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.Contains(line, `"type":"assistant"`) {
+			continue
+		}
+		var e struct {
+			Message struct {
+				Content []struct {
+					Type  string          `json:"type"`
+					Name  string          `json:"name"`
+					Input json.RawMessage `json:"input"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		for _, c := range e.Message.Content {
+			if c.Type != "tool_use" {
+				continue
+			}
+			turns++
+			tools[c.Name]++
+			if name, ok := strings.CutPrefix(c.Name, "mcp__next-devtools__"); ok && !seen[name] {
+				seen[name] = true
+				mcpTools = append(mcpTools, name)
+			}
+			in := string(c.Input)
+			if c.Name == "Bash" {
+				if strings.Contains(in, "agent-browser") {
+					browsed = append(browsed, browsedURL(in))
+				}
+				if strings.Contains(in, "next dev") || strings.Contains(in, "npm run dev") {
+					restarted = true
+				}
+			}
+		}
+	}
+	return turns, tools, mcpTools, browsed, restarted
+}
+
+// browsedURL pulls the address out of an agent-browser command, for the report.
+func browsedURL(in string) string {
+	i := strings.Index(in, "http")
+	if i < 0 {
+		return "(a page)"
+	}
+	rest := in[i:]
+	if j := strings.IndexAny(rest, `"' \`); j > 0 {
+		rest = rest[:j]
+	}
+	return rest
 }
 
 // RunSDLC prepares one base repository, cuts a worktree per task, and runs `parallel` of them at
@@ -151,7 +223,13 @@ func sdlcBase(boxerBin string, log io.Writer) (string, error) {
 // sdlcConfig is the boxer.toml a project like this would really have: an image with node, the MCP
 // server installed into the image once, dependencies installed per worktree, a dev server started
 // on this worktree's own port, and a readiness probe.
+// guestPort is the same in every worktree on purpose: each sandbox is its own machine, so the
+// inside of one cannot collide with the inside of another. Only the host side needs arranging,
+// which is what `auto` does.
+const guestPort = 3000
+
 func sdlcConfig(port int) string {
+	_ = port
 	return fmt.Sprintf(`require_worktree = "off"
 image = "mirror.gcr.io/library/node:24-bookworm-slim"
 
@@ -168,8 +246,10 @@ ready_timeout = "240s"
 [network]
 mode = "allowlist"
 allow_hosts = ["registry.npmjs.org"]
-ports = ["%d:%d"]
-`, nextVersion, port, port, port, port)
+# An automatic host port: boxer.toml is committed, so a fixed one would collide the moment a
+# second worktree started. This is the line a real project would write.
+ports = ["auto:%d"]
+`, nextVersion, guestPort, guestPort, guestPort)
 }
 
 func runIn(dir, bin string, args ...string) (string, error) {
@@ -214,27 +294,43 @@ func runLifecycle(boxerBin, base string, task SDLCTask, port int, log io.Writer)
 	}
 	r.Provision = time.Since(provision)
 
+	// Where the guest's port actually landed on the host. With `auto` this is the only way to know,
+	// and everything the host does — the browser, the checks — has to use it.
+	if st, err := runIn(wt, boxerBin, "status", "--json"); err == nil {
+		var s struct {
+			Ports map[string]string `json:"ports"`
+		}
+		if json.Unmarshal([]byte(st), &s) == nil {
+			r.HostPort = s.Ports[fmt.Sprint(guestPort)]
+		}
+	}
+	if r.HostPort == "" {
+		return fail("the sandbox reported no host port for guest %d", guestPort)
+	}
+
 	// The page must be there before the agent starts, or the task is testing the scaffold rather
 	// than the change.
-	if err := httpOK(fmt.Sprintf("http://127.0.0.1:%d/", port), 120*time.Second); err != nil {
+	if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 120*time.Second); err != nil {
 		return fail("the dev server never answered before the task: %v", err)
 	}
 
 	agent := time.Now()
-	out, spend, err := runSDLCAgent(boxerBin, wt, task, port)
+	out, spend, err := runSDLCAgent(boxerBin, wt, task, r.HostPort)
 	r.Agent, r.Spend, r.Raw = time.Since(agent), spend, out
-	r.UsedMCP = strings.Contains(out, "mcp__next-devtools__")
-	r.UsedBrowse = strings.Contains(out, "agent-browser")
+	r.Turns, r.Tools, r.MCPTools, r.Browsed, r.Restarted = agentWork(out)
+	r.UsedMCP = len(r.MCPTools) > 0
+	r.UsedBrowse = len(r.Browsed) > 0
+	// Every session is kept, not only the failures: a report about how agents work in a sandbox
+	// needs the sessions that went well just as much.
+	r.Transcript = filepath.Join(os.TempDir(), "sdlc-"+task.Name+".agent.log")
+	_ = os.WriteFile(r.Transcript, []byte(out), 0o644)
 	if err != nil {
-		if path := filepath.Join(wt, "..", "sdlc-"+task.Name+".agent.log"); os.WriteFile(path, []byte(out), 0o644) == nil {
-			return fail("agent: %v (transcript: %s)", err, path)
-		}
-		return fail("agent: %v", err)
+		return fail("agent: %v (transcript: %s)", err, r.Transcript)
 	}
 
 	// What a person would check: open the page and read it. Through the forwarded port, with a real
 	// browser, from the host — nothing about this test knows it is talking to a microVM.
-	body, berr := browserRead(fmt.Sprintf("http://127.0.0.1:%d%s", port, task.Route))
+	body, berr := browserRead("http://127.0.0.1:" + r.HostPort + task.Route)
 	if berr != nil {
 		return fail("browser: %v", berr)
 	}
@@ -243,7 +339,13 @@ func runLifecycle(boxerBin, base string, task SDLCTask, port int, log io.Writer)
 		return fail("the page does not show %q; it showed %q", task.Expect, firstLine(body))
 	}
 	// And the change has to be in the worktree, on the host, where the developer would commit it.
-	if out, _ := runIn(wt, "git", "status", "--porcelain"); strings.TrimSpace(out) == "" {
+	changes, _ := runIn(wt, "git", "status", "--porcelain")
+	for _, line := range strings.Split(strings.TrimSpace(changes), "\n") {
+		if f := strings.Fields(line); len(f) > 1 && !strings.Contains(line, ".claude") && !strings.Contains(line, ".mcp-sdlc") {
+			r.Changed = append(r.Changed, f[len(f)-1])
+		}
+	}
+	if len(r.Changed) == 0 {
 		return fail("the page renders but the worktree has no changes")
 	}
 	r.Status = "pass"
@@ -255,7 +357,7 @@ func runLifecycle(boxerBin, base string, task SDLCTask, port int, log io.Writer)
 
 // runSDLCAgent gives the agent what a developer would have: boxer's own layer (installed into the
 // worktree), the dev server's MCP tools running inside the sandbox, and a browser on the host.
-func runSDLCAgent(boxerBin, wt string, task SDLCTask, port int) (string, float64, error) {
+func runSDLCAgent(boxerBin, wt string, task SDLCTask, hostPort string) (string, float64, error) {
 	if out, err := runIn(wt, boxerBin, "install", "claude-code"); err != nil {
 		return out, 0, fmt.Errorf("boxer install: %v", err)
 	}
@@ -281,10 +383,12 @@ func runSDLCAgent(boxerBin, wt string, task SDLCTask, port int) (string, float64
 	}
 	prompt := fmt.Sprintf(`%s
 
-The dev server for this worktree is already running inside the sandbox on port %d.
-Use the next-devtools MCP tools to inspect it, and `+"`agent-browser read http://127.0.0.1:%d<route>`"+` to see
-what a browser sees. Do not start another dev server unless you have to restart this one.
-When you are done, answer with the single word DONE.`, task.Prompt, port, port)
+The dev server for this worktree is already running inside the sandbox on port %d *inside the
+sandbox*, forwarded to http://127.0.0.1:%s on this machine.
+Use the next-devtools MCP tools to inspect it (they run inside the sandbox, so they see port %d),
+and `+"`agent-browser read http://127.0.0.1:%s<route>`"+` to see what a browser sees.
+Do not start another dev server unless you have to restart this one.
+When you are done, answer with the single word DONE.`, task.Prompt, guestPort, hostPort, guestPort, hostPort)
 
 	before := gatewayUsed()
 	cmd := exec.Command("claude", "-p", prompt, "--permission-mode", "bypassPermissions",
@@ -366,14 +470,106 @@ func SDLCReport(rs []SDLCResult, parallel int) string {
 	fmt.Fprintf(&b, "browser through the forwarded port, and the change has to be in the worktree afterwards.\n\n")
 	fmt.Fprintf(&b, "**passed %d of %d · MCP used in %d · browser used in %d · $%.4f · slowest %s**\n\n",
 		pass, len(rs), mcp, browse, spend, slowest.Round(time.Second))
-	fmt.Fprintln(&b, "| Lifecycle | Status | Provision | Agent | Total | MCP | Browser | Spend | Notes |")
+	fmt.Fprintln(&b, "| Lifecycle | Status | Port | Provision | Agent | Turns | MCP calls | Browsed | Spend |")
 	fmt.Fprintln(&b, "| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	for _, r := range rs {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | $%.4f | %s |\n", r.Task, r.Status,
-			r.Provision.Round(time.Second), r.Agent.Round(time.Second), r.Total.Round(time.Second),
-			yesNo(r.UsedMCP), yesNo(r.UsedBrowse), r.Spend, strings.Join(r.Findings, "; "))
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %d | %d | $%.4f |\n", r.Task, r.Status,
+			hostPort(r), r.Provision.Round(time.Second), r.Agent.Round(time.Second),
+			r.Turns, mcpCalls(r), len(r.Browsed), r.Spend)
+	}
+
+	// Ports are the thing several worktrees at once are most likely to fight over, so the report
+	// says plainly whether any two got the same one.
+	fmt.Fprintf(&b, "\n## Ports\n\nEvery lifecycle asked for guest port %d with `auto`, and each was given its own host port.\n\n", 3000)
+	used := map[string][]string{}
+	for _, r := range rs {
+		if r.HostPort != "" {
+			used[r.HostPort] = append(used[r.HostPort], r.Task)
+		}
+	}
+	clash := false
+	for port, tasks := range used {
+		if len(tasks) > 1 {
+			clash = true
+			fmt.Fprintf(&b, "- **collision**: %s all took host port %s\n", strings.Join(tasks, ", "), port)
+		}
+	}
+	if !clash {
+		fmt.Fprintf(&b, "No collisions: %d distinct host ports for %d lifecycles.\n", len(used), len(rs))
+	}
+
+	fmt.Fprintln(&b, "\n## What each agent did")
+	fmt.Fprintln(&b, "\nRead from each session's own transcript, not from what the agent said about itself.")
+	for _, r := range rs {
+		fmt.Fprintf(&b, "\n### %s — %s in %s\n\n", r.Task, r.Status, r.Total.Round(time.Second))
+		if len(r.Findings) > 0 {
+			fmt.Fprintf(&b, "Failed: %s\n\n", strings.Join(r.Findings, "; "))
+		}
+		fmt.Fprintf(&b, "- **tools**: %s\n", toolSummary(r.Tools))
+		if len(r.MCPTools) > 0 {
+			fmt.Fprintf(&b, "- **MCP server in the guest**: %s\n", strings.Join(r.MCPTools, ", "))
+		} else {
+			fmt.Fprintln(&b, "- **MCP server in the guest**: not used")
+		}
+		if len(r.Browsed) > 0 {
+			fmt.Fprintf(&b, "- **browser**: %d page reads, e.g. %s\n", len(r.Browsed), r.Browsed[0])
+		} else {
+			fmt.Fprintln(&b, "- **browser**: not used")
+		}
+		if r.Restarted {
+			fmt.Fprintln(&b, "- **restarted the dev server** in the sandbox")
+		}
+		if len(r.Changed) > 0 {
+			fmt.Fprintf(&b, "- **left in the worktree**: %s\n", strings.Join(r.Changed, ", "))
+		}
+		fmt.Fprintf(&b, "- **host port**: %s · **transcript**: `%s`\n", hostPort(r), r.Transcript)
 	}
 	return b.String()
+}
+
+func hostPort(r SDLCResult) string {
+	if r.HostPort == "" {
+		return "-"
+	}
+	return r.HostPort
+}
+
+func mcpCalls(r SDLCResult) int {
+	n := 0
+	for name, count := range r.Tools {
+		if strings.HasPrefix(name, "mcp__") {
+			n += count
+		}
+	}
+	return n
+}
+
+// toolSummary prints the tools a session used, most-used first, because the shape of the work is
+// in the proportions: an agent that ran twenty shell commands and no MCP call was working around
+// something.
+func toolSummary(tools map[string]int) string {
+	type kv struct {
+		name  string
+		count int
+	}
+	var all []kv
+	for k, v := range tools {
+		all = append(all, kv{k, v})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].count != all[j].count {
+			return all[i].count > all[j].count
+		}
+		return all[i].name < all[j].name
+	})
+	var parts []string
+	for _, t := range all {
+		parts = append(parts, fmt.Sprintf("%s×%d", strings.TrimPrefix(t.name, "mcp__next-devtools__"), t.count))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func yesNo(b bool) string {

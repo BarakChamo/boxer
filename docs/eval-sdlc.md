@@ -14,31 +14,146 @@ framework's own diagnostics.
 
 **What it establishes.** Sandboxes do not get in the way of development: agents edit, run commands,
 read the running app through MCP, look at pages in a browser, restart servers, and install
-dependencies, in parallel worktrees, without clashing. Every lifecycle used the MCP server running
-in its guest; all but one used a browser.
+dependencies, in parallel worktrees, without clashing.
 
-# boxer eval report — tier sdlc — 2026-09-19T10:54:16+08:00
+Across the twelve: **145 tool calls**, of which 99 were shell commands in the sandbox, 19 browser
+page reads, and 15 calls to the MCP server running inside the guest. Five lifecycles reached for
+that server; the rest did the job with a shell and a browser, which is a fair result — the tools
+are there when the work needs them rather than because the harness insists.
+
+An earlier version of this report claimed all twelve used MCP. That was a measurement bug: it
+matched the string anywhere in the transcript, including the server list every session prints at
+startup. Tool use is now counted from the session's own `tool_use` events.
+
+# boxer eval report — tier sdlc — 2026-09-19T13:17:12+08:00
 
 12 development lifecycles, 3 at a time, each in its own git worktree with its own
 sandbox and its own port. Every check is made from the host: the page is read with a real
 browser through the forwarded port, and the change has to be in the worktree afterwards.
 
-**passed 12 of 12 · MCP used in 12 · browser used in 12 · $0.3946 · slowest 6m52s**
+**passed 12 of 12 · MCP used in 5 · browser used in 10 · $0.3305 · slowest 2m29s**
 
-| Lifecycle | Status | Provision | Agent | Total | MCP | Browser | Spend | Notes |
+| Lifecycle | Status | Port | Provision | Agent | Turns | MCP calls | Browsed | Spend |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| add-a-page | pass | 32s | 1m10s | 1m43s | yes | yes | $0.0207 |  |
-| api-route | pass | 39s | 13s | 52s | yes | yes | $0.0052 |  |
-| client-state | pass | 30s | 18s | 49s | yes | yes | $0.0236 |  |
-| fix-a-break | pass | 32s | 1m12s | 1m44s | yes | yes | $0.0221 |  |
-| layout-change | pass | 39s | 1m49s | 2m29s | yes | yes | $0.0472 |  |
-| dynamic-route | pass | 31s | 25s | 57s | yes | yes | $0.0159 |  |
-| server-data | pass | 31s | 46s | 1m17s | yes | yes | $0.0247 |  |
-| metadata | pass | 30s | 4m46s | 5m16s | yes | yes | $0.0749 |  |
-| restart-server | pass | 31s | 6m20s | 6m52s | yes | yes | $0.0661 |  |
-| css-module | pass | 31s | 2m21s | 2m52s | yes | yes | $0.0366 |  |
-| error-boundary | pass | 31s | 1m15s | 1m47s | yes | yes | $0.0186 |  |
-| install-a-dep | pass | 40s | 1m6s | 1m46s | yes | yes | $0.0390 |  |
+| add-a-page | pass | 58656 | 1m4s | 26s | 9 | 0 | 1 | $0.0246 |
+| api-route | pass | 58655 | 32s | 28s | 4 | 1 | 0 | $0.0090 |
+| client-state | pass | 59076 | 34s | 24s | 7 | 1 | 4 | $0.0071 |
+| fix-a-break | pass | 58986 | 33s | 20s | 7 | 2 | 1 | $0.0132 |
+| layout-change | pass | 59556 | 33s | 36s | 13 | 0 | 2 | $0.0195 |
+| dynamic-route | pass | 59462 | 33s | 30s | 5 | 0 | 1 | $0.0192 |
+| server-data | pass | 59558 | 33s | 24s | 9 | 0 | 1 | $0.0150 |
+| metadata | pass | 59704 | 29s | 20s | 7 | 0 | 0 | $0.0076 |
+| restart-server | pass | 59149 | 35s | 1m48s | 28 | 4 | 1 | $0.0741 |
+| css-module | pass | 59147 | 36s | 48s | 13 | 0 | 3 | $0.0365 |
+| error-boundary | pass | 59327 | 32s | 1m56s | 24 | 7 | 4 | $0.0624 |
+| install-a-dep | pass | 58657 | 1m3s | 54s | 19 | 0 | 1 | $0.0422 |
+
+## Ports
+
+Every lifecycle asked for guest port 3000 with `auto`, and each was given its own host port.
+
+No collisions: 12 distinct host ports for 12 lifecycles.
+
+## What each agent did
+
+Read from each session's own transcript, not from what the agent said about itself.
+
+### add-a-page — pass in 1m29s
+
+- **tools**: Bash×7, Read×1, Write×1
+- **MCP server in the guest**: not used
+- **browser**: 1 page reads, e.g. http://127.0.0.1:58656/about
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/about/
+- **host port**: 58656 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-add-a-page.agent.log`
+
+### api-route — pass in 1m1s
+
+- **tools**: Bash×2, Write×1, nextjs_call×1
+- **MCP server in the guest**: nextjs_call
+- **browser**: not used
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/api/
+- **host port**: 58655 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-api-route.agent.log`
+
+### client-state — pass in 59s
+
+- **tools**: Bash×5, Write×1, browser_eval×1
+- **MCP server in the guest**: browser_eval
+- **browser**: 4 page reads, e.g. http://127.0.0.1:59076/counter
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/counter/
+- **host port**: 59076 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-client-state.agent.log`
+
+### fix-a-break — pass in 54s
+
+- **tools**: Bash×2, Read×2, Write×1, nextjs_call×1, nextjs_index×1
+- **MCP server in the guest**: nextjs_index, nextjs_call
+- **browser**: 1 page reads, e.g. http://127.0.0.1:58986/broken
+- **left in the worktree**: app/app/broken/page.tsx, app/package-lock.json, app/package.json, .mcp.json
+- **host port**: 58986 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-fix-a-break.agent.log`
+
+### layout-change — pass in 1m8s
+
+- **tools**: Bash×11, Edit×1, Read×1
+- **MCP server in the guest**: not used
+- **browser**: 2 page reads, e.g. http://127.0.0.1:59556/
+- **left in the worktree**: app/app/layout.tsx, app/package-lock.json, app/package.json, .mcp.json
+- **host port**: 59556 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-layout-change.agent.log`
+
+### dynamic-route — pass in 1m4s
+
+- **tools**: Bash×4, Write×1
+- **MCP server in the guest**: not used
+- **browser**: 1 page reads, e.g. http://127.0.0.1:59462/items/42
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/items/
+- **host port**: 59462 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-dynamic-route.agent.log`
+
+### server-data — pass in 57s
+
+- **tools**: Bash×5, Read×3, Write×1
+- **MCP server in the guest**: not used
+- **browser**: 1 page reads, e.g. http://127.0.0.1:59558/data
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/data/
+- **host port**: 59558 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-server-data.agent.log`
+
+### metadata — pass in 49s
+
+- **tools**: Bash×5, Read×1, Write×1
+- **MCP server in the guest**: not used
+- **browser**: not used
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/about/
+- **host port**: 59704 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-metadata.agent.log`
+
+### restart-server — pass in 2m23s
+
+- **tools**: Bash×21, nextjs_call×3, Read×1, Skill×1, Write×1, nextjs_index×1
+- **MCP server in the guest**: nextjs_index, nextjs_call
+- **browser**: 1 page reads, e.g. http://127.0.0.1:59149/restarted
+- **restarted the dev server** in the sandbox
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/restarted/
+- **host port**: 59149 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-restart-server.agent.log`
+
+### css-module — pass in 1m24s
+
+- **tools**: Bash×8, Read×3, Write×2
+- **MCP server in the guest**: not used
+- **browser**: 3 page reads, e.g. http://127.0.0.1:59147/styled
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/styled/
+- **host port**: 59147 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-css-module.agent.log`
+
+### error-boundary — pass in 2m29s
+
+- **tools**: Bash×13, nextjs_call×5, Read×3, Write×1, nextjs_docs×1, nextjs_index×1
+- **MCP server in the guest**: nextjs_docs, nextjs_index, nextjs_call
+- **browser**: 4 page reads, e.g. http://127.0.0.1:59327/boom
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/boom/error.tsx
+- **host port**: 59327 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-error-boundary.agent.log`
+
+### install-a-dep — pass in 1m58s
+
+- **tools**: Bash×16, Read×1, Skill×1, Write×1
+- **MCP server in the guest**: not used
+- **browser**: 1 page reads, e.g. http://127.0.0.1:58657/clsx
+- **left in the worktree**: app/package-lock.json, app/package.json, .mcp.json, app/app/clsx/
+- **host port**: 58657 · **transcript**: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/sdlc-install-a-dep.agent.log`
 
 ## What twelve lifecycles found
 

@@ -95,8 +95,10 @@ running **inside** the sandbox, and `agent-browser` on the host. Nothing is take
 word: the page is read from the host through the forwarded port and the change must be in the
 worktree.
 
-**12 of 12 pass** on 2026-09-19, MCP used in all twelve, a browser in all twelve, $0.39 for the
-set, slowest lifecycle 6 m 52 s. Report and findings: [eval-sdlc.md](eval-sdlc.md).
+**12 of 12 pass** on 2026-09-19 for $0.33, slowest lifecycle 2 m 29 s. Across them: 145 tool calls
+— 99 shell commands in the sandbox, 19 browser page reads, 15 calls to the MCP server running in
+the guest — with every worktree given its own host port and none colliding. Report, per-lifecycle
+detail and findings: [eval-sdlc.md](eval-sdlc.md).
 
 Concurrency is the point: twelve worktrees, three sandboxes at a time, no clash in files, ports,
 packs or state, and no command reached the host. Four concurrent sandboxes cost about 4 GB of
