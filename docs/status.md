@@ -84,6 +84,24 @@ injected brief mid-session and moved from a host path to `/workspace`.
 **An MCP server that must live beside the code runs in the sandbox, and the harness cannot tell the
 difference.**
 
+## Development lifecycles
+
+`boxer-eval --tier sdlc` (`make eval-sdlc`), added in 1.1: twelve development lifecycles, three at
+a time, each in its own linked worktree with its own sandbox, dev server and port. A live agent does
+ordinary work — a page, an API route, a client component, a dynamic route, server data, metadata, a
+layout change, a CSS module, an error boundary, a dependency install, a dev-server restart, and a
+fix driven by the framework's own diagnostics — with boxer's project layer, the Next.js MCP tools
+running **inside** the sandbox, and `agent-browser` on the host. Nothing is taken on the agent's
+word: the page is read from the host through the forwarded port and the change must be in the
+worktree.
+
+**12 of 12 pass** on 2026-09-19, MCP used in all twelve, a browser in all twelve, $0.39 for the
+set, slowest lifecycle 6 m 52 s. Report and findings: [eval-sdlc.md](eval-sdlc.md).
+
+Concurrency is the point: twelve worktrees, three sandboxes at a time, no clash in files, ports,
+packs or state, and no command reached the host. Four concurrent sandboxes cost about 4 GB of
+memory and 2.7 GB of disk, which is the practical limit on a 16 GB machine.
+
 ## Adherence
 
 `boxer-eval --tier adherence`: does a live model follow the injected brief when the prompt never
