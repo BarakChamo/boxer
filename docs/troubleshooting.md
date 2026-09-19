@@ -100,6 +100,30 @@ by hand:
 rm -f ~/.local/state/boxer/packs/*.smolmachine   # they are a cache; each rebuilds on demand
 ```
 
+## The page loads through the forwarded port but nothing works
+
+A dev server inside the sandbox binds to `0.0.0.0` so the host can reach it through
+`network.ports`. The browser then arrives from a different origin than the server expects, and
+frameworks treat that as a cross-origin request: Next.js 16 serves the HTML but refuses its own dev
+chunks with 403, so the page loads and then hydration stalls. React Router, Vite and Nuxt have the
+same guard under different names.
+
+Tell the framework the origin is yours:
+
+```js
+// next.config.ts — the origin your browser actually uses
+export default { allowedDevOrigins: ['127.0.0.1', 'localhost'] }
+```
+
+```js
+// vite.config.ts
+export default { server: { host: true, allowedHosts: ['localhost', '127.0.0.1'] } }
+```
+
+This is not boxer refusing anything: the sandbox forwards the port faithfully, and the framework is
+doing what it was told to do about origins it does not know. It is worth knowing because the
+symptom — a page that renders in `curl` and looks broken in a browser — points nowhere near it.
+
 ## Grok denies my first command every time
 
 Grok does not surface session-start context to the model, so in `tool` mode the agent has not been

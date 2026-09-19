@@ -820,14 +820,28 @@ func (e *Env) setup() error {
 		if err != nil || code != 0 {
 			// The VM stays: the guest is fine and the next attempt should not pay for a new one.
 			// An image-setup failure is the opposite — a half-built guest is worth throwing away.
-			return e.fail(&Error{Reason: fmt.Sprintf("setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
-				Fix: "fix the `setup` list in boxer.toml, then: boxer up"})
+			return e.fail(e.setupError("setup", "`setup`", code, cmd))
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(marker, nil, 0o644)
+}
+
+// setupError explains a failed setup step, and in particular explains exit 137, which is the
+// guest's out-of-memory killer rather than anything the command did wrong. A person reading
+// "exit 137" learns nothing; a person reading "the guest ran out of memory" knows to raise
+// `memory` or run fewer sandboxes at once, which is the actual fix. `npm install` in several
+// sandboxes at the same time is the way most people will meet it.
+func (e *Env) setupError(what, key string, code int, cmd string) *Error {
+	reason := fmt.Sprintf("%s step failed (exit %d): %s", what, code, cmd)
+	fix := "fix the " + key + " list in boxer.toml, then: boxer up"
+	if code == 137 {
+		reason = fmt.Sprintf("%s step was killed, out of memory (exit 137): %s", what, cmd)
+		fix = fmt.Sprintf("raise `memory` in boxer.toml (this sandbox has %s), or run fewer sandboxes at once", firstNonEmpty(e.Cfg.Memory, "the default"))
+	}
+	return &Error{Reason: reason, Cause: "SETUP_FAILED", Scope: e.Scope, Fix: fix}
 }
 
 // setupMarkerPath names the host-side record that this worktree has been prepared for this setup
@@ -864,8 +878,7 @@ func (e *Env) imageSetup() (ran bool, err error) {
 			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
 		if err != nil || code != 0 {
 			_ = e.VM.Delete(e.Scope.Key)
-			return false, e.fail(&Error{Reason: fmt.Sprintf("image setup step failed (exit %d): %s", code, cmd), Cause: "SETUP_FAILED", Scope: e.Scope,
-				Fix: "fix the `image_setup` list in boxer.toml, then: boxer up"})
+			return false, e.fail(e.setupError("image setup", "`image_setup`", code, cmd))
 		}
 	}
 	_, code, err = e.VM.Output(e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+imageSetupMarker)

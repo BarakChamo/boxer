@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
@@ -977,5 +978,23 @@ func TestTheSameWorktreePreparesItselfOnce(t *testing.T) {
 	b, _ = os.ReadFile(log)
 	if !strings.Contains(string(b), "echo preparing-differently") {
 		t.Fatal("a changed setup list runs")
+	}
+}
+
+// Exit 137 is the guest's out-of-memory killer, and it is what a person meets when several
+// sandboxes run `npm install` at once. "exit 137" teaches nothing; the fix is more memory or fewer
+// sandboxes, so the error says that.
+func TestSetupOutOfMemoryExplainsItself(t *testing.T) {
+	e := &Env{Cfg: config.Config{Memory: "4G"}}
+	oom := e.setupError("setup", "`setup`", 137, "npm install")
+	if !strings.Contains(oom.Reason, "out of memory") {
+		t.Fatalf("reason: %q", oom.Reason)
+	}
+	if !strings.Contains(oom.Fix, "memory") || !strings.Contains(oom.Fix, "4G") {
+		t.Fatalf("the fix must name the current allocation: %q", oom.Fix)
+	}
+	other := e.setupError("setup", "`setup`", 1, "npm install")
+	if strings.Contains(other.Reason, "out of memory") {
+		t.Fatalf("an ordinary failure is not an OOM: %q", other.Reason)
 	}
 }

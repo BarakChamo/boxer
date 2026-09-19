@@ -122,6 +122,13 @@ func sdlcBase(boxerBin string, log io.Writer) (string, error) {
 	}
 	// A deliberately broken page for the fix-a-break task, and a route that crashes for the
 	// boundary task: both are ordinary mistakes rather than contrivances.
+	// A dev server inside a sandbox is reached from the host through a forwarded port, so the
+	// browser's origin is not the one the server expects and Next.js refuses its own dev chunks.
+	// A real project hits this once and writes this line; the fixture writes it too, so the tier
+	// measures development rather than that single trap. It is in troubleshooting.md.
+	_ = os.WriteFile(filepath.Join(dir, "app", "next.config.ts"),
+		[]byte("import type { NextConfig } from 'next'\n\nconst nextConfig: NextConfig = {\n  allowedDevOrigins: ['127.0.0.1', 'localhost'],\n}\n\nexport default nextConfig\n"), 0o644)
+
 	brokenDir := filepath.Join(dir, "app", "app", "broken")
 	_ = os.MkdirAll(brokenDir, 0o755)
 	_ = os.WriteFile(filepath.Join(brokenDir, "page.tsx"),
