@@ -96,7 +96,7 @@ func (d Grok) Prepare(env *Env, c Cell) error {
 func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	// A private leader socket: the default one is the user's own leader under ~/.grok, which
 	// discovers plugins from the real home rather than from GROK_HOME.
-	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "streaming-json", "--max-turns", "6", "--no-subagents", "--leader-socket", filepath.Join(d.home(env), "leader-eval.sock")}
+	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "streaming-json", "--max-turns", env.turns(6), "--no-subagents", "--leader-socket", filepath.Join(d.home(env), "leader-eval.sock")}
 	if env.Tier == "t1" {
 		args = append(args, "-m", "fake")
 	}
@@ -108,7 +108,7 @@ func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "grok"); err != nil {
+	if err := waitFor(cmd, "grok", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseGrokStream(out.String())

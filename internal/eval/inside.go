@@ -193,7 +193,7 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	var args []string
 	switch h {
 	case "claude":
-		args = []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--max-turns", "6"}
+		args = []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--max-turns", env.turns(6)}
 	case "codex":
 		args = []string{"exec", "--skip-git-repo-check", "--json", prompt} // no bypass flag: the table's sandbox_mode and the config's approval_policy carry it
 	case "gemini":

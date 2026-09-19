@@ -77,7 +77,7 @@ func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "opencode"); err != nil {
+	if err := waitFor(cmd, "opencode", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	waitForHook("boxer hook opencode")

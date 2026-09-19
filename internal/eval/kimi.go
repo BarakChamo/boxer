@@ -93,7 +93,7 @@ func (d Kimi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "kimi"); err != nil {
+	if err := waitFor(cmd, "kimi", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}

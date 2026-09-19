@@ -85,7 +85,7 @@ func (d DSH) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	var answer, all bytes.Buffer
 	cmd.Stdout = &answer
 	cmd.Stderr = &all
-	if err := wait(cmd, "dsh"); err != nil {
+	if err := waitFor(cmd, "dsh", env.timeout()); err != nil {
 		return Transcript{Raw: all.String() + answer.String()}, err
 	}
 	tr := Transcript{Raw: all.String() + "\n--- stdout ---\n" + answer.String(), Tools: env.LLMTools()}

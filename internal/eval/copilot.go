@@ -80,7 +80,7 @@ func (d Copilot) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "copilot"); err != nil {
+	if err := waitFor(cmd, "copilot", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseCopilotJSON(out.String())

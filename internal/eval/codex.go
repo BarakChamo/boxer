@@ -85,7 +85,7 @@ func (d Codex) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "codex"); err != nil {
+	if err := waitFor(cmd, "codex", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseCodexJSON(out.String())

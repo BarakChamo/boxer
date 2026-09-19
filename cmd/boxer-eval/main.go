@@ -25,7 +25,7 @@ import (
 func main() {
 	parallel := flag.Int("parallel", 4, "sdlc: how many lifecycles run at once")
 	limit := flag.Int("limit", 0, "sdlc: run only the first n lifecycles")
-	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live), adherence (live; brief, recovery, multistep per harness), or flow (one real development session; slow, network-heavy, on demand)")
+	tier := flag.String("tier", "t1", "t1 (fake model), t2 (live), adherence (live; brief, recovery, multistep per harness), flow (one real development session), sdlc (parallel lifecycles), or matrix (the sdlc workload at every integration level); the last three are slow and live")
 	models := flag.String("models", "", "adherence: comma-separated gateway model ids to run every cell on; default BOXER_EVAL_MODEL")
 	jsonl := flag.String("jsonl", "", "adherence: append each result here and render the report from the whole file, so cells can run one at a time")
 	harness := flag.String("harness", "", "comma-separated driver names; default all")
@@ -72,6 +72,37 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "boxer binary not found on PATH or at bin/boxer")
 		os.Exit(2)
+	}
+
+	// The matrix tier runs the SDLC workload at every integration level, so it is the SDLC runner
+	// with the harness as a variable rather than a constant.
+	if *tier == "matrix" {
+		configs := eval.MatrixConfigs("t2")
+		if *harness != "" || *cell != "" {
+			var picked []eval.MatrixConfig
+			for _, c := range configs {
+				if (*cell == "" || strings.Contains(c.Name, *cell)) &&
+					(*harness == "" || strings.Contains(*harness, c.Driver.Name())) {
+					picked = append(picked, c)
+				}
+			}
+			configs = picked
+		}
+		if *limit > 0 && *limit < len(configs) {
+			configs = configs[:*limit]
+		}
+		rs := eval.RunMatrix(boxerBin, configs, eval.MatrixTasks(), *parallel, os.Stderr)
+		report := eval.MatrixReport(rs, *parallel)
+		if *out != "" {
+			_ = os.WriteFile(*out, []byte(report), 0o644)
+		}
+		fmt.Println(report)
+		for _, r := range rs {
+			if r.Status == "fail" {
+				os.Exit(1)
+			}
+		}
+		return
 	}
 
 	drivers := eval.Drivers()

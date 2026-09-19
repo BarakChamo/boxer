@@ -104,7 +104,7 @@ func (d OpenHands) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	go func() { done <- cmd.Wait() }()
 	select {
 	case <-done:
-	case <-time.After(6 * time.Minute):
+	case <-time.After(env.timeoutOr(6 * time.Minute)):
 		cmd.Process.Kill()
 		return Transcript{Raw: out.String()}, fmt.Errorf("openhands timed out")
 	}

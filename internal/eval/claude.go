@@ -102,7 +102,7 @@ func (d Claude) Prepare(env *Env, c Cell) error {
 }
 
 func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
-	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--max-turns", "6"}
+	args := []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--max-turns", env.turns(6)}
 	if c.Entry == "plugin" || c.Entry == "both" {
 		args = append(args, "--plugin-dir", filepath.Join(env.Dist, "claude-code"))
 	}
@@ -114,7 +114,7 @@ func (d Claude) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Env = append(env.BaseEnv(), d.modelEnv(env)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "claude"); err != nil {
+	if err := waitFor(cmd, "claude", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := parseClaudeStream(out.String())

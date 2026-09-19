@@ -89,7 +89,7 @@ func (d Gemini) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := wait(cmd, "gemini"); err != nil {
+	if err := waitFor(cmd, "gemini", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
 	tr := Transcript{Raw: out.String(), Tools: env.LLMTools()}

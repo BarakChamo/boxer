@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -114,6 +115,37 @@ type Env struct {
 	// Root is the worktree an orchestrator created for the task, when its driver learns it only
 	// at run time; the oracle then judges that worktree's VM instead of Repo.
 	Root string
+	// MaxTurns and AgentTimeout are for cells that run a whole development session rather than
+	// one prompt. Zero means the single-answer defaults, which is what every t1 and t2 cell wants;
+	// the matrix and SDLC tiers raise both. They are per-Env rather than package-level because
+	// those tiers run cells at the same time.
+	MaxTurns     int
+	AgentTimeout time.Duration
+}
+
+// turns is the turn budget for one session: the cell's, or the single-answer default.
+func (e *Env) turns(def int) string {
+	if e.MaxTurns > 0 {
+		return strconv.Itoa(e.MaxTurns)
+	}
+	return strconv.Itoa(def)
+}
+
+// timeout is how long one harness invocation may take: the cell's, or the default.
+func (e *Env) timeout() time.Duration {
+	if e.AgentTimeout > 0 {
+		return e.AgentTimeout
+	}
+	return harnessTimeout
+}
+
+// timeoutOr is the cell's timeout when it set one, else the caller's own default. A driver with a
+// budget of its own still has to yield to a tier that runs whole development sessions.
+func (e *Env) timeoutOr(def time.Duration) time.Duration {
+	if e.AgentTimeout > 0 {
+		return e.AgentTimeout
+	}
+	return def
 }
 
 // Prompt is what every cell asks; the leak canary rides in the command the fake model issues, and

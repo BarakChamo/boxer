@@ -100,6 +100,23 @@ worktree.
 the guest — with every worktree given its own host port and none colliding. Report, per-lifecycle
 detail and findings: [eval-sdlc.md](eval-sdlc.md).
 
+## The same workload at every integration level
+
+`boxer-eval --tier matrix` (`make eval-matrix`), added in 1.1: the SDLC workload again, but with the
+integration level as the variable instead of the task. Ten configurations across four levels — hook
+rewrite, tool mode, PATH shims, shell substitution, inside mode — five harnesses and two
+orchestrators, each in its own worktree with its own sandbox and automatic host port. A passing task
+is not enough: on the discriminating task each cell must also show its level's signature in boxer's
+own trace (a rewrite, a denial, or the pointed absence of either), and `where.txt` must say `linux`,
+which is how a level that quietly ran on the host is caught. Tier and exclusions:
+[eval-matrix.md](eval-matrix.md).
+
+**15 of 18** on 2026-09-19 for $0.53: tool mode 4/4, shims 2/2, inside 2/2, orchestrator 1/1,
+rewrite 6/8, shell substitution 0/1. Two failures, both real: **Codex is never intercepted** — its
+hooks fire zero times across a whole session, and one run did the work on the host — and OpenHands
+executes through `boxer-bash` but cannot finish the workload in fifteen minutes. Codex's cause is
+still open; its hooks fire normally at t1 and in a live standalone repository and worktree.
+
 Concurrency is the point: twelve worktrees, three sandboxes at a time, no clash in files, ports,
 packs or state, and no command reached the host. Four concurrent sandboxes cost about 4 GB of
 memory and 2.7 GB of disk, which is the practical limit on a 16 GB machine.
