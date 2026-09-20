@@ -39,6 +39,12 @@ func (Pi) Cells(tier string) []Cell {
 func (Pi) home(env *Env) string { return filepath.Join(env.Work, "pi-home") }
 
 func (d Pi) Prepare(env *Env, c Cell) error {
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	if out, err := env.boxer(env.Repo, "install", "pi"); err != nil {
 		return fmt.Errorf("boxer install pi: %v\n%s", err, out)
 	}
@@ -81,6 +87,9 @@ func (d Pi) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd.Dir = env.Repo
 	// pi has no config-dir variable, so both tiers run under the private HOME.
 	cmd.Env = append(env.BaseEnv(), "PI_SKIP_VERSION_CHECK=1", "PI_TELEMETRY=0", "HOME="+d.home(env), "BOXER_SMOLVM="+d.smolvmWrapper(env))
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

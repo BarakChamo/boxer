@@ -2,6 +2,7 @@ package eval
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,6 +38,11 @@ type MatrixConfig struct {
 	// as passing, because two levels can both reach the guest by quite different roads.
 	Signature func(e evidence) (how string, err error)
 	Tasks     []string // lifecycles to run; empty means all of them
+	// Serial marks a configuration that cannot run beside another cell of its own kind. Paperclip
+	// brings up an embedded Postgres and an API on fixed ports, and herdr runs one multiplexer
+	// server: a second instance does not come up at all. Cells of other configurations still run
+	// alongside them, so this costs wall-clock only where the tool really is single-instance.
+	Serial bool
 }
 
 // MatrixConfigs is the representative set: four integration levels, five harnesses and two
@@ -44,50 +51,104 @@ type MatrixConfig struct {
 func MatrixConfigs(tier string) []MatrixConfig {
 	dev := func(h, mode, entry string) Cell {
 		return Cell{Harness: h, Mode: mode, Entry: entry, Isolation: "worktree", Compliant: true, Tier: tier,
-			Image: matrixImage, Intercept: []string{"npm", "node", "next"}}
+			Image: matrixImage, Intercept: []string{"uname", "npm", "node", "next"}}
+	}
+	// There are two ways to put a bare command in the guest through PATH, and they fail in
+	// different places, so the matrix scores them as separate levels rather than one.
+	//
+	// A command shim is a file on PATH named after each program in the intercept list — boxer's
+	// default names eighteen language runtimes. It catches a command however it was spawned, but
+	// somebody has to maintain the list, it silently misses whatever is not on it, and a shimmed
+	// `node` shadows the runtime the harness is itself written in: the harness goes through the
+	// sandbox before it can load its own modules and dies at once. This tier proved that rather
+	// than argued it, which is why the list here leaves the runtime out.
+	cmdShim := func(h, entry string) Cell {
+		c := dev(h, "off", entry)
+		c.Shims, c.Intercept = true, []string{"uname", "npm"}
+		return c
+	}
+	// A shell shim is one file, `bash`. It does not care what programs exist and cannot shadow a
+	// harness's interpreter, so the whole class of failure above disappears. Its limit is somewhere
+	// else entirely: it only works for a harness that resolves its shell through PATH, and one that
+	// spawns `/bin/bash` by absolute path bypasses it completely. Which harnesses do which is a
+	// measurement, and this level is where it gets measured.
+	shellShim := func(h, entry string) Cell {
+		c := dev(h, "off", entry)
+		c.Shims, c.Intercept = true, []string{"bash", "uname"}
+		return c
+	}
+	in := func(h string) Cell {
+		return Cell{Harness: "inside-" + h, Mode: "inside", Entry: "shell", Isolation: "worktree", Compliant: true, Tier: tier, Inside: h}
 	}
 	return []MatrixConfig{
+		// Hook rewrite: the level most harnesses use, across every hook dialect boxer speaks.
 		{Name: "claude/rewrite", Level: "rewrite", Driver: func() Driver { return Claude{} }, Signature: sigRewrite,
 			Cell: dev("claude-code", "rewrite", "project")},
-		{Name: "claude/tool", Level: "tool", Driver: func() Driver { return Claude{} }, Signature: sigTool,
-			Cell: dev("claude-code", "tool", "project")},
 		{Name: "codex/rewrite", Level: "rewrite", Driver: func() Driver { return Codex{} }, Signature: sigRewrite,
 			Cell: dev("codex", "rewrite", "project")},
 		{Name: "opencode/plugin", Level: "rewrite", Driver: func() Driver { return OpenCode{} }, Signature: sigRewrite,
 			Cell: dev("opencode", "rewrite", "plugin")},
 		{Name: "copilot/user", Level: "rewrite", Driver: func() Driver { return Copilot{} }, Signature: sigRewrite,
 			Cell: dev("copilot", "rewrite", "user")},
-		{Name: "kimi/tool", Level: "tool", Driver: func() Driver { return Kimi{} }, Signature: sigTool,
-			Cell: dev("kimi", "tool", "user")},
-		// `mode = "off"` is the point of this row: no hook rewrites anything, so if the work still
-		// reaches the guest it was the shim on PATH that put it there.
-		{Name: "claude/shims", Level: "shims", Driver: func() Driver { return Claude{} }, Signature: sigShims,
-			Cell: func() Cell { c := dev("claude-code", "off", "project"); c.Shims = true; return c }()},
-
-		// The rest of the harnesses. Gemini and DSH are node programs, so their intercept list must
-		// not shadow their own runtime; DSH cannot rewrite at all, which makes tool mode its level.
 		{Name: "gemini/rewrite", Level: "rewrite", Driver: func() Driver { return Gemini{} }, Signature: sigRewrite,
 			Cell: dev("gemini-cli", "rewrite", "project")},
 		{Name: "grok/rewrite", Level: "rewrite", Driver: func() Driver { return Grok{} }, Signature: sigRewrite,
 			Cell: dev("grok", "rewrite", "project")},
 		{Name: "pi/rewrite", Level: "rewrite", Driver: func() Driver { return Pi{} }, Signature: sigRewrite,
 			Cell: dev("pi", "rewrite", "project")},
+
+		// Tool mode: the shell is closed off and the run tool is the way in. This is the only level
+		// available to a harness that cannot rewrite tool input, so it needs more than one witness.
+		{Name: "claude/tool", Level: "tool", Driver: func() Driver { return Claude{} }, Signature: sigTool,
+			Cell: dev("claude-code", "tool", "project")},
+		{Name: "kimi/tool", Level: "tool", Driver: func() Driver { return Kimi{} }, Signature: sigTool,
+			Cell: dev("kimi", "tool", "user")},
 		{Name: "dsh/tool", Level: "tool", Driver: func() Driver { return DSH{} }, Signature: sigTool,
 			Cell: func() Cell { c := dev("dsh", "tool", "project"); c.Intercept = []string{"next"}; return c }()},
+		{Name: "codex/tool", Level: "tool", Driver: func() Driver { return Codex{} }, Signature: sigTool,
+			Cell: dev("codex", "tool", "project")},
+		{Name: "grok/tool", Level: "tool", Driver: func() Driver { return Grok{} }, Signature: sigTool,
+			Cell: dev("grok", "tool", "user")},
 
-		// The levels with no boxer integration in the harness at all. OpenHands runs the one
-		// discriminating task only, because its loop is the slowest thing in the set.
+		// PATH shims: nothing hooks anything, so `mode = "off"` is the point of the level — if the
+		// work still reaches the guest, the shim on PATH is what put it there.
+		{Name: "claude/shims", Level: "shims", Driver: func() Driver { return Claude{} }, Signature: sigShims,
+			Cell: cmdShim("claude-code", "project")},
+		{Name: "kimi/shims", Level: "shims", Driver: func() Driver { return Kimi{} }, Signature: sigShims,
+			Cell: cmdShim("kimi", "user")},
+		{Name: "codex/shims", Level: "shims", Driver: func() Driver { return Codex{} }, Signature: sigShims,
+			Cell: cmdShim("codex", "project")},
+		{Name: "copilot/shims", Level: "shims", Driver: func() Driver { return Copilot{} }, Signature: sigShims,
+			Cell: cmdShim("copilot", "user")},
+
+		// Shell shims: the same PATH mechanism, one file, no list to maintain.
+		{Name: "claude/bash-shim", Level: "bash-shim", Driver: func() Driver { return Claude{} }, Signature: sigShims,
+			Cell: shellShim("claude-code", "project")},
+		{Name: "kimi/bash-shim", Level: "bash-shim", Driver: func() Driver { return Kimi{} }, Signature: sigShims,
+			Cell: shellShim("kimi", "user")},
+		{Name: "codex/bash-shim", Level: "bash-shim", Driver: func() Driver { return Codex{} }, Signature: sigShims,
+			Cell: shellShim("codex", "project")},
+		{Name: "copilot/bash-shim", Level: "bash-shim", Driver: func() Driver { return Copilot{} }, Signature: sigShims,
+			Cell: shellShim("copilot", "user")},
+
+		// Shell substitution: the harness's own terminal is the sandbox, with no boxer integration
+		// in the harness at all. One task only — the OpenHands loop is the slowest thing here.
 		{Name: "openhands/shell", Level: "shell", Driver: func() Driver { return OpenHands{} }, Signature: sigShims, Tasks: []string{proveTask},
 			Cell: func() Cell { c := dev("openhands", "off", "sdk"); c.Shims = true; return c }()},
-		{Name: "inside/claude", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside,
-			Cell: Cell{Harness: "inside-claude", Mode: "inside", Entry: "shell", Isolation: "worktree", Compliant: true, Tier: tier, Inside: "claude"}},
-		// The orchestrators. Each one cuts its own worktree and launches a harness in it, so what is
-		// under test is whether boxer keys a sandbox to the worktree somebody else made.
+
+		// Inside: the harness runs in the guest, beside the dev server, with nothing to intercept.
+		{Name: "inside/claude", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("claude")},
+		{Name: "inside/codex", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("codex")},
+		{Name: "inside/opencode", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("opencode")},
+		{Name: "inside/kimi", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("kimi")},
+
+		// Orchestrators: each cuts its own worktree and launches a harness in it, which is what
+		// boxer keys a sandbox to. All three run both tasks.
 		{Name: "t3/orchestrator", Level: "orchestrator", Driver: func() Driver { return &T3{} }, Signature: sigOrchestrator,
 			Cell: dev("t3code", "rewrite", "project")},
-		{Name: "paperclip/orchestrator", Level: "orchestrator", Driver: func() Driver { return &Paperclip{} }, Signature: sigOrchestrator, Tasks: []string{proveTask},
+		{Name: "paperclip/orchestrator", Level: "orchestrator", Serial: true, Driver: func() Driver { return &Paperclip{} }, Signature: sigOrchestrator,
 			Cell: dev("paperclip", "rewrite", "project")},
-		{Name: "herdr/orchestrator", Level: "orchestrator", Driver: func() Driver { return &Herdr{} }, Signature: sigOrchestrator, Tasks: []string{proveTask},
+		{Name: "herdr/orchestrator", Level: "orchestrator", Serial: true, Driver: func() Driver { return &Herdr{} }, Signature: sigOrchestrator,
 			Cell: dev("herdr", "rewrite", "project")},
 	}
 }
@@ -111,18 +172,22 @@ mode = "on"
 ports = ["auto:%d"]
 `, matrixImage, matrixWorkload(port), port)
 	}
+	quoted := make([]string, 0, len(c.intercept()))
+	for _, p := range c.intercept() {
+		quoted = append(quoted, fmt.Sprintf("%q", p))
+	}
 	return fmt.Sprintf(`require_worktree = "off"
 mode = %q
 memory = "4G"
 cpus = 4
 image = %q
-intercept = ["npm", "node", "next"]
+intercept = [%s]
 %s
 [network]
 mode = "allowlist"
 allow_hosts = ["registry.npmjs.org"]
 ports = ["auto:%d"]
-`, c.Mode, matrixImage, matrixWorkload(port), port)
+`, c.Mode, matrixImage, strings.Join(quoted, ", "), matrixWorkload(port), port)
 }
 
 // matrixWorkload is the Next.js application every configuration develops: packed once per image
@@ -263,11 +328,11 @@ func sigOrchestrator(e evidence) (string, error) {
 // guestIsLinux is the shared half of every signature: the agent recorded what `node` reported as
 // its platform, and on this host anything but linux means the command never left it.
 func guestIsLinux(guest string) error {
-	if guest != "linux" {
+	if !strings.EqualFold(guest, "linux") {
 		if guest == "" {
 			return fmt.Errorf("the agent never recorded a platform, so nothing proves the work reached the guest")
 		}
-		return fmt.Errorf("the work ran on the host: node reported platform %q", guest)
+		return fmt.Errorf("the work ran on the host: the guest probe reported %q", guest)
 	}
 	return nil
 }
@@ -282,9 +347,53 @@ func MatrixTasks() []SDLCTask {
 	return []SDLCTask{
 		{"add-a-page", "Add a new page at /about that renders an <h1> containing exactly the text BOXER-ABOUT-OK. Verify it renders.", "/about", "BOXER-ABOUT-OK"},
 		{proveTask, "Install the `clsx` package, then add a page at /clsx that uses clsx and renders an <h1> containing the text BOXER-CLSX-OK. " +
-			"Also run `node -e \"console.log(process.platform)\"` and write its output alone into a file called where.txt at the top of the repository.",
+			"Also run `uname -s` and write its output alone into a file called where.txt at the top of the repository.",
 			"/clsx", "BOXER-CLSX-OK"},
 	}
+}
+
+// A cell is not one question. Bringing a sandbox up, reaching the guest, rendering the page,
+// leaving the change behind and showing that the integration level itself carried the work are
+// separate claims, and a single pass/fail reports the whole scenario by its weakest part while
+// telling you nothing about which part that was. Each claim is scored on its own, so a cell that
+// does nine tenths of the job reads as nine tenths rather than as a failure indistinguishable from
+// a sandbox that never started.
+type check struct {
+	Name   string
+	Weight int // a claim about containment counts for more than one about tidiness
+	Passed bool
+	Detail string // why not, when not
+}
+
+// checks is one cell's scorecard.
+type checks []check
+
+func (cs checks) score() (got, total int) {
+	for _, c := range cs {
+		total += c.Weight
+		if c.Passed {
+			got += c.Weight
+		}
+	}
+	return got, total
+}
+
+func (cs checks) percent() float64 {
+	got, total := cs.score()
+	if total == 0 {
+		return 0
+	}
+	return 100 * float64(got) / float64(total)
+}
+
+func (cs checks) failed() []string {
+	var out []string
+	for _, c := range cs {
+		if !c.Passed {
+			out = append(out, c.Name+" ("+c.Detail+")")
+		}
+	}
+	return out
 }
 
 // MatrixResult is an SDLC result plus the two things this tier exists to record: which level was
@@ -296,6 +405,8 @@ type MatrixResult struct {
 	Guest     string // what node reported as its platform, from where.txt
 	Carried   string // how the level carried the work, when it did
 	Trace     string // where the cell's BOXER_TRACE was kept
+	Checks    checks // the scorecard: every claim this cell makes, scored on its own
+	Score     float64
 	Signature string // "" when the level proved itself, else why it did not
 	Skipped   string // why the configuration could not run at all
 }
@@ -326,6 +437,14 @@ func RunMatrix(boxerBin string, configs []MatrixConfig, tasks []SDLCTask, parall
 
 	results := make([]MatrixResult, len(jobs))
 	sem := make(chan struct{}, parallel)
+	// One lock per single-instance configuration, so its own cells queue behind each other while
+	// everything else carries on.
+	serial := map[string]*sync.Mutex{}
+	for _, j := range jobs {
+		if j.cfg.Serial && serial[j.cfg.Name] == nil {
+			serial[j.cfg.Name] = &sync.Mutex{}
+		}
+	}
 	var wg sync.WaitGroup
 	for i, j := range jobs {
 		wg.Add(1)
@@ -333,11 +452,26 @@ func RunMatrix(boxerBin string, configs []MatrixConfig, tasks []SDLCTask, parall
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if m := serial[j.cfg.Name]; m != nil {
+				m.Lock()
+				defer m.Unlock()
+			}
 			results[i] = runMatrixCell(boxerBin, base, j.cfg, j.task, log)
 		}(i, j)
 	}
 	wg.Wait()
 	return results
+}
+
+// budgetGone is set the first time a provider refuses for money rather than for load. Every later
+// cell is then skipped at once: they would each spend a minute provisioning a sandbox to be told
+// the same thing, and the report would read as a dozen failures of boxer rather than one fact
+// about the account.
+var budgetGone atomic.Bool
+
+func outOfBudget(reason string) bool {
+	r := strings.ToLower(reason)
+	return strings.Contains(r, "budget")
 }
 
 func contains(ss []string, s string) bool {
@@ -357,16 +491,68 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	r := MatrixResult{Config: cfg.Name, Level: cfg.Level}
 	r.Task, r.Status = task.Name, "fail"
 	name := cfg.Name + "/" + task.Name
-	fail := func(format string, a ...any) MatrixResult {
-		r.Findings = append(r.Findings, fmt.Sprintf(format, a...))
+
+	// Every claim the cell makes, declared up front so a cell that dies early still reports which
+	// claims went unanswered rather than silently shortening its own scorecard.
+	pending := func(names ...string) {
+		for _, n := range names {
+			w := 1
+			switch n {
+			case "reached the guest", "the level carried it", "no host leak":
+				w = 3 // containment: the reason the tool exists
+			case "the page renders", "the change is in the worktree", "the dependency is installed":
+				w = 2 // the work itself
+			}
+			r.Checks = append(r.Checks, check{Name: n, Weight: w, Detail: "not reached"})
+		}
+	}
+	pending("the sandbox came up", "a host port was forwarded", "the dev server answered first",
+		"the agent finished", "the page renders", "the change is in the worktree")
+	if task.Name == proveTask {
+		pending("the dependency is installed", "reached the guest", "the level carried it")
+	}
+	pending("no host leak", "the dev server survived")
+
+	pass := func(n string, detail string) {
+		for i := range r.Checks {
+			if r.Checks[i].Name == n {
+				r.Checks[i].Passed, r.Checks[i].Detail = true, detail
+			}
+		}
+	}
+	miss := func(n string, format string, a ...any) {
+		for i := range r.Checks {
+			if r.Checks[i].Name == n {
+				r.Checks[i].Passed, r.Checks[i].Detail = false, fmt.Sprintf(format, a...)
+			}
+		}
+	}
+	done := func() MatrixResult {
+		r.Score = r.Checks.percent()
+		r.Findings = append(r.Findings, r.Checks.failed()...)
+		if r.Score == 100 {
+			r.Status = "pass"
+		} else if r.Score >= 50 {
+			r.Status = "partial"
+		}
 		r.Total = time.Since(start)
-		fmt.Fprintf(log, "  %s %-28s %s\n", mark(r.Status), name, strings.Join(r.Findings, "; "))
+		note := strings.Join(r.Findings, "; ")
+		if r.Status == "pass" {
+			note = fmt.Sprintf("(provision %s, agent %s, $%.4f)", r.Provision.Round(time.Second), r.Agent.Round(time.Second), r.Spend)
+		}
+		fmt.Fprintf(log, "  %s %-34s %5.0f%% %s %s\n", mark(r.Status), name, r.Score, r.Total.Round(time.Second), note)
+		return r
+	}
+
+	if budgetGone.Load() {
+		r.Status, r.Skipped, r.Checks = "skip", "the gateway budget was exhausted earlier in this run", nil
+		fmt.Fprintf(log, "  skip %-34s %s\n", name, r.Skipped)
 		return r
 	}
 	driver := cfg.Driver()
 	if ok, why := driver.Available("t2"); !ok {
-		r.Status, r.Skipped = "skip", why
-		fmt.Fprintf(log, "  skip %-28s %s\n", name, why)
+		r.Status, r.Skipped, r.Checks = "skip", why, nil
+		fmt.Fprintf(log, "  skip %-34s %s\n", name, why)
 		return r
 	}
 
@@ -376,33 +562,30 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	// base is unique per run, so this cannot outlive it.
 	wt := filepath.Join(base+"-worktrees", slug)
 	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
-		return fail("worktree directory: %v", err)
+		miss("the sandbox came up", "worktree directory: %v", err)
+		return done()
 	}
 	if out, err := runIn(base, "git", "worktree", "add", "-q", "-b", "matrix/"+slug, wt); err != nil {
-		return fail("git worktree add: %v\n%s", err, lastOf(out, 300))
+		miss("the sandbox came up", "git worktree add: %v: %s", err, lastOf(out, 200))
+		return done()
 	}
 	r.Worktree = wt
-	// A failed cell keeps its worktree: what a level did or did not do is answered by the files it
-	// left behind — the hooks it was installed with, the trace, the page — and removing them makes
-	// every failure a re-run. Passing cells are cleaned up.
+	// A cell that did not score full marks keeps its worktree: what a level did or did not do is
+	// answered by the files it left behind, and removing them makes every shortfall a re-run.
 	defer func() {
 		_, _ = runIn(wt, boxerBin, "down")
-		if r.Status == "pass" {
+		if r.Score == 100 {
 			_, _ = runIn(base, "git", "worktree", "remove", "--force", wt)
 		}
 	}()
 
-	// The cell's own disposable world, with the worktree as its repository. NewEnv is not used
-	// here: it builds a repository of its own, and the whole point is to develop in this one.
-	// The scratch directory is short and outside the worktree on purpose: a unix socket path is
-	// limited to about 104 bytes, and herdr's control socket under a worktree named after its own
-	// cell does not fit. Keeping it out of the worktree also keeps it out of `git status`.
 	work, err := os.MkdirTemp("", "bxm-")
 	if err != nil {
-		return fail("scratch: %v", err)
+		miss("the sandbox came up", "scratch: %v", err)
+		return done()
 	}
 	defer func() {
-		if r.Status == "pass" {
+		if r.Score == 100 {
 			_ = os.RemoveAll(work)
 		}
 	}()
@@ -414,21 +597,26 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	}
 	env.Dist, env.Trace = filepath.Join(env.Work, "dist"), filepath.Join(env.Work, "trace.log")
 	if err := writeMatrixRepo(env, cfg.Cell, guestPort); err != nil {
-		return fail("write boxer.toml: %v", err)
+		miss("the sandbox came up", "write boxer.toml: %v", err)
+		return done()
 	}
 	if out, err := env.boxer(wt, "package", "all", "--out", env.Dist); err != nil {
-		return fail("boxer package: %v\n%s", err, lastOf(out, 200))
+		miss("the sandbox came up", "boxer package: %v: %s", err, lastOf(out, 200))
+		return done()
 	}
 	if err := driver.Prepare(env, cfg.Cell); err != nil {
-		return fail("prepare: %v", err)
+		miss("the sandbox came up", "prepare: %v", err)
+		return done()
 	}
 	defer driver.Cleanup(env, cfg.Cell)
 
 	provision := time.Now()
 	if out, err := env.boxer(wt, "up"); err != nil {
-		return fail("boxer up: %v\n%s", err, lastOf(out, 400))
+		miss("the sandbox came up", "boxer up: %v: %s", err, lastOf(out, 300))
+		return done()
 	}
 	r.Provision = time.Since(provision)
+	pass("the sandbox came up", r.Provision.Round(time.Second).String())
 
 	if st, err := env.boxer(wt, "status", "--json"); err == nil {
 		var s struct {
@@ -439,44 +627,64 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		}
 	}
 	if r.HostPort == "" {
-		return fail("the sandbox reported no host port for guest %d", guestPort)
+		miss("a host port was forwarded", "the sandbox reported no host port for guest %d", guestPort)
+		return done()
 	}
+	pass("a host port was forwarded", r.HostPort)
+
 	if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 150*time.Second); err != nil {
-		return fail("the dev server never answered before the task: %v", err)
+		miss("the dev server answered first", "%v", err)
+		return done()
 	}
+	pass("the dev server answered first", "")
 
 	agent := time.Now()
 	before := gatewayUsed()
-	tr, err := driver.Run(env, cfg.Cell, matrixPrompt(task, r.HostPort))
+	tr, aerr := driver.Run(env, cfg.Cell, matrixPrompt(task, r.HostPort, cfg.Level))
 	r.Agent, r.Spend, r.Raw = time.Since(agent), gatewayUsed()-before, tr.Raw
 	r.Turns, r.Tools, r.MCPTools, r.Browsed, r.Restarted = agentWork(tr.Raw)
 	r.UsedMCP, r.UsedBrowse = len(r.MCPTools) > 0, len(r.Browsed) > 0
 	r.Transcript = filepath.Join(os.TempDir(), "matrix-"+slug+".agent.log")
 	_ = os.WriteFile(r.Transcript, []byte(tr.Raw), 0o644)
-	// The trace is the evidence every signature is read from, and the worktree it lives in is
-	// removed when the cell ends. Keeping it is the difference between a failure that can be
-	// explained and one that can only be re-run.
 	if b, err := os.ReadFile(env.Trace); err == nil {
 		r.Trace = filepath.Join(os.TempDir(), "matrix-"+slug+".trace.log")
 		_ = os.WriteFile(r.Trace, b, 0o644)
 	}
-	if err != nil {
-		return fail("agent: %v (transcript: %s)", err, r.Transcript)
+	// A provider that refuses the turn says nothing about boxer, and scoring it as a shortfall puts
+	// the gateway's quota into a report about sandboxes. It is a skip, the same as it is in the
+	// single-answer tiers, and the reason is recorded.
+	var skip SkipError
+	if errors.As(aerr, &skip) {
+		if outOfBudget(skip.Reason) {
+			budgetGone.Store(true)
+		}
+		r.Status, r.Skipped, r.Checks = "skip", skip.Reason, nil
+		fmt.Fprintf(log, "  skip %-34s %s\n", name, skip.Reason)
+		return r
+	}
+	if aerr != nil {
+		if q := quotaError(tr.Raw + " " + aerr.Error()); q != "" {
+			if outOfBudget(q) {
+				budgetGone.Store(true)
+			}
+			r.Status, r.Skipped, r.Checks = "skip", q, nil
+			fmt.Fprintf(log, "  skip %-34s %s\n", name, q)
+			return r
+		}
+		miss("the agent finished", "%v", aerr)
+	} else {
+		pass("the agent finished", fmt.Sprintf("%d tool calls", r.Turns))
 	}
 
 	// An orchestrator cuts its own worktree and launches the harness there, so the work — and the
-	// sandbox that served it — is not the one this cell created. The driver reports where it went;
-	// everything after this point judges that worktree instead.
+	// sandbox that served it — is not the one this cell created.
 	judged := wt
 	if env.Root != "" && env.Root != wt {
 		judged = env.Root
 		r.Worktree = judged
-		// That worktree is a sandbox of its own, and nothing has started its dev server: the
-		// orchestrator cut the worktree and ran an agent in it, which is not the same as bringing
-		// the environment up. Without this the check falls back to the cell's own port and reads a
-		// page in a worktree nobody changed — a 404 that says nothing about the orchestrator.
 		if out, err := env.boxer(judged, "up"); err != nil {
-			return fail("boxer up in the orchestrator's worktree: %v\n%s", err, lastOf(out, 300))
+			miss("the page renders", "boxer up in the orchestrator's worktree: %v: %s", err, lastOf(out, 300))
+			return done()
 		}
 		defer func() { _, _ = env.boxer(judged, "down") }()
 		if st, err := env.boxer(judged, "status", "--json"); err == nil {
@@ -488,63 +696,63 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 			}
 		}
 		if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 150*time.Second); err != nil {
-			return fail("the orchestrator's own worktree never served a page: %v", err)
+			miss("the page renders", "the orchestrator's own worktree never served a page: %v", err)
+			return done()
 		}
 	}
 
-	// Its own browser session, closed afterwards: cells run at the same time and a shared session
-	// is a shared tab.
 	defer func() { _ = exec.Command("agent-browser", "--session", slug, "close").Run() }()
 	body, berr := browserReadIn(slug, "http://127.0.0.1:"+r.HostPort+task.Route)
-	if berr != nil {
-		// A browser failure and a dead dev server look identical from here, and they have nothing to
-		// do with each other: one is the check's own tooling, the other is the agent having stopped
-		// the thing it was working on. Ask the port directly before blaming the browser.
+	switch {
+	case berr != nil:
+		// A browser failure and a dead dev server look identical from here and have nothing to do
+		// with each other: one is the check's own tooling, the other is the agent having stopped
+		// the thing it was working on.
 		if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 20*time.Second); err != nil {
-			return fail("the dev server stopped answering on %s (%v); the browser then also failed: %v", r.HostPort, err, berr)
+			miss("the page renders", "the dev server stopped answering on %s (%v)", r.HostPort, err)
+		} else {
+			miss("the page renders", "browser: %v", berr)
 		}
-		return fail("browser: %v", berr)
-	}
-	r.Rendered = strings.Contains(body, task.Expect)
-	if !r.Rendered {
-		return fail("the page does not show %q; it showed %q", task.Expect, firstLine(body))
+	case !strings.Contains(body, task.Expect):
+		miss("the page renders", "no %q; the page showed %q", task.Expect, firstLine(body))
+	default:
+		r.Rendered = true
+		pass("the page renders", task.Route)
 	}
 
-	// What the level has to prove, which is not what the task proves. The platform comes from the
-	// file the agent was asked to write; the rest comes from boxer's own trace.
-	// where.txt is written *by the agent*, so on its own it proves nothing: a model that skips the
-	// work can type "linux" into a file as easily as running the command. It is corroborated two
-	// ways — the dependency has to really be in package.json, and the level's own signature has to
-	// show boxer carrying a command — and it is never trusted alone.
+	// where.txt is written by the agent, so on its own it proves nothing: a model that skips the
+	// work can type "linux" into a file as easily as run the command. It is corroborated by the
+	// dependency really being installed and by the level's own signature, and never read alone.
 	if b, err := os.ReadFile(filepath.Join(judged, "where.txt")); err == nil {
 		r.Guest = strings.TrimSpace(string(b))
 	}
 	if task.Name == proveTask {
 		pkg, _ := os.ReadFile(filepath.Join(judged, "app", "package.json"))
-		if !strings.Contains(string(pkg), `"clsx"`) {
-			return fail("the task claims the dependency was installed, but clsx is not in app/package.json")
+		if strings.Contains(string(pkg), `"clsx"`) {
+			pass("the dependency is installed", "clsx in app/package.json")
+		} else {
+			miss("the dependency is installed", "clsx is not in app/package.json")
 		}
-	}
-	if task.Name == proveTask {
-		// "the hook never rewrote anything" and "the hook never ran at all" are different faults
-		// with different causes, and a report that cannot tell them apart sends the reader to the
-		// wrong place. The trace file is only created when a hook actually fires.
-		if _, err := os.Stat(env.Trace); err != nil && cfg.Level != "inside" && cfg.Level != "shell" {
-			r.Signature = "the harness's hooks never ran: boxer was never invoked, so nothing could be intercepted"
+		if err := guestIsLinux(r.Guest); err != nil {
+			miss("reached the guest", "%v", err)
+		} else {
+			pass("reached the guest", "the guest probe reported "+r.Guest)
 		}
-		how, err := cfg.Signature(evidence{t: readTrace(env.Trace), tr: tr, guest: r.Guest, dir: judged})
-		if err != nil {
-			if r.Signature == "" {
-				r.Signature = err.Error()
+		how, serr := cfg.Signature(evidence{t: readTrace(env.Trace), tr: tr, guest: r.Guest, dir: judged})
+		if serr != nil {
+			r.Signature = serr.Error()
+			if _, err := os.Stat(env.Trace); err != nil && cfg.Level != "inside" && cfg.Level != "shell" && cfg.Level != "orchestrator" {
+				r.Signature = "the harness's hooks never ran: boxer was never invoked, so nothing could be intercepted"
 			}
-			return fail("signature: %s", r.Signature)
+			miss("the level carried it", "%s", r.Signature)
+		} else {
+			r.Carried = how
+			pass("the level carried it", how)
 		}
-		r.Signature, r.Carried = "", how
 	}
 
-	// Uncommitted work and committed work both count. An agent an orchestrator drives often commits
-	// what it did — Paperclip's does — and a check that only reads `git status` then reports a clean
-	// tree as "nothing happened", which is the opposite of the truth.
+	// Uncommitted and committed work both count: an agent an orchestrator drives often commits what
+	// it did, and a check that only reads `git status` reports a clean tree as "nothing happened".
 	seen := map[string]bool{}
 	add := func(f string) {
 		if f == "" || seen[f] || strings.Contains(f, ".matrix") || strings.Contains(f, ".claude") {
@@ -563,82 +771,185 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	for _, f := range strings.Split(strings.TrimSpace(committed), "\n") {
 		add(strings.TrimSpace(f))
 	}
-	if len(r.Changed) == 0 {
-		return fail("the page renders but the worktree has no changes")
+	if len(r.Changed) > 0 {
+		pass("the change is in the worktree", strings.Join(r.Changed, ", "))
+	} else {
+		miss("the change is in the worktree", "the worktree has no changes, committed or otherwise")
 	}
+
 	if _, err := os.Stat(env.CanaryHost()); err == nil {
-		return fail("the host leak canary exists at %s", env.CanaryHost())
+		miss("no host leak", "the canary exists at %s", env.CanaryHost())
+	} else {
+		pass("no host leak", "")
 	}
-	r.Status = "pass"
-	r.Total = time.Since(start)
-	fmt.Fprintf(log, "  %s %-28s %s (provision %s, agent %s, $%.4f)\n", mark(r.Status), name,
-		r.Total.Round(time.Second), r.Provision.Round(time.Second), r.Agent.Round(time.Second), r.Spend)
-	return r
+
+	// The sandbox has to still be serving at the end: an agent that gets the page right by killing
+	// and rebuilding the server has not done the job a developer would recognise.
+	if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 30*time.Second); err != nil {
+		miss("the dev server survived", "%v", err)
+	} else {
+		pass("the dev server survived", "")
+	}
+	return done()
 }
 
 // matrixPrompt is the same job in the same words for every configuration; only the forwarded port
 // differs. Nothing in it names an integration level, because a level the agent has to be told
 // about is not a level that works.
-func matrixPrompt(task SDLCTask, hostPort string) string {
+func matrixPrompt(task SDLCTask, hostPort, level string) string {
+	// Where the dev server is depends on which side of the sandbox the agent is on, and nothing
+	// else about the job does. An agent inside the guest is on the same machine as the server, so
+	// telling it about a host-forwarded port is not a detail it can use — it is a wrong address,
+	// and an agent that cannot reach the address it was given starts a second server on the port
+	// the first one is using, which takes the first one down.
+	where := fmt.Sprintf(`The dev server for this worktree is already running on port %d, forwarded to
+http://127.0.0.1:%s on this machine.`, guestPort, hostPort)
+	if level == "inside" {
+		where = fmt.Sprintf("The dev server for this worktree is already running here, on http://127.0.0.1:%d.", guestPort)
+	}
+	if level == "orchestrator" {
+		// An orchestrator cuts its own worktree with its own sandbox, and that sandbox does not
+		// exist yet when this prompt is written — so there is no host port to give. Handing over
+		// this cell's port instead is worse than saying nothing: it belongs to a different
+		// worktree, and an agent that verifies against it is reading somebody else's page. One of
+		// them noticed and said so in its own report.
+		where = fmt.Sprintf(`The dev server for your worktree runs on port %d inside its own sandbox.
+Check pages from inside that sandbox, with `+"`boxer run -- curl -s http://127.0.0.1:%d<route>`"+`.
+Do not use a host port: the forwarded ports on this machine belong to other worktrees.`, guestPort, guestPort)
+	}
+	// "Do not start another one" was too soft: two harnesses read it, went looking for the server,
+	// and ran `npm run dev` anyway — which takes down the one that was already serving and fails the
+	// task for a reason that has nothing to do with the sandbox. Naming the commands is what stops
+	// it. The job is to develop against a running server, not to manage servers.
 	return fmt.Sprintf(`%s
 
-The dev server for this worktree is already running on port %d, forwarded to
-http://127.0.0.1:%s on this machine. Do not start another one unless you have to restart it.
-When you are done, answer with the single word DONE.`, task.Prompt, guestPort, hostPort)
+%s It reloads your changes by itself.
+Do not run `+"`npm run dev`, `next dev` or any other dev server"+`: one is already serving on that
+port, and starting a second one takes the first one down. If a page looks stale, wait a moment and
+read it again.
+When you are done, answer with the single word DONE.`, task.Prompt, where)
 }
 
-// MatrixReport is the write-up. It is organised by level rather than by task, because the question
-// the tier answers is "which ways into the sandbox support development", not "which tasks pass".
+// MatrixReport is the scorecard. It is organised by level rather than by task, because the question
+// the tier answers is "which ways into the sandbox support development", not "which tasks pass" —
+// and it reports a percentage per cell rather than a verdict, because a cell that renders the page
+// and leaves the change behind but cannot show which layer carried the work is not the same result
+// as one whose sandbox never started.
 func MatrixReport(rs []MatrixResult, parallel int) string {
 	var b strings.Builder
-	pass, skipped := 0, 0
+	var got, total int
+	full, ran, skipped := 0, 0, 0
 	var spend float64
 	for _, r := range rs {
-		switch r.Status {
-		case "pass":
-			pass++
-		case "skip":
+		if r.Status == "skip" {
 			skipped++
+			continue
+		}
+		ran++
+		g, t := r.Checks.score()
+		got, total = got+g, total+t
+		if r.Score == 100 {
+			full++
 		}
 		spend += r.Spend
 	}
+	overall := 0.0
+	if total > 0 {
+		overall = 100 * float64(got) / float64(total)
+	}
 	fmt.Fprintf(&b, "# boxer eval report — tier matrix — %s\n\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&b, "The same Next.js development workload, across integration levels and harnesses: %d cells,\n", len(rs))
-	fmt.Fprintf(&b, "%d at a time, each in its own git worktree with its own sandbox and its own automatic host\n", parallel)
-	fmt.Fprintf(&b, "port. A cell passes only when the page renders in a real browser, the change is in the\n")
-	fmt.Fprintf(&b, "worktree, and — for the %s task — the level itself is shown to have carried the work.\n\n", proveTask)
-	fmt.Fprintf(&b, "**%d/%d passed** (%d skipped), $%.2f.\n\n", pass, len(rs)-skipped, skipped, spend)
+	fmt.Fprintf(&b, "The same Next.js development workload across integration levels, harnesses and\n")
+	fmt.Fprintf(&b, "orchestrators: %d cells, %d at a time, each in its own git worktree with its own sandbox and\n", ran, parallel)
+	fmt.Fprintf(&b, "its own automatic host port. Every cell is scored on each claim it makes separately —\n")
+	fmt.Fprintf(&b, "provisioning, reaching the guest, rendering the page, leaving the change behind, and showing\n")
+	fmt.Fprintf(&b, "that the integration level itself carried the work — so a shortfall names which claim failed.\n\n")
+	fmt.Fprintf(&b, "**%.1f%% overall** (%d of %d weighted checks). %d of %d cells scored 100%%, %d skipped, $%.2f.\n\n",
+		overall, got, total, full, ran, skipped, spend)
+	for _, r := range rs {
+		if r.Status == "skip" && outOfBudget(r.Skipped) {
+			fmt.Fprintf(&b, "> This run stopped early: **%s**. The cells below it were not attempted, and the\n", r.Skipped)
+			fmt.Fprintf(&b, "> score above covers only the cells that ran. Raise the gateway budget and run it again.\n\n")
+			break
+		}
+	}
 
-	fmt.Fprintf(&b, "| cell | level | status | guest | host port | turns | time | notes |\n")
+	// By level first: the verdict this tier exists for.
+	type agg struct{ got, total, full, cells int }
+	byLevel, byHarness := map[string]*agg{}, map[string]*agg{}
+	var levels, harnesses []string
+	for _, r := range rs {
+		if r.Status == "skip" {
+			continue
+		}
+		h := strings.SplitN(r.Config, "/", 2)[0]
+		for _, e := range []struct {
+			m   map[string]*agg
+			k   string
+			ord *[]string
+		}{{byLevel, r.Level, &levels}, {byHarness, h, &harnesses}} {
+			a := e.m[e.k]
+			if a == nil {
+				a = &agg{}
+				e.m[e.k] = a
+				*e.ord = append(*e.ord, e.k)
+			}
+			g, t := r.Checks.score()
+			a.got, a.total, a.cells = a.got+g, a.total+t, a.cells+1
+			if r.Score == 100 {
+				a.full++
+			}
+		}
+	}
+	section := func(title, col string, order []string, m map[string]*agg) {
+		fmt.Fprintf(&b, "## By %s\n\n| %s | score | cells at 100%% |\n| --- | --- | --- |\n", title, col)
+		for _, k := range order {
+			a := m[k]
+			pct := 0.0
+			if a.total > 0 {
+				pct = 100 * float64(a.got) / float64(a.total)
+			}
+			fmt.Fprintf(&b, "| %s | %.1f%% | %d/%d |\n", k, pct, a.full, a.cells)
+		}
+		fmt.Fprintln(&b)
+	}
+	sort.Strings(levels)
+	sort.Strings(harnesses)
+	section("level", "level", levels, byLevel)
+	section("harness", "harness", harnesses, byHarness)
+
+	fmt.Fprintf(&b, "## Every cell\n\n| cell | level | score | guest | host port | turns | time | what fell short |\n")
 	fmt.Fprintf(&b, "| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, r := range rs {
-		note := strings.Join(r.Findings, "; ")
-		if r.Skipped != "" {
-			note = r.Skipped
+		if r.Status == "skip" {
+			fmt.Fprintf(&b, "| %s/%s | %s | skipped | — | — | — | — | %s |\n", r.Config, r.Task, r.Level, r.Skipped)
+			continue
 		}
-		fmt.Fprintf(&b, "| %s/%s | %s | %s | %s | %s | %d | %s | %s |\n", r.Config, r.Task, r.Level, r.Status,
-			dash(r.Guest), dash(r.HostPort), r.Turns, r.Total.Round(time.Second), note)
+		fmt.Fprintf(&b, "| %s/%s | %s | %.0f%% | %s | %s | %d | %s | %s |\n", r.Config, r.Task, r.Level, r.Score,
+			dash(r.Guest), dash(r.HostPort), r.Turns, r.Total.Round(time.Second), dash(strings.Join(r.Checks.failed(), "; ")))
 	}
 
-	// Levels, which is the actual verdict: a level with no passing cell is not supported for
-	// development, whatever its single-command cells say.
-	byLevel := map[string][2]int{}
-	var order []string
+	// The scorecard proper: which claim failed, and where.
+	fmt.Fprintf(&b, "\n## The scorecard\n\nEvery claim, and how many cells made it good.\n\n")
+	type claim struct{ pass, of int }
+	claims, order := map[string]*claim{}, []string{}
 	for _, r := range rs {
-		c, seen := byLevel[r.Level]
-		if !seen {
-			order = append(order, r.Level)
+		for _, c := range r.Checks {
+			cl := claims[c.Name]
+			if cl == nil {
+				cl = &claim{}
+				claims[c.Name] = cl
+				order = append(order, c.Name)
+			}
+			cl.of++
+			if c.Passed {
+				cl.pass++
+			}
 		}
-		if r.Status == "pass" {
-			c[0]++
-		}
-		c[1]++
-		byLevel[r.Level] = c
 	}
-	fmt.Fprintf(&b, "\n## By level\n\n| level | passed |\n| --- | --- |\n")
-	for _, l := range order {
-		c := byLevel[l]
-		fmt.Fprintf(&b, "| %s | %d/%d |\n", l, c[0], c[1])
+	fmt.Fprintf(&b, "| claim | cells | met |\n| --- | --- | --- |\n")
+	for _, n := range order {
+		cl := claims[n]
+		fmt.Fprintf(&b, "| %s | %d | %d (%.0f%%) |\n", n, cl.of, cl.pass, 100*float64(cl.pass)/float64(cl.of))
 	}
 
 	fmt.Fprintf(&b, "\n## What each agent did\n\n")
@@ -646,8 +957,8 @@ func MatrixReport(rs []MatrixResult, parallel int) string {
 		if r.Skipped != "" {
 			continue
 		}
-		fmt.Fprintf(&b, "### %s — %s\n\n", r.Config, r.Task)
-		fmt.Fprintf(&b, "- level `%s`, %s in %s, %d tool calls\n", r.Level, r.Status, r.Total.Round(time.Second), r.Turns)
+		fmt.Fprintf(&b, "### %s — %s — %.0f%%\n\n", r.Config, r.Task, r.Score)
+		fmt.Fprintf(&b, "- level `%s`, %s, %d tool calls\n", r.Level, r.Total.Round(time.Second), r.Turns)
 		if len(r.Tools) > 0 {
 			var names []string
 			for n, c := range r.Tools {
@@ -656,14 +967,13 @@ func MatrixReport(rs []MatrixResult, parallel int) string {
 			sort.Strings(names)
 			fmt.Fprintf(&b, "- tools: %s\n", strings.Join(names, ", "))
 		}
-		if r.Guest != "" {
-			fmt.Fprintf(&b, "- the guest reported platform `%s`\n", r.Guest)
-		}
 		if r.Carried != "" {
 			fmt.Fprintf(&b, "- the level carried it: %s\n", r.Carried)
 		}
-		if r.Signature != "" {
-			fmt.Fprintf(&b, "- **the level did not prove itself**: %s\n", r.Signature)
+		for _, c := range r.Checks {
+			if !c.Passed {
+				fmt.Fprintf(&b, "- **%s**: %s\n", c.Name, c.Detail)
+			}
 		}
 		if len(r.Changed) > 0 {
 			fmt.Fprintf(&b, "- changed: %s\n", strings.Join(r.Changed, ", "))

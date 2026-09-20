@@ -88,6 +88,13 @@ Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
 `
 
 func main() {
+	// Never resolve a program through boxer's own shims: a shim runs `boxer run`, so a boxer that
+	// resolved one would call into itself, and the inner call waits for the sandbox the outer one
+	// is already holding. This has to happen before anything is spawned, which means here.
+	launchedPATH = os.Getenv("PATH")
+	if p := shim.SanitizePath(launchedPATH); p != launchedPATH {
+		_ = os.Setenv("PATH", p)
+	}
 	// Only the command sweeps: the library never re-executes its host program.
 	box.ReclaimAllowed = true
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -600,6 +607,52 @@ func (r *doctorReport) exit() int {
 	return 0
 }
 
+// loginShellDemotesShims reports whether a login shell would resolve an intercepted program on the
+// host instead of through boxer's shim.
+//
+// A shim only works while its directory is first on PATH, and a login shell rebuilds PATH: macOS
+// runs path_helper from /etc/zprofile, which puts the system directories in front of whatever was
+// there. A harness that runs its commands through `zsh -lc` or `bash -lc` — Codex does — then gets
+// the host's own `uname`, `npm` or `node`, and the sandbox is quietly not in the path at all. That
+// is worth saying out loud: enforcement the user has configured is not holding, and nothing else
+// reports it.
+// launchedPATH is the PATH boxer was started with, before it removed its own shim directories from
+// it. Diagnostics need the original: what the harness's PATH looks like is the thing being checked.
+var launchedPATH string
+
+func loginShellDemotesShims(e *box.Env) string {
+	if e == nil || e.Cfg.Enforcement == "hook" || len(e.Cfg.Intercept) == 0 {
+		return ""
+	}
+	dir := ""
+	for _, p := range filepath.SplitList(launchedPATH) {
+		if _, err := os.Stat(filepath.Join(p, shim.Marker)); err == nil {
+			dir = p
+			break
+		}
+	}
+	if dir == "" {
+		return "" // no shims on this PATH; nothing to demote
+	}
+	prog := e.Cfg.Intercept[0]
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	cmd := exec.Command(shell, "-lc", "command -v "+prog)
+	cmd.Env = append(os.Environ(), "PATH="+launchedPATH) // ask about the harness's PATH, not boxer's
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	if resolved := strings.TrimSpace(string(out)); resolved != "" && !strings.HasPrefix(resolved, dir) {
+		return fmt.Sprintf("PATH shims do not hold in a login shell: `%s -lc` resolves %s to %s, not to %s. "+
+			"A login shell rebuilds PATH (on macOS, path_helper), so a harness that runs commands through a login "+
+			"shell reaches the host. Use hook or tool enforcement for those harnesses.", shell, prog, resolved, dir)
+	}
+	return ""
+}
+
 func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	r := &doctorReport{Version: version(), Inside: vm.Inside(), ConfigFiles: []string{}, Settings: []doctorSetting{}, Warnings: []string{}}
 	client := vm.New()
@@ -674,6 +727,9 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		r.Shims = sh
 	}
 	r.Warnings = append(r.Warnings, e.Warnings...)
+	if w := loginShellDemotesShims(e); w != "" {
+		r.Warnings = append(r.Warnings, w)
+	}
 	r.Signals = hook.Signals(e.Cfg.Isolation, install.GitInstalled(e.Scope.Root))
 	// Installed content is published verbatim and never edited afterwards, so the drift check is
 	// a comparison against this binary's own copy.

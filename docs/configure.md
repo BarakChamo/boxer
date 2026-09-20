@@ -82,6 +82,27 @@ happened and blocks nothing.
 are deliberately left on the host. `git`, `gh` and `ssh` are on the host by default because they
 need your credentials and your real repository.
 
+Under `shim` enforcement the intercept list becomes real files on PATH, one per program, and two
+things are worth knowing before you edit it. Do not intercept the runtime your harness is written
+in: a `node` shim sends a harness that *is* a node program through the sandbox before it can load
+its own modules, and it dies at startup. And a shim of a program boxer's own machinery runs — the
+smolvm launcher runs `uname` — would call back into boxer; boxer removes its own shim directories
+from PATH for anything it starts, so that recursion cannot happen, but the shim is then not doing
+anything for boxer's own commands either.
+
+A PATH shim holds only while its directory is first on PATH, and a **login shell rebuilds PATH**:
+macOS runs `path_helper` from `/etc/zprofile`, which puts the system directories in front of
+whatever was there. A harness that runs its commands through `zsh -lc` or `bash -lc` — Codex does —
+therefore gets the host's own `uname` or `npm`, and the sandbox is quietly not in the path at all.
+`boxer doctor` says so when it detects this. For those harnesses use `hook` or `tool` enforcement,
+which do not depend on PATH.
+
+Intercepting `bash` instead of a list of programs is the other way to use this level: one shim, no
+list to maintain, and nothing that can shadow a harness's interpreter. It catches every command a
+harness runs *through a shell it resolves on PATH*, and nothing at all from a harness that spawns
+`/bin/bash` by absolute path. Which of the two fits depends on the harness, and
+[eval-matrix.md](eval-matrix.md) measures both.
+
 **`image`** is any OCI reference — `node:24-bookworm`, `ghcr.io/you/dev:latest`, a private
 registry — and is detected from your lockfile when you leave it empty. It also takes a local
 image: a `docker save` archive (`image = "./dev.tar"`), an extracted rootfs directory, or `-` for

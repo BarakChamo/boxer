@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // template removes the shim directory from PATH before handing off, so nothing boxer or smolvm
@@ -18,9 +19,35 @@ export PATH
 exec boxer run -- %[1]s "$@"
 `
 
+// Marker names a directory as boxer's own shims. boxer drops any PATH entry containing it before
+// spawning anything, because a shim it resolves itself is a shim that calls back into boxer: the
+// smolvm launcher runs `uname`, and with a `uname` shim on PATH that became `boxer run -- uname`
+// inside a boxer that was already working on the same sandbox, which deadlocked until it was
+// killed. The shim script strips its own directory for the program it hands off to, which does not
+// help any other process boxer starts.
+const Marker = ".boxer-shims"
+
+// SanitizePath removes every boxer shim directory from a PATH value.
+func SanitizePath(path string) string {
+	var keep []string
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, Marker)); err == nil {
+			continue
+		}
+		keep = append(keep, dir)
+	}
+	return strings.Join(keep, string(filepath.ListSeparator))
+}
+
 // Install writes one shim per program into dir and returns the paths written.
 func Install(dir string, programs []string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, Marker), []byte("boxer shims; boxer removes this directory from its own PATH\n"), 0o644); err != nil {
 		return nil, err
 	}
 	var written []string

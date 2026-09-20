@@ -98,7 +98,14 @@ func gateway(h string) (openAICompatible, string) {
 
 // quotaError recognises a live turn stopped by the provider rather than by boxer.
 func quotaError(out string) string {
-	for _, needle := range []string{"usage limit", "usage_limit", "quota", "rate limit", "rate-limited", "rate_limit", "too many requests", "free tier", "insufficient_quota", "credit balance", "no_providers_available"} {
+	for _, needle := range []string{"usage limit", "usage_limit", "quota", "rate limit", "rate-limited", "rate_limit", "too many requests", "free tier", "insufficient_quota", "credit balance", "no_providers_available",
+		// A harness that gives up on its provider is reporting the provider, not the sandbox.
+		// No bare status numbers here: "529" matched the middle of a session UUID and skipped a
+		// cell that had simply failed. Every needle has to be a phrase a provider actually writes.
+		"repeated api errors", "overloaded", "server had an error", "503 service", "error 529",
+		// The gateway's own spending limit. Without this a run that reaches it reports a dozen
+		// shortfalls that are all one billing fact.
+		"budget exceeded", "team budget"} {
 		if i := strings.Index(strings.ToLower(out), needle); i >= 0 {
 			start := i
 			end := i + 160

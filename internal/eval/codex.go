@@ -53,6 +53,12 @@ func (Codex) home(env *Env) string { return filepath.Join(env.Work, "codex-home"
 
 func (d Codex) Prepare(env *Env, c Cell) error {
 	home := d.home(env)
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return err
 	}
@@ -82,6 +88,9 @@ func (d Codex) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = env.Repo
 	cmd.Env = append(env.BaseEnv(), "CODEX_HOME="+d.home(env)) // private home at both tiers: no login, no user config
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

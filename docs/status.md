@@ -111,17 +111,18 @@ own trace (a rewrite, a denial, or the pointed absence of either), and `where.tx
 which is how a level that quietly ran on the host is caught. Tier and exclusions:
 [eval-matrix.md](eval-matrix.md).
 
-**27 of 27** on 2026-09-19 for $1.49, three at a time: hook rewrite, tool mode, PATH shims, shell
-substitution, inside mode and orchestrator all carry a development session, across nine harnesses
-and three orchestrators. Gemini is skipped: its CLI speaks only the Gemini API, which the gateway
-does not serve.
+**99.2% of weighted checks on 2026-09-20, 52 of 53 cells at 100%** for $3.06, three at a time.
+Every integration level is carried by more than one harness — hook rewrite, tool mode, command
+shims, shell shims, shell substitution, inside mode and three orchestrators — and each cell is
+scored on every claim it makes rather than passed or failed as a whole.
 
-Getting there found two faults in boxer that the single-command tiers could not see. **Codex was
-never intercepted in a linked worktree** — it resolves project configuration to the main repository,
-so the hooks installed into the worktree were never read and every command ran on the host; every
-orchestrator works in linked worktrees, so this was the ordinary case. And **`boxer run` discarded
-input written before the sandbox attached**, which silently lost the shell configuration a harness
-writes immediately after spawning its terminal. Both are fixed, with tests.
+Getting there found three faults in boxer the single-command tiers could not see. **Codex was never
+intercepted in a linked worktree**, so every command ran on the host and every orchestrator was
+affected. **`boxer run` discarded input written before the sandbox attached**, silently losing the
+shell configuration a harness writes immediately after spawning its terminal. And **a boxer shim
+could be resolved by boxer itself** — the smolvm launcher runs `uname` — which deadlocked a whole
+session. All three are fixed, with tests. One limit is reported rather than fixed: PATH shims do not
+survive a login shell, and `boxer doctor` now says so.
 
 Concurrency is the point: twelve worktrees, three sandboxes at a time, no clash in files, ports,
 packs or state, and no command reached the host. Four concurrent sandboxes cost about 4 GB of

@@ -10,7 +10,9 @@ import (
 // The point of the matrix is coverage of integration levels, so a row that quietly duplicates
 // another level's coverage, or a level that disappears, is the failure worth catching.
 func TestTheMatrixCoversEveryIntegrationLevel(t *testing.T) {
-	want := []string{"rewrite", "tool", "shims", "shell", "inside", "orchestrator"}
+	// Command shims and shell shims are the same PATH mechanism with different failure modes, so
+	// they are scored as separate levels rather than one standing in for the other.
+	want := []string{"rewrite", "tool", "shims", "bash-shim", "shell", "inside", "orchestrator"}
 	// Two cells of the same configuration run at the same time, so a configuration that handed
 	// out one shared driver instance would race; the factory has to make a new one each call.
 	if c := MatrixConfigs("t2")[0]; c.Driver() == nil {
@@ -31,9 +33,21 @@ func TestTheMatrixCoversEveryIntegrationLevel(t *testing.T) {
 		}
 		seen[c.Level] = true
 	}
+	// One witness per level is not coverage: a level carried by a single harness tells you that
+	// harness works, not that the level does. Every level that more than one harness can reach
+	// must be exercised by more than one.
+	perLevel := map[string]int{}
+	for _, c := range MatrixConfigs("t2") {
+		perLevel[c.Level]++
+	}
 	for _, l := range want {
 		if !seen[l] {
 			t.Errorf("no configuration exercises the %q level", l)
+		}
+		// Shell substitution is the exception: OpenHands is the only harness here whose terminal
+		// shell is configurable, and a second witness would have to be invented rather than found.
+		if l != "shell" && perLevel[l] < 2 {
+			t.Errorf("the %q level has only %d configuration; a level needs more than one witness", l, perLevel[l])
 		}
 	}
 }
@@ -102,14 +116,47 @@ func TestASignatureFailsWhenItsLevelDidNotCarryTheWork(t *testing.T) {
 	}
 }
 
-func TestTheReportNamesEveryLevelItRan(t *testing.T) {
+func TestTheReportScoresEachClaimRatherThanTheCell(t *testing.T) {
+	// A cell that rendered the page and left the change behind but could not show which layer
+	// carried the work is not the same result as one whose sandbox never started, and the report
+	// has to be able to say so.
+	whole := checks{
+		{Name: "the sandbox came up", Weight: 1, Passed: true},
+		{Name: "the page renders", Weight: 2, Passed: true},
+		{Name: "the level carried it", Weight: 3, Passed: true},
+	}
+	partial := checks{
+		{Name: "the sandbox came up", Weight: 1, Passed: true},
+		{Name: "the page renders", Weight: 2, Passed: true},
+		{Name: "the level carried it", Weight: 3, Passed: false, Detail: "nothing was denied"},
+	}
+	if p := whole.percent(); p != 100 {
+		t.Errorf("a scorecard with every claim met is %v%%, want 100", p)
+	}
+	// Weighted, not counted: three claims of which two are met is not two thirds when the one that
+	// failed is the one about containment.
+	if p := partial.percent(); p != 50 {
+		t.Errorf("a scorecard missing the heaviest claim is %v%%, want 50", p)
+	}
+	if f := partial.failed(); len(f) != 1 || !strings.Contains(f[0], "nothing was denied") {
+		t.Errorf("the scorecard does not name what fell short: %v", f)
+	}
+
 	rs := []MatrixResult{
-		{SDLCResult: SDLCResult{Task: "add-a-page", Status: "pass"}, Config: "claude/rewrite", Level: "rewrite", Guest: "linux", Carried: "the hook rewrote the command into `boxer run`"},
-		{SDLCResult: SDLCResult{Task: proveTask, Status: "fail"}, Config: "kimi/tool", Level: "tool", Signature: "nothing was denied"},
+		{SDLCResult: SDLCResult{Task: "add-a-page", Status: "pass"}, Config: "claude/rewrite", Level: "rewrite",
+			Guest: "linux", Carried: "the hook rewrote the command into `boxer run`", Checks: whole, Score: 100},
+		{SDLCResult: SDLCResult{Task: proveTask, Status: "partial"}, Config: "kimi/tool", Level: "tool",
+			Checks: partial, Score: 50},
 		{SDLCResult: SDLCResult{Task: proveTask, Status: "skip"}, Config: "openhands/shell", Level: "shell", Skipped: "no virtualenv"},
 	}
 	out := MatrixReport(rs, 3)
-	for _, want := range []string{"1/2 passed", "(1 skipped)", "| rewrite | 1/1 |", "| tool | 0/1 |", "nothing was denied", "no virtualenv"} {
+	for _, want := range []string{
+		"75.0% overall", "1 of 2 cells scored 100%", "1 skipped",
+		"| rewrite | 100.0% | 1/1 |", "| tool | 50.0% | 0/1 |",
+		"| claude | 100.0% | 1/1 |", // by harness as well as by level
+		"## The scorecard", "| the level carried it | 2 | 1 (50%) |",
+		"nothing was denied", "no virtualenv",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the report does not contain %q\n%s", want, out)
 		}

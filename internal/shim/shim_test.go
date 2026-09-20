@@ -79,3 +79,29 @@ func TestShellWrapperExecsBashInTheSandbox(t *testing.T) {
 		t.Fatalf("an unset PROMPT_COMMAND was passed anyway: %q", out)
 	}
 }
+
+// A boxer that resolves its own shims calls into itself: the shim runs `boxer run`, and the inner
+// boxer waits for the sandbox the outer one is already working on. The smolvm launcher runs
+// `uname`, so a `uname` shim on PATH was enough to deadlock a whole session until it was killed.
+func TestBoxerRefusesToResolveItsOwnShims(t *testing.T) {
+	shims := t.TempDir()
+	if _, err := Install(shims, []string{"uname", "npm"}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(shims, Marker)); err != nil {
+		t.Fatalf("an installed shim directory is not marked as one: %v", err)
+	}
+	ordinary := t.TempDir()
+	path := strings.Join([]string{shims, ordinary}, string(filepath.ListSeparator))
+	got := SanitizePath(path)
+	if strings.Contains(got, shims) {
+		t.Errorf("the shim directory survived sanitising: %q", got)
+	}
+	if !strings.Contains(got, ordinary) {
+		t.Errorf("sanitising dropped a directory that is not boxer's: %q", got)
+	}
+	// A PATH with nothing of boxer's in it comes back unchanged, empty entries aside.
+	if got := SanitizePath(ordinary); got != ordinary {
+		t.Errorf("an unrelated PATH was rewritten: %q", got)
+	}
+}

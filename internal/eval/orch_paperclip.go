@@ -74,7 +74,7 @@ func (d *Paperclip) api(env *Env) string {
 
 func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	api := d.api(env)
-	before := worktrees(env.Repo) // so the worktree Paperclip cuts can be named by difference
+	title := "boxer-eval-" + env.RunID // names the issue, and so the worktree Paperclip cuts
 	var companies, agents []struct {
 		ID string `json:"id"`
 	}
@@ -119,7 +119,9 @@ func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	if err := httpJSON("POST", api+"/companies/"+cid+"/projects", nil, project, &proj); err != nil {
 		return Transcript{Raw: d.srv.output()}, err
 	}
-	issue := map[string]any{"title": "uname", "description": prompt, "status": "todo", "assigneeAgentId": aid, "projectId": proj.ID}
+	// The title names the worktree Paperclip cuts, so a fixed one makes two cells running at the
+	// same time share a directory: the second works in the first's tree, or takes it away.
+	issue := map[string]any{"title": title, "description": prompt, "status": "todo", "assigneeAgentId": aid, "projectId": proj.ID}
 	var iss struct {
 		ID string `json:"id"`
 	}
@@ -157,7 +159,7 @@ func (d *Paperclip) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 			}
 		}
 	}
-	env.Root = newWorktree(env.Repo, before)
+	env.Root = namedWorktree(env.Repo, title)
 	raw := &strings.Builder{}
 	if final.ID == "" {
 		fmt.Fprintf(raw, "no heartbeat run finished\n%s", tail(d.srv.output(), 4000))
@@ -210,10 +212,16 @@ func worktrees(repo string) map[string]bool {
 	return set
 }
 
-// newWorktree is the working tree that appeared since before was taken.
-func newWorktree(repo string, before map[string]bool) string {
+// namedWorktree is the working tree whose path carries this cell's issue title.
+//
+// Picking "the one that appeared while the agent worked" is wrong as soon as two cells run at the
+// same time against the same repository: both create one, and each can see the other's. That is
+// not a theoretical race — it served one cell's page from the other cell's worktree, and the cell
+// failed with a 404 for a page it had written correctly. The title is unique per cell, and
+// Paperclip names the worktree after it, so this cannot pick up a neighbour's.
+func namedWorktree(repo, title string) string {
 	for p := range worktrees(repo) {
-		if !before[p] && p != repo {
+		if p != repo && strings.Contains(p, title) {
 			return p
 		}
 	}

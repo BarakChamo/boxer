@@ -39,6 +39,12 @@ func (OpenCode) Cells(tier string) []Cell {
 }
 
 func (OpenCode) Prepare(env *Env, c Cell) error {
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	if out, err := env.boxer(env.Repo, "install", "opencode"); err != nil {
 		return fmt.Errorf("boxer install opencode: %v\n%s", err, out)
 	}
@@ -74,6 +80,9 @@ func (OpenCode) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd := exec.Command("opencode", "run", "--print-logs", "-m", model, prompt)
 	cmd.Dir = env.Repo
 	cmd.Env = env.BaseEnv()
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

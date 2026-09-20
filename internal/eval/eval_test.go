@@ -240,3 +240,27 @@ func TestSDLCReport(t *testing.T) {
 		}
 	}
 }
+
+// A quota needle is allowed to excuse a cell, so it has to be a phrase a provider really writes.
+// A bare status number is not: "529" matched the middle of a session UUID and turned a genuine
+// failure into a skip.
+func TestQuotaDetectionDoesNotMatchIdentifiers(t *testing.T) {
+	for _, noise := range []string{
+		`{"session_id":"529-e460-46d6-8dcb-a64e02dd6dad"}`,
+		`{"uuid":"01a0b855-711e-7640-b578-1c7b3204572e"}`,
+		"wrote 503 bytes to /tmp/x",
+	} {
+		if q := quotaError(noise); q != "" {
+			t.Errorf("ordinary output was read as a provider refusal: %q -> %q", noise, q)
+		}
+	}
+	for _, real := range []string{
+		"Error: Team budget exceeded. Current spend: $10.01, limit: $10.00",
+		"Claude gave up after repeated API errors.",
+		`{"error":{"code":"quota_for_entity_exceeded"}}`,
+	} {
+		if quotaError(real) == "" {
+			t.Errorf("a provider refusal was not recognised: %q", real)
+		}
+	}
+}

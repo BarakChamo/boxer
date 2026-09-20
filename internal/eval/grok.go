@@ -59,6 +59,12 @@ func (Grok) Cells(tier string) []Cell {
 func (Grok) home(env *Env) string { return filepath.Join(env.Work, "grok-home") }
 
 func (d Grok) Prepare(env *Env, c Cell) error {
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	home := d.home(env)
 	for _, sub := range []string{"hooks", "plugins"} {
 		if err := os.MkdirAll(filepath.Join(home, sub), 0o755); err != nil {
@@ -105,6 +111,9 @@ func (d Grok) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	// Folder trust gates project hooks and the project .mcp.json; disabling it is the headless
 	// equivalent of --trust, which only the interactive session accepts.
 	cmd.Env = append(env.BaseEnv(), "GROK_HOME="+d.home(env), "GROK_FOLDER_TRUST=0", "FAKE_LLM_KEY=fake")
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

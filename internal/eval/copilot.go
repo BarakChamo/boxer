@@ -47,6 +47,12 @@ func (Copilot) Cells(tier string) []Cell {
 func (Copilot) home(env *Env) string { return filepath.Join(env.Work, "copilot-home") }
 
 func (d Copilot) Prepare(env *Env, c Cell) error {
+	// A shim cell puts the bare command in the guest through PATH, with no hook rewriting anything.
+	if c.Shims {
+		if out, err := env.boxer(env.Repo, "shim", "install", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install: %v\n%s", err, out)
+		}
+	}
 	home := d.home(env)
 	if err := os.MkdirAll(filepath.Join(home, "hooks"), 0o755); err != nil {
 		return err
@@ -77,6 +83,9 @@ func (d Copilot) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	cmd := exec.Command("copilot", args...)
 	cmd.Dir = env.Repo
 	cmd.Env = append(append(env.BaseEnv(), "COPILOT_HOME="+d.home(env), "COPILOT_AUTO_UPDATE=false", "COPILOT_ALLOW_ALL=true"), d.provider(env)...)
+	if c.Shims {
+		cmd.Env = prependPath(cmd.Env, filepath.Join(env.Work, "shims"))
+	}
 	cmd.Stdin = strings.NewReader("")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
