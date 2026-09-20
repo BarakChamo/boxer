@@ -106,18 +106,33 @@ func (d *Herdr) Prepare(env *Env, c Cell) error {
 	// bypass permissions opens a full-screen "you accept all responsibility" confirmation and waits
 	// for a keypress, so that setting replaces one blocking dialog with another. An allow list
 	// prompts for nothing and shows nothing.
+	//
+	// Skill is on the list because boxer installs one, and using a skill is its own permission: a
+	// pane sat for fifteen minutes on "Use skill \"boxer\"?" until the pane was read and it said so.
+	// Every tool the agent needs has to be granted, not merely the ones that run commands.
 	local := filepath.Join(env.Repo, ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(local, []byte(`{"enableAllProjectMcpServers": true, "permissions": {"allow": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "mcp__boxer"]}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(local, []byte(`{"enableAllProjectMcpServers": true, "permissions": {"allow": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "Skill", "Skill(boxer)", "mcp__boxer"]}}`+"\n"), 0o644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(env.Work, "herdr-home"), 0o755); err != nil {
 		return err
 	}
+	// terminal.default_shell is boxer's shell-substitution seam in a pane manager: point it at the
+	// wrapper and every pane's shell is the sandbox, with no integration in the harness at all.
+	// A cell asks for that with Shims; otherwise a plain non-login /bin/sh, because a pane whose
+	// shell another tool has renamed is refused by `agent start` as "not an available shell".
+	shell := "/bin/sh"
+	if c.Shims {
+		shell = filepath.Join(env.Work, "shims", "boxer-bash")
+		if out, err := env.boxer(env.Repo, "shim", "install", "--shell", filepath.Join(env.Work, "shims")); err != nil {
+			return fmt.Errorf("boxer shim install --shell: %v\n%s", err, out)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(env.Work, "herdr-config.toml"),
-		[]byte("[terminal]\ndefault_shell = \"/bin/sh\"\nshell_mode = \"non_login\"\n"), 0o644); err != nil {
+		[]byte(fmt.Sprintf("[terminal]\ndefault_shell = %q\nshell_mode = \"non_login\"\n", shell)), 0o644); err != nil {
 		return err
 	}
 	srv, err := startServer(env.Repo, d.env(env), "herdr", "server")

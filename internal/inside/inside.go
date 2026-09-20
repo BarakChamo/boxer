@@ -58,6 +58,19 @@ var Harnesses = map[string]Harness{
 		Hosts:    []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
 		GuestEnv: []string{`CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`, "INITIAL_AGENT_MODE=agent-full-access"},
 		Args:     []string{"-c", `sandbox_mode="danger-full-access"`}},
+	// fx is a single native binary rather than an npm package, and its installer is a bash script:
+	// it uses `set -o pipefail`, which the guest's /bin/sh (dash) rejects, so it is fetched and then
+	// run under bash rather than piped into sh. It speaks the Vercel AI Gateway directly, so the
+	// key is all it needs.
+	"fx": {Bin: "fx", Install: "apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates && curl -fsSL https://fx.sh/setup.sh -o /tmp/fx-setup.sh && FX_INSTALL_DIR=/usr/local/bin bash /tmp/fx-setup.sh",
+		ConfigVar: "FX_HOME", ConfigDir: "~/.fx",
+		Env:   []string{"AI_GATEWAY_API_KEY", "FX_AI_GATEWAY_API_KEY", "FX_MODEL", "FX_PROVIDER"},
+		Hosts: []string{"ai-gateway.vercel.sh", "fx.sh", "vercel.com"},
+		Creds: []string{"AI_GATEWAY_API_KEY", "FX_AI_GATEWAY_API_KEY"},
+		// fx keeps its credential in the macOS Keychain unless told not to; inside the guest there
+		// is no Keychain, so the key has to come from the environment.
+		GuestEnv:  []string{"FX_DISABLE_KEYCHAIN=1"},
+		LoginHint: "fx reads AI_GATEWAY_API_KEY; export it on the host and it travels into the VM"},
 	"gemini": {Bin: "gemini", Install: "npm i -g @google/gemini-cli",
 		ACP: []string{"gemini", "--acp"}, ConfigVar: "GEMINI_CLI_HOME", ConfigDir: "~/.gemini",
 		Env:   []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL", "GEMINI_CLI_TRUST_WORKSPACE"},
@@ -103,7 +116,7 @@ func init() {
 
 // Names lists the harnesses in stable order.
 func Names() []string {
-	return []string{"claude", "codex", "gemini", "kimi", "opencode", "pi", "grok", "copilot"}
+	return []string{"claude", "codex", "fx", "gemini", "kimi", "opencode", "pi", "grok", "copilot"}
 }
 
 // DefaultImage is the guest image when the configuration names none: node for the npm harnesses,

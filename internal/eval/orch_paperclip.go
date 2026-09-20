@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,7 +56,17 @@ func (d *Paperclip) Prepare(env *Env, c Cell) error {
 		args = append(args, "--model", LiveModel("claude"))
 	}
 	// test-drive reads ANTHROPIC_API_KEY from its own environment into the agent's secret.
-	srv, err := startServer(env.Repo, append(env.BaseEnv(), (Claude{}).modelEnv(env)...), "paperclipai", args...)
+	// Paperclip starts its harness over ACP and gives the handshake its own deadline. The default
+	// is generous on an idle machine and not on this one: cells provision microVMs beside it, and a
+	// handshake that loses the race is reported as "paperclip run failed", which reads as a boxer
+	// fault and is not one. The tier's budget governs here as everywhere else.
+	handshake := env.timeoutOr(4 * time.Minute)
+	srvEnv := append(env.BaseEnv(), (Claude{}).modelEnv(env)...)
+	srvEnv = append(srvEnv,
+		"ACPX_HANDSHAKE_TIMEOUT_MS="+strconv.FormatInt(handshake.Milliseconds(), 10),
+		"ACPX_SESSION_HANDSHAKE_TIMEOUT="+strconv.FormatInt(handshake.Milliseconds(), 10),
+		"ACPX_CLAUDE_ACP_SESSION_CREATE_TIMEOUT_MS="+strconv.FormatInt(handshake.Milliseconds(), 10))
+	srv, err := startServer(env.Repo, srvEnv, "paperclipai", args...)
 	if err != nil {
 		return err
 	}

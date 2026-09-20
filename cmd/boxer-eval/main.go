@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/eval"
 )
@@ -31,6 +32,7 @@ func main() {
 	harness := flag.String("harness", "", "comma-separated driver names; default all")
 	cell := flag.String("cell", "", "substring filter on cell names")
 	out := flag.String("out", "", "write the Markdown report here")
+	archive := flag.String("archive", "", "matrix: keep this run's full report under this directory, and add it to the index")
 	keep := flag.Bool("keep", false, "keep every cell's scratch directory (failures are always kept)")
 	list := flag.Bool("list", false, "list cells and exit")
 	lockRun := flag.Bool("lock-run", false, "take the host smolvm lock, then run the command after -- (used by evals/smoke.sh)")
@@ -91,10 +93,19 @@ func main() {
 		if *limit > 0 && *limit < len(configs) {
 			configs = configs[:*limit]
 		}
+		started := time.Now()
 		rs := eval.RunMatrix(boxerBin, configs, eval.MatrixTasks(), *parallel, os.Stderr)
-		report := eval.MatrixReport(rs, *parallel)
+		meta := eval.CollectRunMeta(boxerBin, *parallel, started)
+		report := eval.MatrixReportWith(rs, *parallel, meta)
 		if *out != "" {
 			_ = os.WriteFile(*out, []byte(report), 0o644)
+		}
+		// Every run is kept, not only the latest: a published score is worth reading only beside
+		// the ones before it, and a run that is overwritten cannot be compared with anything.
+		if *archive != "" {
+			if err := eval.ArchiveRun(*archive, rs, *parallel, meta, report); err != nil {
+				fmt.Fprintln(os.Stderr, "archive:", err)
+			}
 		}
 		fmt.Println(report)
 		for _, r := range rs {

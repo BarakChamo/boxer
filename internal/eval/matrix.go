@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -135,12 +137,22 @@ func MatrixConfigs(tier string) []MatrixConfig {
 		// in the harness at all. One task only — the OpenHands loop is the slowest thing here.
 		{Name: "openhands/shell", Level: "shell", Driver: func() Driver { return OpenHands{} }, Signature: sigShims, Tasks: []string{proveTask},
 			Cell: func() Cell { c := dev("openhands", "off", "sdk"); c.Shims = true; return c }()},
+		// herdr was tried as a second witness and does not work as one. Pointing its
+		// terminal.default_shell at the wrapper really does put the pane in the sandbox — by hand,
+		// the pane prints the guest's prompt rather than the host's — but `herdr agent start` then
+		// refuses the pane with "not an available shell": it identifies a pane by its foreground
+		// process, and after the wrapper execs, that process is boxer. Renaming the wrapper to
+		// `bash` does not help, because the name it reads is the running one. So the seam is real
+		// for a person and closed for an agent, which is what a cell needs.
 
 		// Inside: the harness runs in the guest, beside the dev server, with nothing to intercept.
 		{Name: "inside/claude", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("claude")},
 		{Name: "inside/codex", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("codex")},
 		{Name: "inside/opencode", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("opencode")},
 		{Name: "inside/kimi", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("kimi")},
+		// fx has no hooks and its shell cannot be denied, and it resolves commands past a PATH
+		// shim — so inside the guest is the only level at which boxer genuinely contains it.
+		{Name: "inside/fx", Level: "inside", Driver: func() Driver { return Inside{} }, Signature: sigInside, Cell: in("fx")},
 
 		// Orchestrators: each cuts its own worktree and launches a harness in it, which is what
 		// boxer keys a sandbox to. All three run both tasks.
@@ -161,9 +173,12 @@ const matrixImage = "mirror.gcr.io/library/node:24-bookworm-slim"
 // the job. It replaces what mkrepo wrote, which is the single-command repository.
 func matrixTOML(c Cell, port int) string {
 	if c.Inside != "" {
+		// More memory than an outside cell, because this VM carries more: the harness itself runs
+		// here, beside the dev server and whatever the agent installs. At 4G the dev server was the
+		// process that lost, and a cell then failed for a page that had been written correctly.
 		return fmt.Sprintf(`integration = "inside"
 require_worktree = "off"
-memory = "4G"
+memory = "8G"
 cpus = 4
 image = %q
 %s
@@ -499,19 +514,21 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 			w := 1
 			switch n {
 			case "reached the guest", "the level carried it", "no host leak":
-				w = 3 // containment: the reason the tool exists
+				w = 4 // containment: the reason the tool exists, and worth more than the rest
 			case "the page renders", "the change is in the worktree", "the dependency is installed":
 				w = 2 // the work itself
+			case "the agent converged", "the server was not replaced":
+				w = 2 // doing the job without working around the sandbox
 			}
 			r.Checks = append(r.Checks, check{Name: n, Weight: w, Detail: "not reached"})
 		}
 	}
 	pending("the sandbox came up", "a host port was forwarded", "the dev server answered first",
-		"the agent finished", "the page renders", "the change is in the worktree")
+		"the agent finished", "the agent converged", "the page renders", "the change is in the worktree")
 	if task.Name == proveTask {
 		pending("the dependency is installed", "reached the guest", "the level carried it")
 	}
-	pending("no host leak", "the dev server survived")
+	pending("no host leak", "the dev server survived", "the server was not replaced", "the sandbox was left clean")
 
 	pass := func(n string, detail string) {
 		for i := range r.Checks {
@@ -530,10 +547,13 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	done := func() MatrixResult {
 		r.Score = r.Checks.percent()
 		r.Findings = append(r.Findings, r.Checks.failed()...)
-		if r.Score == 100 {
+		switch {
+		case r.Score == 100:
 			r.Status = "pass"
-		} else if r.Score >= 50 {
+		case r.Score >= 85:
 			r.Status = "partial"
+		default:
+			r.Status = "fail"
 		}
 		r.Total = time.Since(start)
 		note := strings.Join(r.Findings, "; ")
@@ -662,6 +682,21 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		fmt.Fprintf(log, "  skip %-34s %s\n", name, skip.Reason)
 		return r
 	}
+	// Convergence is its own claim. A harness that loops until the clock runs out has not done the
+	// job, even when the files it left behind happen to be right — and reporting that only as
+	// "the agent finished: timed out" buries it among the mechanics.
+	if aerr == nil {
+		pass("the agent converged", "ended by itself")
+	} else {
+		miss("the agent converged", "%v", aerr)
+	}
+	// Restarting or replacing the dev server is the classic way to make a page look right while
+	// working around the sandbox rather than in it, and it takes the running server down.
+	if startedAnotherServer(tr.Raw) {
+		miss("the server was not replaced", "the agent started its own dev server")
+	} else {
+		pass("the server was not replaced", "")
+	}
 	if aerr != nil {
 		if q := quotaError(tr.Raw + " " + aerr.Error()); q != "" {
 			if outOfBudget(q) {
@@ -709,7 +744,13 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 		// with each other: one is the check's own tooling, the other is the agent having stopped
 		// the thing it was working on.
 		if err := httpOK("http://127.0.0.1:"+r.HostPort+"/", 20*time.Second); err != nil {
-			miss("the page renders", "the dev server stopped answering on %s (%v)", r.HostPort, err)
+			// Say why it stopped, not just that it did: the server's own log is in the guest, and
+			// without it every death looks the same and costs another run to tell apart.
+			why := ""
+			if out, e := env.boxer(judged, "run", "--", "tail", "-5", "/tmp/boxer-start.log"); e == nil {
+				why = "; its last words: " + strings.Join(strings.Fields(lastOf(out, 300)), " ")
+			}
+			miss("the page renders", "the dev server stopped answering on %s (%v)%s", r.HostPort, err, why)
 		} else {
 			miss("the page renders", "browser: %v", berr)
 		}
@@ -790,8 +831,38 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 	} else {
 		pass("the dev server survived", "")
 	}
+	// Nothing of this cell's may outlive it. A tool that keys a sandbox to a worktree has to let go
+	// of it again, and a leaked VM is the kind of thing nobody notices until the disk is full.
+	if out, err := runIn(judged, boxerBin, "down"); err != nil {
+		miss("the sandbox was left clean", "boxer down: %v: %s", err, lastOf(out, 200))
+	} else if out, _ := runIn(judged, boxerBin, "status", "--json"); strings.Contains(out, `"state":"running"`) {
+		miss("the sandbox was left clean", "a sandbox is still running after boxer down")
+	} else {
+		pass("the sandbox was left clean", "")
+	}
 	return done()
 }
+
+// startedAnotherServer reports whether the agent launched a dev server of its own. Two harnesses
+// did exactly this when they could not reach the one already running, and it takes the first one
+// down: the page then fails for a reason that has nothing to do with the sandbox.
+func startedAnotherServer(raw string) bool {
+	// Only what the agent ran, never the whole transcript: the prompt itself names these commands
+	// in order to forbid them, so a plain search over the transcript marks every cell guilty.
+	for _, m := range reRanCommand.FindAllStringSubmatch(raw, -1) {
+		cmd := m[1]
+		for _, needle := range []string{"npm run dev", "next dev", "yarn dev", "pnpm dev"} {
+			if strings.Contains(cmd, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// reRanCommand matches the command field a harness writes when it runs something: "command": "…"
+// in Claude Code, Codex and Copilot transcripts, and "cmd" in others.
+var reRanCommand = regexp.MustCompile(`"(?:command|cmd)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 
 // matrixPrompt is the same job in the same words for every configuration; only the forwarded port
 // differs. Nothing in it names an integration level, because a level the agent has to be told
@@ -830,12 +901,63 @@ read it again.
 When you are done, answer with the single word DONE.`, task.Prompt, where)
 }
 
+// RunMeta is the provenance of one run. A score without the conditions that produced it is not
+// evidence, and a published series of them is worth nothing if the reader cannot tell which runs
+// are comparable: the model, the parallelism, the boxer under test and the host all move the
+// numbers.
+type RunMeta struct {
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished"`
+	Boxer    string    `json:"boxer"`    // version as the binary reports it
+	Commit   string    `json:"commit"`   // the tree the run was made from
+	Dirty    bool      `json:"dirty"`    // whether that tree had uncommitted changes
+	Smolvm   string    `json:"smolvm"`   // the hypervisor underneath
+	Model    string    `json:"model"`    // every cell runs on one model, on purpose
+	Image    string    `json:"image"`    // the guest image the workload runs in
+	Parallel int       `json:"parallel"` // how many cells at once
+	Host     string    `json:"host"`     // os/arch, cpus, memory
+	Cells    int       `json:"cells"`
+	Full     int       `json:"full"` // cells at 100%
+	Skipped  int       `json:"skipped"`
+	Score    float64   `json:"score"`
+	Spend    float64   `json:"spend"`
+}
+
+// CollectRunMeta reads what it can and leaves the rest empty rather than guessing.
+func CollectRunMeta(boxerBin string, parallel int, started time.Time) RunMeta {
+	one := func(name string, args ...string) string {
+		out, err := exec.Command(name, args...).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	m := RunMeta{
+		Started:  started,
+		Boxer:    one(boxerBin, "--version"),
+		Commit:   one("git", "rev-parse", "--short", "HEAD"),
+		Dirty:    one("git", "status", "--porcelain") != "",
+		Smolvm:   one("smolvm", "--version"),
+		Model:    LiveModel("claude"),
+		Image:    matrixImage,
+		Parallel: parallel,
+		Host: fmt.Sprintf("%s/%s, %d cpus, %s", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(),
+			strings.TrimSpace(one("sh", "-c", "sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%.0f GB\", $1/1073741824}'"))),
+	}
+	return m
+}
+
 // MatrixReport is the scorecard. It is organised by level rather than by task, because the question
 // the tier answers is "which ways into the sandbox support development", not "which tasks pass" —
 // and it reports a percentage per cell rather than a verdict, because a cell that renders the page
 // and leaves the change behind but cannot show which layer carried the work is not the same result
 // as one whose sandbox never started.
 func MatrixReport(rs []MatrixResult, parallel int) string {
+	return MatrixReportWith(rs, parallel, RunMeta{})
+}
+
+// MatrixReportWith is the report with the run's provenance at the top.
+func MatrixReportWith(rs []MatrixResult, parallel int, meta RunMeta) string {
 	var b strings.Builder
 	var got, total int
 	full, ran, skipped := 0, 0, 0
@@ -865,6 +987,25 @@ func MatrixReport(rs []MatrixResult, parallel int) string {
 	fmt.Fprintf(&b, "that the integration level itself carried the work — so a shortfall names which claim failed.\n\n")
 	fmt.Fprintf(&b, "**%.1f%% overall** (%d of %d weighted checks). %d of %d cells scored 100%%, %d skipped, $%.2f.\n\n",
 		overall, got, total, full, ran, skipped, spend)
+	if meta.Boxer != "" || meta.Commit != "" {
+		dirty := ""
+		if meta.Dirty {
+			dirty = " (with uncommitted changes)"
+		}
+		fmt.Fprintf(&b, "## How this run was made\n\n")
+		fmt.Fprintf(&b, "| | |\n| --- | --- |\n")
+		fmt.Fprintf(&b, "| boxer | %s, commit `%s`%s |\n", dash(meta.Boxer), dash(meta.Commit), dirty)
+		fmt.Fprintf(&b, "| smolvm | %s |\n", dash(meta.Smolvm))
+		fmt.Fprintf(&b, "| model | `%s` — every cell, so the integration level is the only variable |\n", dash(meta.Model))
+		fmt.Fprintf(&b, "| guest image | `%s` |\n", dash(meta.Image))
+		fmt.Fprintf(&b, "| concurrency | %d cells at a time |\n", meta.Parallel)
+		fmt.Fprintf(&b, "| host | %s |\n", dash(meta.Host))
+		fmt.Fprintf(&b, "| started | %s |\n", meta.Started.Format(time.RFC3339))
+		if !meta.Finished.IsZero() {
+			fmt.Fprintf(&b, "| took | %s |\n", meta.Finished.Sub(meta.Started).Round(time.Second))
+		}
+		fmt.Fprintln(&b)
+	}
 	for _, r := range rs {
 		if r.Status == "skip" && outOfBudget(r.Skipped) {
 			fmt.Fprintf(&b, "> This run stopped early: **%s**. The cells below it were not attempted, and the\n", r.Skipped)
@@ -994,4 +1135,96 @@ func dash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// ArchiveRun keeps one run for good: its full report under dir, a line in the index beside every
+// other run, and a JSON line for reading the series by machine.
+//
+// A single latest-report file answers "is it working now" and nothing else. What a published eval
+// has to answer is "is it getting better, and what changed when it got worse" — which needs the
+// runs kept side by side, each carrying the conditions it was made under.
+func ArchiveRun(dir string, rs []MatrixResult, parallel int, meta RunMeta, report string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	stamp := meta.Started.UTC().Format("2006-01-02T150405Z")
+	name := stamp + ".md"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(report), 0o644); err != nil {
+		return err
+	}
+
+	for _, r := range rs {
+		if r.Status == "skip" {
+			meta.Skipped++
+			continue
+		}
+		meta.Cells++
+		if r.Score == 100 {
+			meta.Full++
+		}
+		meta.Spend += r.Spend
+	}
+	var got, total int
+	for _, r := range rs {
+		g, t := r.Checks.score()
+		got, total = got+g, total+t
+	}
+	if total > 0 {
+		meta.Score = 100 * float64(got) / float64(total)
+	}
+	meta.Finished = time.Now()
+
+	line, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "runs.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return writeRunIndex(dir)
+}
+
+// writeRunIndex rebuilds the index from runs.jsonl, newest first, so the file is always a true
+// reflection of what is archived rather than something that drifts as runs are added.
+func writeRunIndex(dir string) error {
+	b, err := os.ReadFile(filepath.Join(dir, "runs.jsonl"))
+	if err != nil {
+		return err
+	}
+	var runs []RunMeta
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var m RunMeta
+		if json.Unmarshal([]byte(line), &m) == nil {
+			runs = append(runs, m)
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].Started.After(runs[j].Started) })
+
+	var x strings.Builder
+	fmt.Fprintf(&x, "# boxer eval runs — tier matrix\n\n")
+	fmt.Fprintf(&x, "Every run of the matrix tier, newest first. Each row links to that run's full\n")
+	fmt.Fprintf(&x, "scorecard: the score by level, by harness and by claim, and what every cell did.\n")
+	fmt.Fprintf(&x, "`runs.jsonl` carries the same rows for reading the series by machine.\n\n")
+	fmt.Fprintf(&x, "A run is comparable with another only when the model, the concurrency and the host\n")
+	fmt.Fprintf(&x, "match, so each row carries them.\n\n")
+	fmt.Fprintf(&x, "| run | score | cells at 100%% | model | boxer | spend |\n")
+	fmt.Fprintf(&x, "| --- | --- | --- | --- | --- | --- |\n")
+	for _, m := range runs {
+		stamp := m.Started.UTC().Format("2006-01-02T150405Z")
+		commit := m.Commit
+		if m.Dirty {
+			commit += "+"
+		}
+		fmt.Fprintf(&x, "| [%s](%s.md) | %.1f%% | %d/%d | `%s` | `%s` | $%.2f |\n",
+			m.Started.UTC().Format("2006-01-02 15:04"), stamp, m.Score, m.Full, m.Cells, m.Model, commit, m.Spend)
+	}
+	return os.WriteFile(filepath.Join(dir, "README.md"), []byte(x.String()), 0o644)
 }

@@ -2,6 +2,7 @@ package eval
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -117,6 +118,10 @@ func (d Inside) prepareLive(env *Env, h, dir string) error {
 		files[".gemini/settings.json"] = `{"security":{"auth":{"selectedType":"gemini-api-key"}},"general":{"disableAutoUpdate":true,"disableUpdateNag":true},"privacy":{"usageStatisticsEnabled":false}}`
 	case "kimi":
 		files["config.toml"] = kimiConfig("anthropic", gatewayRoot, key, LiveModel("kimi"))
+	case "fx":
+		if k, why := gatewayKey(); why == "" {
+			files[".fx/settings.json"] = fmt.Sprintf(`{"provider":"gateway","model":%q,"gateway":{"apiKey":%q}}`, LiveModel("claude"), k)
+		}
 	case "opencode", "pi":
 		p, _ := gateway(h)
 		if h == "opencode" {
@@ -196,6 +201,10 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		args = []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--max-turns", env.turns(6)}
 	case "codex":
 		args = []string{"exec", "--skip-git-repo-check", "--json", prompt} // no bypass flag: the table's sandbox_mode and the config's approval_policy carry it
+	case "fx":
+		// fx has no hooks and its shell cannot be denied, so nothing outside it is doing the
+		// sandboxing: inside the guest is the level where fx is genuinely contained.
+		args = []string{"ask", "--full-access", "--json", "--no-color", "--", prompt}
 	case "gemini":
 		args = []string{"-p", prompt, "--yolo"}
 	case "kimi":
@@ -260,6 +269,8 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		tr.Answer = parseCodexJSON(raw).Answer
 	case "copilot":
 		tr.Answer = parseCopilotJSON(raw).Answer
+	case "fx":
+		tr = parseFxJSON(raw)
 	default:
 		for _, line := range strings.Split(stripANSI(raw), "\n") {
 			l := strings.TrimSpace(line)
@@ -273,6 +284,51 @@ func (d Inside) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 		}
 	}
 	return tr, nil
+}
+
+// parseFxJSON reads `fx ask --json`, whose last line is one object: the final answer and every
+// tool call, each shell call carrying the command it ran. That is more than most harnesses report
+// and makes the trace unnecessary for fx — which matters, because fx has no hooks to write one.
+func parseFxJSON(raw string) Transcript {
+	tr := Transcript{Raw: raw}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		line = strings.TrimSpace(stripANSI(line))
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var e struct {
+			FinalOutput string `json:"final_output"`
+			Output      string `json:"output"`
+			ToolCalls   []struct {
+				Name          string `json:"name"`
+				CommandResult struct {
+					Command string `json:"command"`
+				} `json:"command_result"`
+			} `json:"tool_calls"`
+		}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		answer := firstNonBlank(e.FinalOutput, e.Output)
+		if f := strings.Fields(answer); len(f) > 0 {
+			tr.Answer = f[0]
+		}
+		for _, t := range e.ToolCalls {
+			name := t.Name
+			if c := t.CommandResult.Command; c != "" {
+				name += ":" + c
+			}
+			tr.Tools = append(tr.Tools, name)
+		}
+	}
+	return tr
+}
+
+func firstNonBlank(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
 }
 
 func (Inside) Cleanup(env *Env, c Cell) {}
