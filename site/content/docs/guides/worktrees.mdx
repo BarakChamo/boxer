@@ -1,0 +1,49 @@
+---
+title: Worktrees and parallel work
+description: Several agents, several sandboxes, one machine.
+---
+
+boxer keys a sandbox to a git worktree, which makes parallel agent work the ordinary case rather
+than a special one.
+
+```sh
+git worktree add ../myapp-feature -b feature
+cd ../myapp-feature
+boxer run -c 'npm test'      # its own VM, its own port, its own filesystem
+```
+
+Two worktrees never share a sandbox, so two agents cannot overwrite each other's `node_modules`,
+race on a port, or see each other's half-finished files.
+
+## Committing a boxer.toml
+
+A committed `boxer.toml` is inherited by every worktree cut from the branch, which is what you
+want — but only if nothing in it is host-specific.
+
+```toml
+[network]
+ports = ["auto:3000"]     # not "3000:3000"
+```
+
+A fixed host port is fine until a second worktree starts, and then it is an `EADDRINUSE` that
+looks like the application's fault.
+
+## What each worktree pays
+
+Each sandbox has its own memory and disk. Four concurrent sandboxes of a node project cost roughly
+4 GB of memory and a couple of gigabytes of disk on top of the shared image, which is the
+practical limit on a 16 GB machine.
+
+`boxer ls --resources` shows what each one is using; `boxer gc` reclaims the idle ones.
+
+## Orchestrators
+
+Tools that cut a worktree per task — Conductor, T3 Code, Paperclip, herdr — work without any extra
+arrangement, because the worktree they create is the thing boxer keys to. See
+[Orchestrators](/docs/guides/orchestrators).
+
+<Callout type="warn">
+Codex reads project configuration from the **main repository**, not the linked worktree. `boxer
+install codex` writes its hooks to both for this reason. Installing by hand into a worktree alone
+leaves Codex unsandboxed, silently.
+</Callout>

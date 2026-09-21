@@ -1,0 +1,70 @@
+---
+title: Orchestrators
+description: Tools that cut a worktree per task, and what boxer does about it.
+---
+
+An orchestrator opens a worktree for each task and starts a harness in it. Since boxer keys a
+sandbox to the worktree, that is already the right shape: the sandbox appears with the worktree
+and goes away with it.
+
+What differs is how the harness gets launched, and therefore which integration level applies.
+
+## T3 Code
+
+Cuts a worktree and runs Claude Code in it. The project layer is inherited, so
+`boxer install claude-code` — committed — is the whole integration.
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m 'boxer'
+```
+
+## Paperclip
+
+Launches its harness over ACP with an environment of its own. The project layer is inherited the
+same way, but boxer's trace variable is not, so `boxer doctor` inside the task worktree is how you
+confirm it took.
+
+## herdr
+
+Drives a harness interactively in a terminal pane, which makes two things matter that do not
+elsewhere:
+
+- The harness is started by herdr, so there is no command line to put `--permission-mode` on.
+  Grants have to live in project settings, and they must include `Skill` — boxer installs one, and
+  using a skill is its own permission. A pane sitting on `Use skill "boxer"?` looks exactly like a
+  hang.
+- `terminal.default_shell` can point at `boxer shim install --shell`'s wrapper, which puts every
+  pane's shell in the sandbox. This works for a person typing in a pane. herdr will not attach its
+  own agent to such a pane — it identifies a pane by its foreground process, which is then `boxer`
+  rather than a shell.
+
+## Conductor
+
+Conductor runs each harness's real binary against an ordinary git worktree, so the project layer
+should be inherited like anywhere else.
+
+```sh
+boxer install conductor        # writes .conductor/settings.toml
+```
+
+That writes a managed block pointing `claude_code_executable_path` and friends at harness shims,
+so Conductor spawns the shim, the shim runs `boxer shell <harness>`, and the harness itself runs
+in the VM.
+
+<Callout>
+Conductor's local workspaces are GUI-only: it is a native app, not an Electron one, and its CLI
+drives cloud workspaces, which run on Conductor's infrastructure where boxer has nothing to
+sandbox. Verification is a ten-minute manual check rather than an automated one.
+</Callout>
+
+## OpenHands
+
+OpenHands lets you set the shell its terminal uses, which is the shell-substitution level: the
+agent's entire terminal is the sandbox, with no boxer integration inside the harness.
+
+```sh
+boxer shim install --shell ~/.boxer/shims     # writes boxer-bash
+```
+
+Point the terminal tool's `shell_path` at it.

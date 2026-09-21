@@ -1,0 +1,41 @@
+---
+title: What boxer is
+description: One microVM per git worktree, so a coding agent's shell commands stop running on your machine.
+---
+
+Coding agents run shell commands. `npm install`, `make`, `python script.py`, whatever the model
+decided would help. Those commands run as you, on your machine, with your credentials and your
+filesystem.
+
+boxer puts them in a [smolvm](https://smolmachines.com) microVM instead — one VM per git worktree,
+started on the first command, with the worktree mounted at the same path it has on the host.
+
+The agent is not told. It types `npm test`, the command runs in the VM, and the output comes back
+looking exactly as it would have. Same paths, same exit codes, same stdout.
+
+```console
+$ boxer run -c 'uname -a'
+Linux sb-7f2a91 6.12.95 #1 SMP aarch64 Linux
+```
+
+That ran on Linux. The host is a Mac.
+
+## What it is not
+
+boxer is not a container runtime, and it does not replace your dev environment. It is a shim
+between a coding agent and the commands it wants to run, with a VM behind it. The VMs, their
+images and their snapshots all belong to smolvm; boxer keeps no state of its own beyond a few
+markers.
+
+It is also not a security boundary against an adversary who knows they are in it. A microVM is a
+real isolation boundary and a good one, but boxer's threat model is *an agent doing something
+destructive or careless*, not *an attacker deliberately breaking out*.
+
+## Where to start
+
+<Cards>
+  <Card title="Install" href="/docs/start/install" description="The binary, smolvm, and a first sandboxed command." />
+  <Card title="Connect your harness" href="/docs/start/harnesses" description="Claude Code, Codex, Copilot, Kimi, OpenCode and the rest." />
+  <Card title="How it works" href="/docs/guides/how-it-works" description="Scopes, integration levels, and what happens on the first command." />
+  <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
+</Cards>

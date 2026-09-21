@@ -7,3 +7,9 @@ __pycache__/
 .env
 coverage.out
 .venv-openhands
+
+# docs site build output and dependencies; the content under site/content is committed
+site/node_modules/
+site/.next/
+site/.source/
+site/out/

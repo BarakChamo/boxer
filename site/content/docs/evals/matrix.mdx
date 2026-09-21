@@ -1,0 +1,56 @@
+---
+title: The matrix tier
+description: The same workload at every integration level, scored claim by claim.
+---
+
+The `sdlc` tier proves development works in a boxer sandbox — for one configuration. The `matrix`
+tier varies the configuration instead of the task: the same Next.js workload across every
+integration level, harness and orchestrator, each cell in its own worktree with its own sandbox and
+its own automatic host port.
+
+## The two tasks
+
+- **`add-a-page`** — write a route that renders a marker and verify it. Every configuration can do
+  this, so a difference between cells is a difference in the level rather than in the task.
+- **`prove-and-install`** — install a dependency, then record what `uname -s` says. This is the one
+  that catches a level which quietly ran on the host.
+
+## Scoring
+
+A cell is not one question, so it is not one verdict. Each cell scores thirteen claims
+independently, weighted by what they are worth:
+
+| Weight | Claims |
+| --- | --- |
+| 4 | reached the guest · the level carried it · no host leak |
+| 2 | the page renders · the change is in the worktree · the dependency is installed · the agent converged · the server was not replaced |
+| 1 | the sandbox came up · a host port was forwarded · the dev server answered first · the agent finished · the sandbox was left clean |
+
+Claims are declared before the cell runs, so a cell that dies early reports which claims went
+*unanswered* rather than quietly shortening its own denominator. A provider that refuses a turn is
+a skip, not a shortfall.
+
+## What the evidence is worth
+
+The file the agent writes to record the platform proves nothing on its own — a model that skips the
+work can type `Linux` into a file as easily as run the command. It is corroborated twice: the
+dependency has to really be in `package.json`, and the level's own signature has to show boxer
+carrying a command. An earlier version of this tier trusted the file, and an agent that had
+installed nothing passed.
+
+Two levels need their evidence read differently, and the report names which mechanism it found. The
+OpenCode plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher builds a
+clean environment for the harness it starts, so boxer's trace variable never reaches it however well
+the interception worked — for those the worktree the orchestrator cut is the evidence.
+
+## Running it
+
+```sh
+make eval-matrix
+bin/boxer-eval --tier matrix --cell claude/rewrite --parallel 1
+```
+
+Every run is archived under `docs/evals/matrix/`: the full scorecard, an index rebuilt from the
+data, and a JSON line per run. Each report opens with the conditions it was made under — boxer and
+its commit, smolvm, the model, the image, the concurrency and the host — because a score without
+them cannot be compared with the run before it.

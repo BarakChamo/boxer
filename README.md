@@ -10,6 +10,8 @@ the agent's experience changes.
 
 One Go binary. smolvm holds the only state.
 
+Full documentation: [`site/`](site) — `make docs-dev` serves it locally.
+
 ## Two minutes
 
 ```sh

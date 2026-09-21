@@ -1,0 +1,46 @@
+---
+title: Your first sandbox
+description: What happens on the first command, and how to see it.
+---
+
+## The first command provisions
+
+```console
+$ cd ~/code/myapp
+$ boxer run -c 'echo hello from $(uname -s)'
+hello from Linux
+```
+
+Between those two lines boxer:
+
+1. Resolved the **scope** — the git worktree you are in. One worktree, one VM.
+2. Read `boxer.toml`, if there is one, and inferred an image if there is not.
+3. Created the VM, mounting the worktree at the same absolute path it has on the host.
+4. Ran the command inside, and streamed its output back.
+
+The path matters more than it looks. A worktree mounted at the same path means an agent's
+absolute paths keep working, error messages point at real files, and anything that writes a path
+into a config file writes one that is true on both sides.
+
+## Seeing what exists
+
+```sh
+boxer ls          # every sandbox on this machine, with its worktree
+boxer status      # this worktree's sandbox: state, image, ports, resources
+boxer logs        # what the sandbox has been asked to do
+```
+
+`boxer down` stops this worktree's VM; `boxer down --all` stops every one. Nothing is lost —
+a stopped sandbox keeps its disk, and starting it again is fast.
+
+## Reclaiming space
+
+VMs and their snapshots are the only things that take real space.
+
+```sh
+boxer gc          # idle sandboxes and unreferenced packs
+boxer gc --all    # every sandbox boxer owns, running or not
+```
+
+`boxer doctor` prints what boxer is costing you on disk, because "why is my disk full" is a
+question a sandbox tool should be able to answer about itself.

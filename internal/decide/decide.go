@@ -4,6 +4,7 @@
 package decide
 
 import (
+	"github.com/BarakChamo/boxer/internal/sh"
 	"slices"
 	"strings"
 )
@@ -49,7 +50,7 @@ func Decide(in Input) Decision {
 	if !needsSandbox(cmd, in.Intercept, in.Passthrough) {
 		return Decision{Action: Allow}
 	}
-	wrapped := "boxer run -c " + shellQuote(cmd)
+	wrapped := "boxer run -c " + sh.Quote(cmd)
 	switch in.Mode {
 	case "tool":
 		return Decision{
@@ -107,9 +108,4 @@ func firstProgram(seg string) string {
 
 func isBoxer(cmd string) bool {
 	return firstProgram(cmd) == "boxer"
-}
-
-// shellQuote wraps s in single quotes for a POSIX shell.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

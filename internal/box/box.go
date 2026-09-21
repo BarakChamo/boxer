@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/BarakChamo/boxer/internal/sh"
 	"io"
 	"net"
 	"os"
@@ -815,7 +816,7 @@ func (e *Env) startServices() error {
 	for _, cmd := range e.Cfg.Start {
 		fmt.Fprintf(e.Stderr, "boxer: start: %s\n", cmd)
 		// Detached and disowned: the command that launches a server must not wait for it.
-		line := "cd " + e.MountAt() + " && nohup sh -lc " + shellQuote(cmd) + " >>" + startLog + " 2>&1 &"
+		line := "cd " + e.MountAt() + " && nohup sh -lc " + sh.Quote(cmd) + " >>" + startLog + " 2>&1 &"
 		if _, code, err := e.VM.Output(e.Scope.Key, e.MountAt(), "sh", "-c", line); err != nil || code != 0 {
 			return e.fail(&Error{Reason: fmt.Sprintf("start step failed (exit %d): %s", code, cmd), Cause: "START_FAILED", Scope: e.Scope,
 				Fix: "check the `start` list in boxer.toml, then: boxer up"})
@@ -853,10 +854,6 @@ func (e *Env) waitReady() error {
 		time.Sleep(250 * time.Millisecond)
 	}
 }
-
-// shellQuote wraps s for `sh -c`, because a start command is written by a person and will contain
-// quotes sooner or later.
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // imageSetupMarker lives in the guest, so it travels in the pack: that is exactly what lets a new
 // VM skip work that is already in the image.

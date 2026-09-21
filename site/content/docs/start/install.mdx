@@ -1,0 +1,61 @@
+---
+title: Install
+description: smolvm, then boxer, then a command that proves it worked.
+---
+
+boxer is a single Go binary. It needs [smolvm](https://smolmachines.com), which runs the microVMs,
+and a git repository to work in.
+
+macOS on Apple Silicon and Linux on x86-64 or arm64 are supported. Windows is not: smolvm runs
+there, but boxer's worktree model depends on POSIX paths and mounts.
+
+## smolvm first
+
+```sh
+curl -sSL https://smolmachines.com/install.sh | bash
+smolvm version
+```
+
+Everything below assumes it is on your `PATH`.
+
+## Then boxer
+
+Pick whichever fits how you already install things. They produce the same binary.
+
+```sh
+# The install script — downloads the release for your platform into ~/.local/bin and
+# checks its sha256 against the release's checksums.txt before moving it into place.
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
+
+# Homebrew, on macOS.
+brew install BarakChamo/tap/boxer
+
+# npm, if node is what you have. The package downloads the same release binary.
+npm i -g boxer-cli
+
+# From source, which needs a Go toolchain.
+go install github.com/BarakChamo/boxer/cmd/boxer@latest
+```
+
+`BOXER_VERSION=v1.2.3` pins the install script to a release. `BOXER_INSTALL_DIR` changes where it
+puts the binary. If the target directory is not on your `PATH`, the script says so rather than
+leaving you to find out later.
+
+## Check it
+
+```sh
+cd your-repository
+boxer doctor
+```
+
+`doctor` prints what boxer resolved for this directory: the scope it would use, the image it would
+boot, which harness integrations it can see, and anything about the setup that will not work.
+Read it once now — it is the fastest way to understand what boxer thinks it is doing, and the
+first thing to run when something later does not sandbox.
+
+```sh
+boxer run -c 'uname -a'
+```
+
+The first command in a worktree provisions its VM. That takes a few seconds on a warm host and
+longer the first time, when the image has to be pulled. After that it is sub-second.

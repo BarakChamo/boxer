@@ -1,0 +1,83 @@
+---
+title: How it works
+description: Scopes, the first command, and the five ways a command reaches the guest.
+---
+
+## Scope: one VM per worktree
+
+A **scope** is what boxer keys a sandbox to. By default it is the git worktree, resolved from the
+current directory. Two worktrees of the same repository get two VMs; two directories inside one
+worktree share one.
+
+This is the design decision everything else follows from. Agents work in worktrees — orchestrators
+like Conductor, T3 and Paperclip cut one per task — so keying to the worktree means each task gets
+its own machine without anyone arranging it.
+
+```toml
+isolation = "worktree"   # default. also: session, subagent, repo
+```
+
+`session` and `subagent` key the VM to an agent session id instead, for harnesses that hand one
+out. `repo` collapses every worktree onto one VM, which is occasionally what you want and usually
+not.
+
+## What the first command does
+
+1. Resolve the scope from the working directory.
+2. Read `boxer.toml` — from the worktree, then the repository root, then `~/.config/boxer/`.
+3. Create the VM: image, CPUs, memory, and the worktree mounted at its host path.
+4. Run `image_setup` if this image has not had it, then `setup` if this worktree has not.
+5. Start anything in `start`, and wait for `ready`.
+6. Run the command.
+
+Steps 4 and 5 are skipped when their markers say they are done, which is what makes the second
+command fast.
+
+## The two setup lists
+
+The split matters and is easy to get wrong.
+
+```toml
+image_setup = ["npm i -g some-cli"]      # per image. Travels in the snapshot.
+setup       = ["npm install"]            # per worktree. Lands in your files.
+```
+
+`image_setup` runs once per image and is captured in the environment pack, so every later VM from
+that pack starts with the work already done. `setup` lands in the worktree, which the pack cannot
+carry, so it runs once per worktree.
+
+Putting `npm install` in `image_setup` produces a pack with a marker saying the work is done and a
+worktree with no `node_modules` — a confusing failure worth avoiding.
+
+## Environment packs
+
+After a VM's `image_setup` succeeds, boxer snapshots it with `smolvm pack create`. The pack is
+keyed on the image plus a hash of everything that shaped it: `image_setup`, `env`, `mounts`,
+`start`, `ready`. Change any of them and the key changes, so the next VM builds a fresh pack
+instead of inheriting a stale one.
+
+`boxer up --rebuild` drops the pack and starts again, for when something outside the setup list
+moved — a base image tag, a dependency resolved at install time.
+
+## How a command reaches the guest
+
+| Level | Mechanism | Enforces? |
+| --- | --- | --- |
+| MCP + skill | the agent chooses `boxer_run` | no |
+| Hooks | boxer rewrites the command before it runs | yes |
+| Plugin | same, in-process (OpenCode) | yes |
+| PATH shims | a file named `npm` that re-runs itself in the guest | yes, where PATH holds |
+| Inside | the harness runs in the VM | by construction |
+
+`mode` decides how the hook behaves:
+
+- `rewrite` — the agent types `npm test`, boxer turns it into `boxer run -c 'npm test'`. Transparent.
+- `tool` — the shell is denied and `boxer_run` is the only way through, for harnesses that can
+  block a command but not rewrite one.
+- `off` — boxer stays installed and does nothing.
+
+## What is not sandboxed, on purpose
+
+`git`, `gh` and `ssh` run on the host by default. They need your credentials and your real
+repository, and putting them in the guest breaks more than it protects. `passthrough` is the list;
+`intercept` is its opposite.

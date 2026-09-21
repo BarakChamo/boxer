@@ -1,0 +1,73 @@
+---
+title: JSON output
+description: The language-agnostic API, for anything that watches sandboxes.
+---
+
+`--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks` and `logs` prints exactly one
+JSON document on stdout — an object or an array, indented, with snake_case fields. Human output is
+unchanged without the flag.
+
+Fields are added, never repurposed or removed.
+
+## `boxer status --json`
+
+```json
+{
+  "scope": "sb-7e1852e4a3c3",
+  "isolation": "worktree",
+  "worktree": "/Users/me/src/demo",
+  "mount_at": "/Users/me/src/demo",
+  "exists": true,
+  "state": "running",
+  "image": "node:24-bookworm-slim",
+  "image_reason": "machine",
+  "ports": { "3000": "61234" },
+  "labels": { "boxer.root": "/Users/me/src/demo" },
+  "last_used": "2026-09-20T14:31:09Z"
+}
+```
+
+Exit codes: `0` running, `3` stopped, `4` absent, `1` refused.
+
+`ports` maps guest port to the host port it landed on, which is the only way to know where an
+`auto:` forward went. `events` appears when the file telemetry sink is on: the last five events
+for this scope, so a dashboard gets state and recent history in one call.
+
+## `boxer ls --json`
+
+An array of the same shape, one per sandbox, plus `attachment` — whether the worktree the sandbox
+is keyed to still exists. `--resources` adds live cpu and memory.
+
+## `boxer doctor --json`
+
+The resolved configuration and everything boxer checked: `settings` with the file or environment
+variable each came from, `scope`, `git`, `shims`, `signals`, `storage`, `drift` and `warnings`.
+
+`warnings` is the field worth watching. It carries the setups that look right and do not hold — a
+login shell that demotes the shims, an installed file that has drifted from this binary's copy.
+
+## Errors
+
+A scoped command refused before it can act prints the refusal on stdout and repeats it in prose on
+stderr, exiting 1:
+
+```json
+{
+  "error": {
+    "reason": "not inside a git worktree",
+    "cause": "NO_WORKTREE",
+    "fix": "run boxer from inside a repository, or set require_worktree = \"off\""
+  }
+}
+```
+
+`cause` is a stable identifier; `reason` and `fix` are for people.
+
+## Watching
+
+```sh
+boxer watch --json
+```
+
+One JSON object per state change, as it happens — a sandbox appearing, starting, stopping or being
+deleted. Useful for a dashboard that would otherwise poll `ls`.

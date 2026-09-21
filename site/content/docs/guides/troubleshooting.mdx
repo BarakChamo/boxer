@@ -1,0 +1,66 @@
+---
+title: Troubleshooting
+description: The failures that are worth recognising on sight.
+---
+
+Start with `boxer doctor`. It resolves the same configuration a real command would and prints what
+it found, including the setups that look right and will not hold.
+
+## My command ran on the host
+
+Check, in order:
+
+1. `boxer doctor` — is an integration installed for this harness, and does it say enforcement is
+   in effect?
+2. Is the program on `intercept`? Nothing else is sandboxed.
+3. Does the harness run commands through a **login shell**? `zsh -lc` rebuilds `PATH` and demotes
+   shims. `doctor` reports this; use hooks or tool mode instead.
+4. Are you in a **linked worktree with Codex**? Codex reads project config from the main
+   repository. `boxer install codex` writes both; a hand-installed `.codex/` in the worktree alone
+   is never read.
+
+## The sandbox will not start
+
+`read checkpoint footer: I/O error` means a truncated environment pack, which is what an
+interrupted `pack create` leaves behind. boxer detects and rebuilds these, but `boxer up --rebuild`
+forces it.
+
+`exit 137` during setup is the kernel's out-of-memory killer. Raise `memory` in `boxer.toml` or run
+fewer sandboxes at once.
+
+## Setup ran but my dependencies are missing
+
+`image_setup` is captured in the image snapshot; `setup` lands in the worktree. Dependency installs
+belong in `setup`. In `image_setup` they leave a marker saying the work is done and a worktree with
+nothing in it.
+
+## The dev server does not answer
+
+- `ready` may be passing before the server really is. Its own output is in `/tmp/boxer-start.log`
+  in the guest, and boxer quotes the tail in the error.
+- A second dev server takes down the first. If an agent cannot reach the one you gave it, it will
+  often start its own — check what address you told it about: a host-forwarded port is meaningless
+  from *inside* the guest, where the server is simply on `127.0.0.1:<guest port>`.
+- Next.js refuses its own dev chunks when reached through a forwarded port. Add
+  `allowedDevOrigins: ['127.0.0.1', 'localhost']`.
+
+## An interactive harness hangs
+
+Read what it is showing. Interactive agents block on dialogs that headless ones never see:
+permission prompts, a bypass-permissions confirmation, a skill-approval prompt. Grant tools in
+project settings and include every tool the agent needs, `Skill` among them.
+
+## Everything is slow the first time
+
+The image has to be pulled and `image_setup` has to run. After that a pack carries the result and
+starts are fast. If the second run is also slow, the pack key changed — `image_setup`, `env`,
+`mounts`, `start` and `ready` are all part of it.
+
+## Disk is full
+
+```sh
+boxer ls --resources
+boxer gc --all
+```
+
+`boxer doctor` prints what boxer costs on disk.

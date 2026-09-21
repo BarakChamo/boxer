@@ -1,0 +1,49 @@
+---
+title: Events
+description: What boxer records, when you ask it to.
+---
+
+boxer records what it did as a stream of JSON events. The stream is **off by default**: with no
+`[telemetry]` table and no `BOXER_TRACE`, boxer writes nothing anywhere.
+
+```toml
+[telemetry]
+enabled = true
+sink = "file"               # none | file | stderr | otel
+path = ""                   # default: $XDG_STATE_HOME/boxer/events.jsonl
+record_commands = false     # command lines stay out of the stream unless this is true
+endpoint = ""               # otel only; without it nothing leaves the machine
+```
+
+`BOXER_TRACE=<path>` turns the file sink on at that path regardless of configuration. That is what
+the hooks and the evaluation harness use, and it is the fastest way to see what boxer is deciding.
+
+## Shape
+
+```json
+{
+  "time": "2026-09-20T14:31:09.236Z",
+  "event": "provision",
+  "scope": "sb-7e1852e4a3c3",
+  "harness": "claude-code",
+  "duration_ms": 623.4,
+  "outcome": "ok",
+  "payload": { "created": true, "image": "node:24-bookworm-slim" }
+}
+```
+
+`event` is one of `resolve`, `provision`, `run`, `rewrite`, `deny`, `setup`, `start`, `ready`,
+`gc`, `pack`. `outcome` is `ok`, `failed` or `skipped`. `payload` carries what that event needs and
+nothing more.
+
+Command lines are omitted unless `record_commands = true`, because an event log that captures every
+command an agent runs is a different thing to store than one that captures what boxer did with
+them.
+
+## Reading it back
+
+```sh
+boxer logs -n 50          # this scope
+boxer logs --json         # the raw events
+boxer logs --scope NAME   # another sandbox
+```

@@ -1,0 +1,87 @@
+---
+title: Enforcement and its limits
+description: Which mechanisms actually hold, which only ask, and where each one breaks.
+---
+
+boxer has five ways into the sandbox. Two of them enforce, one asks, and two hold only under
+conditions worth knowing before you rely on them.
+
+## Hooks — the strong one
+
+Where a harness has a hook API that accepts a rewritten command, boxer uses it. The agent types
+`npm test`; boxer sees the call before it runs, matches `npm` against `intercept`, and replaces the
+command with `boxer run -c 'npm test'`. The agent never sees a refusal and never learns anything.
+
+This holds regardless of shells, paths or how the command was composed, because the interception
+happens above the shell entirely. Claude Code, Codex, Grok, Gemini CLI and OpenCode all accept it.
+
+## Tool mode — for harnesses that can only say no
+
+Some harnesses can block a command but not rewrite one. `mode = "tool"` denies the shell and
+leaves `boxer_run` as the way through. A compliant agent simply uses the tool and is never denied
+anything; an agent that reaches for the shell gets a refusal explaining what to do instead.
+
+## PATH shims — no harness cooperation at all
+
+```sh
+boxer shim install ~/.boxer/shims
+```
+
+This writes one file per entry in `intercept`, each of which re-runs itself in the guest. Put the
+directory first on the harness's `PATH` and a bare `npm` goes to the sandbox.
+
+Two things break it, and both are worth checking before you depend on it:
+
+<Callout type="warn">
+**Never shim the runtime your harness is written in.** A `node` shim shadows the interpreter of a
+node-based harness, which then goes through the sandbox before it can load its own modules and
+dies at startup. `intercept` for a shim setup should name build tools, not interpreters.
+</Callout>
+
+<Callout type="warn">
+**A login shell rebuilds `PATH`.** On macOS `/etc/zprofile` runs `path_helper`, which puts the
+system directories in front of whatever was there — so a harness that runs commands through
+`zsh -lc` or `bash -lc`, as Codex does, gets `/usr/bin/npm` and the shim never fires. `boxer
+doctor` detects this and says so. Use hooks or tool mode for those harnesses.
+</Callout>
+
+## Shimming the shell instead
+
+```toml
+intercept = ["bash"]
+```
+
+One file instead of a list. Nothing to maintain and nothing that can shadow an interpreter — but
+it only catches commands run through a shell the harness resolves on `PATH`. A harness that spawns
+`/bin/bash` by absolute path bypasses it completely.
+
+Which of the two fits depends on the harness, and the [evaluation matrix](/docs/evals/matrix)
+measures both rather than guessing.
+
+## Inside mode — nothing to intercept
+
+```toml
+integration = "inside"
+```
+
+The harness itself runs in the VM. There is no host side to intercept, so nothing can leak by
+construction — no hooks, no shims, no rewrite rules. `boxer shell claude` starts it.
+
+The cost is that the harness's credentials and config have to reach the guest, and that the VM now
+carries the harness as well as the work. Give it more memory than you would an outside sandbox.
+
+## The skill — asks, does not enforce
+
+Every level ships a skill telling the agent that commands here go through boxer. On its own that
+is persuasion, not containment: an agent that ignores it is not sandboxed. It is the floor for a
+harness nobody has integrated, and the `adherence` evaluation tier measures how often agents
+actually follow it.
+
+## Checking what holds
+
+```sh
+boxer doctor
+```
+
+It prints the integrations it can see, the enforcement in effect, and the setups that look right
+and will not hold.

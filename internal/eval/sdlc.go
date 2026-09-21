@@ -592,10 +592,3 @@ func toolSummary(tools map[string]int) string {
 	}
 	return strings.Join(parts, ", ")
 }
-
-func yesNo(b bool) string {
-	if b {
-		return "yes"
-	}
-	return "-"
-}

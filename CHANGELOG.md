@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Codex was not sandboxed in a linked worktree.** Codex resolves project configuration to the
+  main repository, so the hooks `boxer install codex` wrote into a worktree were never read and
+  every command ran on the host. Orchestrators work almost entirely in linked worktrees, which made
+  this the ordinary case rather than a corner. The installer now writes the hooks to the main
+  repository as well, and says so.
+- **Input written before the sandbox attached was discarded.** A sandbox takes seconds to attach,
+  and opening the guest terminal flushed whatever was queued on the caller's. A harness that
+  configures its shell immediately after spawning it — OpenHands writes the prompt it parses
+  command results out of one second in — lost that configuration every time and then waited for
+  output that could never end. `boxer run --tty` now asks for a terminal explicitly and captures
+  stdin from the moment it starts.
+- **A boxer shim could be resolved by boxer itself.** The smolvm launcher runs `uname`, so a
+  `uname` shim on PATH became `boxer run -- uname` inside a boxer already working on that sandbox,
+  and the session deadlocked until it was killed. Shim directories are marked, and boxer drops them
+  from its own PATH before starting anything.
+
+### Added
+- **fx**, Vercel Labs' native coding agent, as an inside-mode harness. fx has no hooks, its shell
+  cannot be denied headlessly, and it resolves commands past a PATH shim, so inside the guest is
+  the level at which boxer genuinely contains it. Its installer is fetched and run under bash — the
+  script uses `set -o pipefail`, which the guest's `/bin/sh` rejects — with the Keychain disabled,
+  because a VM has none.
+- **`boxer doctor` reports enforcement that will not hold.** A login shell rebuilds PATH — on macOS
+  `path_helper` puts the system directories first — so PATH shims silently miss for a harness that
+  runs commands through `zsh -lc`. boxer cannot out-rank `path_helper`; it can say so, and now
+  names the enforcement to use instead.
+- **A matrix evaluation tier**: the same development workload at every integration level, across
+  nine harnesses and three orchestrators, with each cell scored on thirteen weighted claims rather
+  than passed or failed as a whole. Every run is archived with the conditions it was made under.
+- **A documentation site** built with Fumadocs, under `site/`. `make docs`.
+
 ### Added
 - **Environment packs.** `setup` was run once per VM and never cached, so every worktree repeated
   `bun install` from scratch while a pack of the bare image sat beside it. The result of setup is

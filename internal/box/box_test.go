@@ -779,19 +779,6 @@ func TestReadyTimesOutWithSomewhereToLook(t *testing.T) {
 	}
 }
 
-// A start command written by a person will contain quotes.
-func TestShellQuote(t *testing.T) {
-	for in, want := range map[string]string{
-		"npm run dev":            "'npm run dev'",
-		"sh -c 'echo hi'":        `'sh -c '\''echo hi'\'''`,
-		"echo \"double quoted\"": "'echo \"double quoted\"'",
-	} {
-		if got := shellQuote(in); got != want {
-			t.Errorf("%q -> %q, want %q", in, got, want)
-		}
-	}
-}
-
 // A restarted VM has no processes: the start marker is in the guest's memory-backed /tmp precisely
 // so that a stop clears it and the services launch again, while the setup marker is durable
 // because what is installed survives.

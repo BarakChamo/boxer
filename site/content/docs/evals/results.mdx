@@ -1,0 +1,51 @@
+---
+title: Support, measured
+description: Which harness works at which level, from the last full run.
+---
+
+Everything here comes from the matrix tier. Nothing is listed as supported because the code exists
+— it is listed because a cell ran and scored.
+
+## By integration level
+
+| Level | Score | Harnesses |
+| --- | --- | --- |
+| hook rewrite | 100% | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
+| shell substitution | 100% | OpenHands |
+| tool mode | 96.5% | Claude Code, Kimi Code, DSH, Codex, Grok |
+| bash shim | 95.7% | Claude Code, Kimi Code, Codex, Copilot |
+| inside | 93.0% | Claude Code, Codex, OpenCode, Kimi Code, fx |
+| command shims | 91.3% | Claude Code, Kimi Code, Codex, Copilot |
+| orchestrator | 79.7% | T3 Code, Paperclip, herdr |
+
+Every level is carried by at least two harnesses, except shell substitution — OpenHands is the only
+harness whose terminal shell is configurable, and a second witness would have to be invented rather
+than found.
+
+## Known limits
+
+These are measured, not suspected.
+
+**PATH shims do not survive a login shell.** A login shell rebuilds `PATH`; on macOS `path_helper`
+puts the system directories first. A harness that runs commands through `zsh -lc` — Codex does —
+reaches the host. boxer cannot out-rank `path_helper`, so `boxer doctor` detects the situation and
+names the enforcement to use instead.
+
+**Gemini CLI needs its own key.** It speaks only the Gemini API, which the AI Gateway does not
+serve, so its cells skip rather than run.
+
+**Conductor is verified by hand.** It is a native app rather than an Electron one, so there is no
+debugging port to drive, and its CLI drives cloud workspaces where boxer has nothing to sandbox.
+
+**fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
+and it resolves commands past a PATH shim — so outside the guest there is nothing for boxer to hold
+onto. Inside there is, and both of its cells score 100%.
+
+## Reading a run
+
+Archived runs live in `docs/evals/matrix/`, newest first, with a JSON line per run for reading the
+series by machine. A run is comparable with another only when the model, the concurrency and the
+host match, which is why each report carries them.
+
+Cells that fall short are worth reading rather than counting: the scorecard names which claim
+failed, and the report keeps the transcript and the trace for each one.

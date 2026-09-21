@@ -1,0 +1,102 @@
+---
+title: The guest environment
+description: Images, dependencies, services and ports.
+---
+
+## Choosing an image
+
+```toml
+image = "node:24-bookworm-slim"
+```
+
+Any OCI reference works. Leave it out and boxer infers one from your lockfile — `package-lock.json`
+gets node, `requirements.txt` gets python, and so on.
+
+It also takes a local image, which is the path for a repository that builds its own:
+
+```toml
+image = "./dev.tar"        # docker save archive
+image = "./rootfs"         # extracted rootfs directory
+image = "-"                # read from stdin
+```
+
+Nothing is pulled for these, so no registry host has to be opened.
+
+<Callout>
+Prefer a registry mirror for public images. Docker Hub's anonymous pull quota is 100 an hour, and
+a machine running several sandboxes reaches it. `mirror.gcr.io/library/node:24-bookworm-slim` has
+no quota.
+</Callout>
+
+## Dependencies
+
+```toml
+image_setup = ["npm i -g typescript"]   # once per image, captured in the pack
+setup = ["npm ci"]                       # once per worktree, lands in your files
+```
+
+## Services
+
+`start` launches long-running processes; `ready` is how boxer knows they are up.
+
+```toml
+start = ["npm run dev"]
+ready = "curl -sf http://127.0.0.1:3000/ >/dev/null"
+ready_timeout = "120s"
+```
+
+`start` runs once per running VM. A `boxer down` and a later start run them again — the marker
+lives in the guest's memory-backed `/tmp` precisely so that a stopped VM has no processes and
+knows it.
+
+When `ready` never passes, the services' own output is in `/tmp/boxer-start.log` in the guest, and
+boxer quotes the tail of it in the error rather than making you go and look.
+
+## Ports
+
+```toml
+[network]
+ports = ["auto:3000"]
+```
+
+`auto:` asks the host for a free port and forwards it to 3000 in the guest. Use it in any
+`boxer.toml` you commit: a fixed host port collides the moment a second worktree starts, which is
+exactly what happens when an orchestrator opens three tasks at once.
+
+`boxer status` prints what the guest port actually landed on:
+
+```console
+$ boxer status
+sb-7f2a91 running · node:24-bookworm-slim · 3000 → 61234
+```
+
+<Callout type="warn">
+A dev server reached through a forwarded port sees a different origin than it expects. Next.js
+refuses its own dev chunks in that case; add `allowedDevOrigins: ['127.0.0.1', 'localhost']` to
+`next.config.ts`. Other frameworks have the same knob under different names.
+</Callout>
+
+## Environment variables and secrets
+
+```toml
+[env]
+NODE_ENV = "development"          # configuration; travels into the pack
+
+env_passthrough = ["CI"]          # read from the host at run time
+secrets = ["NPM_TOKEN"]           # same, and never written anywhere
+```
+
+`env` is configuration and is captured in the snapshot. Anything you would not want in a snapshot
+belongs in `env_passthrough` or `secrets`, which are read from the host on each run.
+
+## Networking
+
+```toml
+[network]
+mode = "allowlist"
+allow_hosts = ["registry.npmjs.org"]
+```
+
+`on` allows everything, `off` allows nothing, `allowlist` allows what you name. The allowlist is
+the useful default for a build: dependencies resolve, and a command that decides to phone somewhere
+else does not.

@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence eval-flow eval-sdlc eval-matrix package install-routes release-gate clean clean-evals help
+.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence eval-flow eval-sdlc eval-matrix docs docs-dev package install-routes release-gate clean clean-evals help
 
 help:             ## list the targets
 	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -61,6 +61,12 @@ eval-sdlc: build  ## development lifecycles in parallel worktrees: a live agent 
 eval-matrix: build  ## the same Next.js workload across harnesses and integration levels (slow, live)
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier matrix --parallel 3 --out docs/eval-matrix.md
+
+docs: ## build the documentation site into site/.next
+	cd site && npm install --no-audit --no-fund && npm run build
+
+docs-dev: ## serve the documentation site with hot reload
+	cd site && npm install --no-audit --no-fund && npm run dev
 
 package: build    ## render the package and every client view into dist/, and refresh the checked-in plugin/
 	bin/boxer package all --out dist

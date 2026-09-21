@@ -1,0 +1,133 @@
+---
+title: boxer.toml
+description: Every key, what it does, and what it defaults to.
+---
+
+boxer reads, lowest priority first: `~/.config/boxer/boxer.toml`, the repository root's
+`boxer.toml`, the worktree's, and then `BOXER_*` environment variables. `boxer doctor` prints which
+file each setting came from.
+
+A `devcontainer.json` is merged in first when one is present, so a repository that already has one
+does not need a second description of the same environment.
+
+## Scope and integration
+
+```toml
+isolation = "worktree"        # worktree | session | subagent | repo
+integration = "outside"       # outside | inside
+mode = "rewrite"              # rewrite | tool | off
+enforcement = "both"          # hook | shim | both | audit
+require_worktree = "warn"     # off | warn | error
+```
+
+`mode` decides how a command reaches the guest: `rewrite` turns it into `boxer run` transparently,
+`tool` denies the shell and leaves `boxer_run`, `off` keeps boxer installed and inert.
+
+`enforcement` decides which mechanisms are live. `audit` records what would have happened and
+blocks nothing, which is the setting for finding out what an agent actually runs.
+
+## What gets sandboxed
+
+```toml
+intercept = ["npm", "node", "python3", "go", "make"]
+passthrough = ["git", "gh", "ssh"]
+```
+
+`git`, `gh` and `ssh` are on the host by default: they need your credentials and your real
+repository.
+
+Under `enforcement = "shim"` the intercept list becomes real files on `PATH`. Do not put your
+harness's own runtime on it — see [Enforcement](/docs/guides/enforcement).
+
+## The guest
+
+```toml
+image = "node:24-bookworm-slim"   # any OCI ref, a local tar, a rootfs dir, or "-"
+smolfile = ""                      # a smolvm Smolfile instead of an image
+cpus = 2
+memory = "2G"
+mount_at = ""                      # default: the worktree's own host path
+mounts = ["~/.npm:/root/.npm"]     # host:guest[:ro]
+```
+
+## Setup and services
+
+```toml
+image_setup = ["npm i -g typescript"]   # once per image, captured in the pack
+setup = ["npm ci"]                       # once per worktree, lands in your files
+start = ["npm run dev"]                  # every time the VM starts, detached
+ready = "curl -sf http://127.0.0.1:3000/"
+ready_timeout = "120s"
+```
+
+The `image_setup`/`setup` split is the same line `devcontainer.json` draws between
+`onCreateCommand` and `postCreateCommand`. Dependency installs belong in `setup`.
+
+## Environment
+
+```toml
+[env]
+NODE_ENV = "development"
+
+env_passthrough = ["CI"]        # read from the host at run time
+secrets = ["NPM_TOKEN"]         # same, and never written to a pack or a record
+```
+
+## Network
+
+```toml
+[network]
+mode = "on"                     # on | off | allowlist
+allow_hosts = ["registry.npmjs.org"]
+ports = ["auto:3000"]           # auto: picks a free host port
+```
+
+Use `auto:` in anything you commit. A fixed host port collides as soon as a second worktree starts.
+
+## Tasks
+
+```toml
+[tasks]
+test = "npm test"
+build = "npm run build"
+```
+
+`boxer run --task test`. Named tasks are how an agent runs your real commands without composing a
+shell line that the intercept list may or may not catch.
+
+## Housekeeping
+
+```toml
+auto_reclaim = true
+reclaim_every = "1h"
+idle_timeout = "2h"
+min_free_gb = 10
+packs_keep_last = 3
+warm_on_session_start = false
+```
+
+`auto_reclaim` lets an ordinary command sweep what boxer no longer needs, at most once per
+`reclaim_every`. `min_free_gb` is the disk margin boxer refuses to spend on its own cache: below
+it, packing is skipped and the image is pulled instead, because a full disk breaks every VM on the
+host rather than only boxer's.
+
+`warm_on_session_start` makes the session-start hook provision in the background and return at
+once, so a session never waits on a VM.
+
+## Per-harness overrides
+
+```toml
+[harness.kimi]
+mode = "tool"
+```
+
+Any top-level key can be overridden for one harness.
+
+## Telemetry
+
+```toml
+[telemetry]
+sink = "file"                   # off | file
+```
+
+Local only — an event log `boxer logs` reads. Nothing is sent anywhere.
