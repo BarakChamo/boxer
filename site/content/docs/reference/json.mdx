@@ -46,6 +46,17 @@ variable each came from, `scope`, `git`, `shims`, `signals`, `storage`, `drift` 
 `warnings` is the field worth watching. It carries the setups that look right and do not hold — a
 login shell that demotes the shims, an installed file that has drifted from this binary's copy.
 
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | success; for `status`, running |
+| 1 | refused or failed |
+| 2 | usage error |
+| 3 | `status`: the sandbox exists but is stopped |
+| 4 | `status`: no sandbox for this scope |
+| *n* | `run`: the guest command's own exit code, or 127 when it could not start |
+
 ## Errors
 
 A scoped command refused before it can act prints the refusal on stdout and repeats it in prose on
@@ -61,7 +72,18 @@ stderr, exiting 1:
 }
 ```
 
-`cause` is a stable identifier; `reason` and `fix` are for people.
+`cause` is a stable identifier; `reason` and `fix` are for people. The same shape renders three
+ways — prose on stderr, this object under `--json`, and the text of a failed MCP tool call.
+
+| `cause` | When |
+| --- | --- |
+| `NO_REPOSITORY` | not inside a git repository |
+| `WORKTREE_REQUIRED` | `require_worktree = "error"` and this is not one |
+| `SCOPE_UNRESOLVED` | the scope could not be determined |
+| `NO_SANDBOX` | the command needs a sandbox that does not exist |
+| `CREATE_FAILED` / `START_FAILED` | smolvm refused |
+| `SETUP_FAILED` | a `setup` or `image_setup` line exited non-zero |
+| `HARNESS_INSTALL_FAILED` | inside mode could not install the harness in the guest |
 
 ## Watching
 

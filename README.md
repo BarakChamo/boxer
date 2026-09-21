@@ -10,7 +10,7 @@ the agent's experience changes.
 
 One Go binary. smolvm holds the only state.
 
-Full documentation: [`site/`](site) — `make docs-dev` serves it locally.
+Full documentation: the site under [`site/`](site). `make docs-dev` serves it locally.
 
 ## Two minutes
 
@@ -30,7 +30,7 @@ milliseconds of overhead.
 
 `brew install BarakChamo/tap/boxer`, `npm i -g boxer-cli` and
 `go install github.com/BarakChamo/boxer/cmd/boxer@latest` are the other three routes;
-[docs/install.md](docs/install.md) has the details.
+[site/content/docs/start/install.mdx](site/content/docs/start/install.mdx) has the details.
 
 ## How an agent ends up in the sandbox
 
@@ -58,7 +58,7 @@ strongest without being asked.
 5. **Inside mode.** `boxer shell claude`, `boxer acp gemini`: the harness itself runs in the VM.
    There is nothing to hook, because the agent is not on your machine.
 
-Each one is explained, with the commands, in [docs/integrate.md](docs/integrate.md).
+Each one is explained, with the commands, in [site/content/docs/start/harnesses.mdx](site/content/docs/start/harnesses.mdx).
 
 ## Where each harness is verified
 
@@ -141,19 +141,19 @@ Off by default: with no `[telemetry]` table, boxer writes no log, no metrics and
 network. Turn it on with `enabled = true` and read it back with `boxer logs`; `boxer status --json`
 carries the last few events for the scope. Command lines are elided unless `record_commands = true`,
 and nothing leaves the machine unless you build with `-tags otel` and set an `endpoint`. The schema,
-the event names and the redaction rules are in [docs/events.md](docs/events.md).
+the event names and the redaction rules are in [site/content/docs/reference/events.mdx](site/content/docs/reference/events.mdx).
 
 `boxer install git` adds a `post-checkout` hook (honouring `core.hooksPath`) that runs
 `boxer up --detach` in every worktree `git worktree add` creates, so the VM is warm before any
 agent opens it. Opt-in; `boxer install all` leaves git configuration alone.
 
 `boxer doctor` prints every resolved value and where it came from. The rest of the keys, and what
-each one changes, are in [docs/configure.md](docs/configure.md).
+each one changes, are in [site/content/docs/reference/configuration.mdx](site/content/docs/reference/configuration.mdx).
 
 ## Documentation
 
-**Using boxer:** [install](docs/install.md) · [configure](docs/configure.md) ·
-[integrate](docs/integrate.md) · [troubleshoot](docs/troubleshooting.md) · [API](docs/api.md)
+**Using boxer:** [install](site/content/docs/start/install.mdx) · [configure](site/content/docs/reference/configuration.mdx) ·
+[integrate](site/content/docs/start/harnesses.mdx) · [troubleshoot](site/content/docs/guides/troubleshooting.mdx) · [API](site/content/docs/reference/json.mdx)
 
 **Working on boxer:** [architecture](docs/architecture.md) ·
 [evaluation plan](docs/eval-plan.md) · [requirements](docs/requirements.md) ·

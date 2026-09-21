@@ -1,22 +1,34 @@
 # boxer documentation
 
-## Using boxer
+User-facing documentation is the site under [`site/`](../site). `make docs-dev` serves it;
+`make docs` builds it. It is the single source for the CLI reference, the configuration keys, the
+guides and the evaluation results, so that no table exists in two places and drifts.
 
-- [install.md](install.md) — smolvm, the four ways to get the binary, and checking the install
-- [configure.md](configure.md) — `boxer.toml`, what each key changes, per-harness overrides
-- [integrate.md](integrate.md) — the five ways boxer reaches your agent, and which harness gets which
-- [troubleshooting.md](troubleshooting.md) — the failures people actually hit, and what to do
-- [api.md](api.md) — the `--json` shapes, exit codes, `pkg/boxer`, the MCP tools
-- [orchestrators.md](orchestrators.md) — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica
+What lives here is the engineering record — the material that documents decisions and evidence
+rather than usage.
 
-## Working on boxer
+## The record
 
 - [architecture.md](architecture.md) — the pieces, and the rule that keeps harness names out of the core
 - [requirements.md](requirements.md) — the specification, requirement by requirement, with verification status
-- [eval-plan.md](eval-plan.md) — how boxer's claims are evaluated: the tiers, the oracle, the matrix
-- [plan-1.1.md](plan-1.1.md) — what 1.1 adds and why, with the research behind it
 - [release.md](release.md) — what 1.0 promises, versioning, and the release gate
 - [status.md](status.md) — what the last full evaluation run proved, with dates and skips
+- [orchestrators.md](orchestrators.md) — the research behind each orchestrator integration, including
+  the Conductor checklist that has to be run by hand
 
-Evaluation reports, regenerated from runs rather than written: [eval-t1.md](eval-t1.md),
-[eval-t2.md](eval-t2.md), [eval-adherence.md](eval-adherence.md).
+## Plans and evaluations
+
+- [eval-plan.md](eval-plan.md) — the tiers, the oracle, and what each one is for
+- [plan-1.1.md](plan-1.1.md) — what 1.1 adds and why
+- [evals/matrix/](evals/matrix) — every archived matrix run, newest first, with `runs.jsonl` for
+  reading the series by machine
+
+Reports regenerated from runs rather than written by hand: [eval-t1.md](eval-t1.md),
+[eval-t2.md](eval-t2.md), [eval-adherence.md](eval-adherence.md), [eval-flow.md](eval-flow.md),
+[eval-sdlc.md](eval-sdlc.md), [eval-matrix.md](eval-matrix.md).
+
+## Pointers
+
+These files are stubs that name their page on the site: [install.md](install.md),
+[configure.md](configure.md), [integrate.md](integrate.md), [api.md](api.md),
+[events.md](events.md), [troubleshooting.md](troubleshooting.md).

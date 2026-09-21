@@ -1,1 +1,10 @@
-{ "title": "Reference", "pages": ["cli", "configuration", "json", "events"] }
+{
+  "title": "Reference",
+  "pages": [
+    "cli",
+    "configuration",
+    "json",
+    "go",
+    "events"
+  ]
+}

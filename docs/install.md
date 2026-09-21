@@ -1,81 +1,11 @@
 # Installing boxer
 
-boxer is a single Go binary. It needs [smolvm](https://smolmachines.com), which is what actually
-runs the microVMs, and a git repository to work in. macOS on Apple Silicon and Linux on x86-64 or
-arm64 are supported; Windows is not.
+This page now lives in the documentation site, under [`site/content/docs/start/install.mdx`](../site/content/docs/start/install.mdx).
 
-## smolvm first
+`make docs-dev` serves the site locally; `make docs` builds it. The site is the single source
+for user-facing documentation, so that the CLI reference and the configuration keys cannot drift
+between two copies of the same table.
 
-```sh
-curl -sSL https://smolmachines.com/install.sh | bash
-smolvm version
-```
-
-Everything below assumes it is on your PATH. boxer keeps no state of its own: the VMs, their
-images and the packs are smolvm's.
-
-## Four routes to the binary
-
-Pick one. They all produce the same `boxer`.
-
-```sh
-# 1. The install script: downloads the release for your platform into ~/.local/bin, after
-#    checking its sha256 against the release's checksums.txt.
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
-
-# 2. Homebrew, on macOS.
-brew install BarakChamo/tap/boxer
-
-# 3. npm, if node is what you already have. The package downloads the same release binary.
-npm i -g boxer-cli
-
-# 4. From source, which needs a Go toolchain.
-go install github.com/BarakChamo/boxer/cmd/boxer@latest
-```
-
-`BOXER_VERSION=v1.2.3` pins the install script to a release; `BOXER_INSTALL_DIR` changes where it
-puts the binary. If `~/.local/bin` is not on your PATH the script tells you so.
-
-## Teaching your harnesses to use it
-
-```sh
-boxer install all            # every harness this repository can take, merged and idempotent
-boxer install copilot --user # Copilot CLI is user-level only: its repository hooks need a trusted
-                             # directory, which headless mode does not grant
-```
-
-`boxer install all` writes a project layer that orchestrators also load, because a harness they
-launch gets its own configuration directory and never sees a user-level plugin. The five ways an
-agent ends up in the sandbox, and which harness gets which, are in [integrate.md](integrate.md).
-
-A `go install` build carries no release stamp, so it reports the module version the toolchain
-recorded (`boxer --version` prints `v1.0.0`, not `dev`). Only a build from a working tree is `dev`.
-
-## Check the install
-
-```sh
-boxer doctor
-```
-
-`doctor` is the first thing to run and the first thing to paste into a bug report. It prints every
-resolved configuration value and where it came from, whether smolvm is present and healthy, which
-harnesses it can see, what this worktree's scope is, and what would happen if an agent ran a
-command here.
-
-## Verifying a download
-
-Each release carries `checksums.txt`, a signature made with cosign keyless, and an SBOM per
-archive. The install script and the npm package verify the checksum for you and refuse to install
-on a mismatch. To check the signature yourself, see
-[release.md](release.md#reproducibility-and-provenance).
-
-## Upgrading and removing
-
-Re-run the same route. `boxer doctor` warns when a repository has an installed plugin or skill
-layer older than the binary; `boxer install <harness>` rewrites it.
-
-To remove boxer: delete the binary, run `boxer down --all` first if any sandbox is still running,
-and delete the files `boxer install` wrote into your repository (`.claude/`, `.codex/`,
-`.gemini/`, `.opencode/`, `.grok/`, `.pi/`, `.dsh/` entries, and `~/.copilot/hooks/boxer.json` —
-they are merged, so remove boxer's entries rather than the files). `boxer gc` reclaims the packs
-under `~/.local/state/boxer/packs`, which are a cache and nothing else.
+The engineering record stays here in `docs/`: [architecture](architecture.md),
+[requirements](requirements.md), [status](status.md), [release](release.md), the
+[orchestrator notes](orchestrators.md), the evaluation write-ups and the ADRs.

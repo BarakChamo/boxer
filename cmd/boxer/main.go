@@ -82,7 +82,7 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer version
 
 Identity flags accepted by up/run/down/status/doctor: --harness NAME --session ID --agent ID
---json on ls, status, down, gc, doctor prints one JSON object or array (see docs/api.md)
+--json on ls, status, down, gc, doctor prints one JSON object or array (see the JSON reference in the docs site)
 Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
 `
 

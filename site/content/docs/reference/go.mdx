@@ -1,0 +1,65 @@
+---
+title: Go and MCP
+description: The importable package, and the MCP server harnesses talk to.
+---
+
+## `pkg/boxer`
+
+The only importable package. Thin delegation to the internals, with the types aliased
+(`Machine`, `Scope`, `Error`, `RunOpts`).
+
+```go
+import "github.com/BarakChamo/boxer/pkg/boxer"
+
+b, err := boxer.Open(cwd, boxer.Options{Harness: "claude-code", SessionID: sid})
+if err != nil {
+    var be *boxer.Error
+    if errors.As(err, &be) {
+        log.Fatalf("%s (%s): %s", be.Reason, be.Cause, be.Fix)
+    }
+    log.Fatal(err)
+}
+
+if _, err := b.Ensure(true, false); err != nil { // create if needed, then start
+    log.Fatal(err)
+}
+
+code, err := b.Run(
+    []string{"sh", "-c", "npm test"},
+    boxer.RunOpts{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
+)
+
+m, exists, _ := b.Status()
+_ = b.Down()
+
+machines, _ := boxer.List() // every boxer-owned machine on the host
+```
+
+`Run` returns `-1` with an error when `on_sandbox_unavailable = "passthrough"` and the sandbox
+could not be provisioned. The caller decides whether to fall back to the host — boxer will not
+make that choice silently.
+
+## MCP
+
+```sh
+boxer mcp [--harness NAME]
+```
+
+Speaks MCP over stdio, protocol `2025-06-18`. Two tools:
+
+| Tool | Input | Result |
+| --- | --- | --- |
+| `boxer_run` | `{ command, cwd? }` | stdout and stderr, then `[exit N]`. `isError` when the exit is non-zero or boxer refused |
+| `boxer_status` | `{ cwd? }` | one line: scope, isolation, state, image, worktree, mount |
+
+One resource, `boxer://brief` (`text/markdown`) — the same brief `boxer brief` prints, resolved for
+the server's working directory.
+
+`cwd` is forgiving about which side of the mount it names. A host path inside the worktree becomes
+the matching guest directory; a path under the guest mount maps back to the host worktree; anything
+else falls back to the server's own directory, and the result says so with a `note:` line rather
+than pretending.
+
+The server doubles as a session signal for harnesses without hooks: `initialize` provisions its own
+scope in the background when `create_on` includes `mcp`, and stdin EOF records the scope's last use
+so `gc` knows it is idle.
