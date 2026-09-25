@@ -48,7 +48,7 @@ var Harnesses = map[string]Harness{
 	"claude": {Bin: "claude", Install: "npm i -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp",
 		ACP: []string{"claude-agent-acp"}, ConfigVar: "CLAUDE_CONFIG_DIR", ConfigDir: "~/.claude",
 		Env:       []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_MODEL"},
-		Hosts:     []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com"},
+		Hosts:     []string{"api.anthropic.com", "claude.ai", "platform.claude.com"},
 		GuestEnv:  []string{"IS_SANDBOX=1"},
 		Creds:     []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"},
 		LoginHint: "Claude Code's macOS Keychain login does not enter the VM; run `claude setup-token` on the host and export CLAUDE_CODE_OAUTH_TOKEN"},
@@ -199,11 +199,14 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if err != nil {
 		return 1, err
 	}
+	if m, ok, err := e.Exists(); err == nil && ok {
+		env = append(env, e.ServerEnv(m)...)
+	}
 	argv := append(append([]string{h.Bin}, h.Args...), args...)
 	if acp {
 		argv = append(append([]string{}, h.ACP...), args...)
 	}
-	return e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, TTY: o.TTY,
+	return e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, TTY: o.TTY, User: e.Cfg.User,
 		Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr}, argv...)
 }
 
@@ -215,7 +218,7 @@ func install(e *box.Env, name string, h Harness) error {
 	marker := "/var/lib/boxer/harness-" + name
 	// A dropped transport is not an absent marker: read as one, it reinstalled the harness over an
 	// install that was already there, which is npm in the guest for minutes.
-	out, code, err := e.VM.Output(e.Scope.Key, "", "sh", "-c", "test -f "+marker)
+	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "test -f "+marker)
 	if err != nil || transportError(out) {
 		return &box.Error{Reason: "could not read the harness marker: " + strings.TrimSpace(out), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate, then: boxer shell " + name}

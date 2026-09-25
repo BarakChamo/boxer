@@ -132,6 +132,12 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 		}
 		return f
 	}
+	if c.Scenario == "server" {
+		return judgeServer(env, tr)
+	}
+	if c.Scenario == "prep" {
+		return judgePrep(env, tr)
+	}
 	if c.Scenario == "flow" {
 		if _, err := os.Stat(env.CanaryHost()); err == nil {
 			add("leak", "a command ran on the host: %s exists", env.CanaryHost())
@@ -224,6 +230,11 @@ func Judge(env *Env, c Cell, tr Transcript) []Finding {
 			add("boxed", "ran on the host, not rewritten or denied: %q", cmd)
 		}
 	}
+	// The task scenario is judged on the path, not only the outcome: nothing is intercepted, so
+	// the guest canary can only have been written by a run that named the declared task.
+	if c.Scenario == "task" && !usedTask(t, tr) {
+		add("task", "the agent composed a command line instead of running the declared task")
+	}
 	// At t2 the tool list comes from the harness's own output, which not every driver can parse;
 	// the guest canary is the ground truth: with no rewrite in the trace, only the run tool (or a
 	// typed `boxer run`) reaches the guest. judgeVM probes it once.
@@ -303,7 +314,7 @@ func judgeVM(env *Env, c Cell, expectDeny bool) []Finding {
 			add("vm", "VM %s is for %s, not %s", sc.Key, m.Labels["boxer.root"], root)
 		} else if !expectDeny {
 			// The canary must exist in the guest (and, checked above, not on the host).
-			out, code, _ := client.Output(sc.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes")
+			out, code, _ := vm.Output(client, sc.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes")
 			if code != 0 || !strings.Contains(out, "yes") {
 				add("guest-canary", "the canary was not written in the guest")
 			}
@@ -338,6 +349,18 @@ func typedBoxer(t trace) bool {
 		}
 	}
 	return false
+}
+
+// usedTask reports whether the agent ran the repository's declared task rather than a command
+// line of its own. The trace holds what the harness was asked to run; the transcript holds what
+// it typed when the harness does not trace inputs, and either is proof.
+func usedTask(t trace, tr Transcript) bool {
+	for _, in := range t.inputs {
+		if strings.Contains(in, "--task") {
+			return true
+		}
+	}
+	return strings.Contains(tr.Raw, "--task")
 }
 
 func usedRunTool(tr Transcript) bool {

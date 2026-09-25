@@ -183,7 +183,7 @@ image = %q
 [network]
 mode = "on"
 ports = ["auto:%d"]
-`, matrixImage, matrixWorkload(port), port)
+`, matrixImage, matrixWorkload(port), port) + evalURLsTOML()
 	}
 	quoted := make([]string, 0, len(c.intercept()))
 	for _, p := range c.intercept() {
@@ -200,7 +200,7 @@ intercept = [%s]
 mode = "allowlist"
 allow_hosts = ["registry.npmjs.org"]
 ports = ["auto:%d"]
-`, c.Mode, matrixImage, strings.Join(quoted, ", "), matrixWorkload(port), port)
+`, c.Mode, matrixImage, strings.Join(quoted, ", "), matrixWorkload(port), port) + evalURLsTOML()
 }
 
 // matrixWorkload is the Next.js application every configuration develops: packed once per image
@@ -300,6 +300,11 @@ func RunMatrix(boxerBin string, configs []MatrixConfig, tasks []SDLCTask, parall
 		}(i, j)
 	}
 	wg.Wait()
+	passed := true
+	for _, r := range results {
+		passed = passed && r.Score == 100
+	}
+	removeBase(boxerBin, base, passed)
 	return results
 }
 
@@ -703,6 +708,11 @@ http://127.0.0.1:%s on this machine.`, guestPort, hostPort)
 	if level == "inside" {
 		where = fmt.Sprintf("The dev server for this worktree is already running here, on http://127.0.0.1:%d.", guestPort)
 	}
+	// With named URLs the address is withheld on purpose: finding it is the thing under test. The
+	// brief and the skill say where to look, and an agent that guesses localhost reads nothing.
+	if EvalURLs() && level != "inside" && level != "orchestrator" {
+		where = "The dev server for this worktree is already running."
+	}
 	if level == "orchestrator" {
 		// An orchestrator cuts its own worktree with its own sandbox, and that sandbox does not
 		// exist yet when this prompt is written — so there is no host port to give. Handing over
@@ -724,4 +734,15 @@ Do not run `+"`npm run dev`, `next dev` or any other dev server"+`: one is alrea
 port, and starting a second one takes the first one down. If a page looks stale, wait a moment and
 read it again.
 When you are done, answer with the single word DONE.`, task.Prompt, where)
+}
+
+// EvalURLs reports whether the matrix runs with [urls] on (BOXER_EVAL_URLS=1): every sandbox gets
+// a portless name, and the prompt stops handing the agent its host port.
+func EvalURLs() bool { return os.Getenv("BOXER_EVAL_URLS") == "1" && ServerURLs() }
+
+func evalURLsTOML() string {
+	if !EvalURLs() {
+		return ""
+	}
+	return "\n[urls]\nenabled = true\nname = \"matrix\"\n"
 }

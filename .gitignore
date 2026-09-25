@@ -13,3 +13,6 @@ site/node_modules/
 site/.next/
 site/.source/
 site/out/
+
+# Personal Claude Code settings; never shared.
+.claude/settings.local.json

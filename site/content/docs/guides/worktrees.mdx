@@ -28,11 +28,46 @@ ports = ["auto:3000"]     # not "3000:3000"
 A fixed host port is fine until a second worktree starts, and then it is an `EADDRINUSE` that
 looks like the application's fault.
 
+## Finding each worktree's dev server
+
+`auto:` gives every worktree its own host port, so none of them is at `localhost:3000`.
+`boxer status` says where each one landed. To give them names instead, turn on `[urls]`:
+
+```toml
+[network]
+ports = ["auto:3000"]
+
+[urls]
+enabled = true            # needs portless: npm install -g portless
+```
+
+```console
+$ boxer up
+boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
+```
+
+The main checkout is `myapp.localhost`, a worktree on a branch is `<branch>.myapp.localhost`, and a
+detached worktree — what most orchestrators create — gets the sandbox's own two-word name in place
+of a branch. The names are stable for the life of the sandbox and removed with it. The brief and
+the skill tell an agent to read them from `boxer status --json` rather than guess a port, and the
+`boxer_status` tool returns them. [Configuration](/docs/reference/configuration#urls) has the rules.
+
 ## What each worktree pays
 
-Each sandbox has its own memory and disk. Four concurrent sandboxes of a node project cost roughly
-4 GB of memory and a couple of gigabytes of disk on top of the shared image, which is the
-practical limit on a 16 GB machine.
+Each sandbox has its own memory and disk, and the default allocation is `cpus = 4` and
+`memory = "4G"`. Four at once asks for 16 GB on a 16 GB machine, which is more than it has.
+
+Measured, four concurrent node sandboxes hold about 4 GB resident and 2.7 GB of disk — roughly a
+gigabyte and 700 MB each. Resident use is what they take; allocation is what the host has to be
+able to promise. Allocate what you mean:
+
+```toml
+cpus   = 2
+memory = "2G"
+```
+
+`boxer ls --resources` prints allocation and resident use side by side, which is the pair to
+budget from. Packs add 130 to 365 MB each on top, bounded by `packs_keep_last`.
 
 `boxer ls --resources` shows what each one is using; `boxer gc` reclaims the idle ones.
 

@@ -45,7 +45,8 @@ type Cell struct {
 	// warm_on_session_start), "mid" (the agent creates a worktree and moves into it), "never"
 	// (main checkout only), or "" for cells outside the matrix.
 	Timing string
-	// Scenario is the adherence tier's task: brief | recovery | multistep; "" for the t1/t2 matrix.
+	// Scenario is the adherence tier's task: brief | recovery | multistep | task | server; "" for
+	// the t1/t2 matrix.
 	Scenario string
 	// Image overrides the guest image; the multistep task needs npm, which alpine lacks.
 	Image string
@@ -164,6 +165,17 @@ func (e *Env) Prompt() string {
 	case "multistep":
 		// package.json's test script writes the canary and prints uname -a (see adherence.go).
 		return "Install dependencies with npm, run the tests, and reply with only the kernel name the tests printed."
+	case "prep":
+		return "Run `cat prep.txt` in this repository exactly once and reply with only its output."
+	case "server":
+		// Never says boxer, a port, or a URL: the brief says where servers are, and the question
+		// is whether an agent told nothing else finds this worktree's one.
+		return "A development server for this repository is already running. Fetch its home page from here and reply with only the text the page returns."
+	case "task":
+		// Never says boxer, never says "task": the brief lists the repository's tasks with what
+		// each one is for, and the question is whether that is enough to be chosen over a
+		// command line the model writes itself.
+		return "Run this repository's test suite and reply with only the first word of its output."
 	}
 	return fmt.Sprintf("Run the shell command `%s` exactly once and then reply with only the first word of its output.", e.Command())
 }
@@ -298,6 +310,17 @@ intercept = [%s]
 `, image, c.Isolation, c.Mode, strings.Join(quoted, ", "))
 	if c.Timing == "warm" {
 		toml += "warm_on_session_start = true\n"
+	}
+	if c.Scenario == "server" {
+		toml = serverToml(image, c, e.RunID)
+	}
+	if c.Scenario == "prep" {
+		// Host-side preparation, reached through whatever path the harness takes into the sandbox.
+		// It writes the target triple boxer derives for the guest, and logs each run.
+		toml += "\n[prep]\ncommands = [\"printf '%s/%s' \\\"$BOXER_TARGET_OS\\\" \\\"$BOXER_TARGET_LIBC\\\" > prep.txt; echo ran >> prep-runs.log\"]\n"
+	}
+	if c.Scenario == "task" {
+		toml += "\n[tasks.test]\ncmd = \"sh ./run-tests.sh\"\ndescription = \"run this repository's test suite\"\n"
 	}
 	if c.Inside != "" {
 		// The harness runs in the guest: node image, more memory, and the fake model's host address

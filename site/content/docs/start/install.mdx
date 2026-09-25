@@ -9,6 +9,10 @@ and a git repository to work in.
 macOS on Apple Silicon and Linux on x86-64 or arm64 are supported. Windows is not: smolvm runs
 there, but boxer's worktree model depends on POSIX paths and mounts.
 
+boxer starts microVMs, so the host-side process needs `/dev/hypervisor` access. That also means
+boxer cannot run inside another sandbox that denies it — a harness's own seatbelt, for one. See
+[Enforcement](/docs/guides/enforcement#harnesses-that-sandbox-themselves).
+
 ## smolvm first
 
 ```sh

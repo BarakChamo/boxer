@@ -15,11 +15,16 @@ rather than usage.
 - [status.md](status.md) — what the last full evaluation run proved, with dates and skips
 - [orchestrators.md](orchestrators.md) — the research behind each orchestrator integration, including
   the Conductor checklist that has to be run by hand
+- [testing.md](testing.md) — the layers: fake hypervisor, scripted model, smoke, the tiers
+- [adding-a-harness.md](adding-a-harness.md) — the five tables a tenth harness is rows in
+- [adding-a-backend.md](adding-a-backend.md) — the contract a second backend has to satisfy,
+  written before the interface exists and grounded in smol cloud, which has no host mounts
+- [documentation-map.md](documentation-map.md) — what is documented where, and what is missing
 
 ## Plans and evaluations
 
 - [eval-plan.md](eval-plan.md) — the tiers, the oracle, and what each one is for
-- [plan-1.1.md](plan-1.1.md) — what 1.1 adds and why
+- [plan-production.md](plan-production.md) — what stands between here and a first production release
 - [evals/matrix/](evals/matrix) — every archived matrix run, newest first, with `runs.jsonl` for
   reading the series by machine
 

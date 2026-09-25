@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,6 +39,11 @@ func main() {
 	lockRun := flag.Bool("lock-run", false, "take the host smolvm lock, then run the command after -- (used by evals/smoke.sh)")
 	flag.Parse()
 	loadDotEnv()
+	if !*lockRun {
+		if n := eval.PruneScratch(time.Now()); n > 0 {
+			fmt.Fprintf(os.Stderr, "boxer-eval: removed %d eval scratch director(ies) older than three days\n", n)
+		}
+	}
 
 	if *lockRun {
 		unlock, err := eval.HostLock(os.Stderr)
@@ -78,6 +84,17 @@ func main() {
 
 	// The matrix tier runs the SDLC workload at every integration level, so it is the SDLC runner
 	// with the harness as a variable rather than a constant.
+	// The long tiers start live sandboxes several at a time; an interrupt must not leave them.
+	if *tier == "matrix" || *tier == "sdlc" {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sig
+			fmt.Fprintln(os.Stderr, "boxer-eval: interrupted; bringing down this run's sandboxes")
+			eval.AbortCleanup(boxerBin)
+			os.Exit(130)
+		}()
+	}
 	if *tier == "matrix" {
 		configs := eval.MatrixConfigs("t2")
 		if *harness != "" || *cell != "" {
@@ -92,6 +109,19 @@ func main() {
 		}
 		if *limit > 0 && *limit < len(configs) {
 			configs = configs[:*limit]
+		}
+		// --list must list. It used to fall through to the run itself: a matrix that was only asked
+		// what it would do scaffolded a base repository and started live sandboxes, and stopping it
+		// left them running with nothing to reap them.
+		if *list {
+			for _, c := range configs {
+				for _, t := range eval.MatrixTasks() {
+					if len(c.Tasks) == 0 || slices.Contains(c.Tasks, t.Name) {
+						fmt.Println(c.Name + "/" + t.Name)
+					}
+				}
+			}
+			return
 		}
 		started := time.Now()
 		rs := eval.RunMatrix(boxerBin, configs, eval.MatrixTasks(), *parallel, os.Stderr)
@@ -132,6 +162,12 @@ func main() {
 		}
 		if *limit > 0 && *limit < len(tasks) {
 			tasks = tasks[:*limit]
+		}
+		if *list {
+			for _, t := range tasks {
+				fmt.Println(t.Name)
+			}
+			return
 		}
 		rs := eval.RunSDLC(boxerBin, tasks, *parallel, os.Stderr)
 		report := eval.SDLCReport(rs, *parallel)

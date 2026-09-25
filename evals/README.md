@@ -1,6 +1,7 @@
 # evals
 
-- `smoke.sh`: boxer alone against real smolvm, no model (44 checks). Takes the host eval lock.
+- `smoke.sh`: boxer alone against real smolvm, no model. Prints `passed N, failed N`; the last
+  full run is recorded in [../docs/status.md](../docs/status.md). Takes the host eval lock.
 - `boxer-eval` (`cmd/boxer-eval`, `make build`): the harness and orchestrator matrix.
   `--tier t1` plays the model with fakellm; `--tier t2` uses real providers with credentials
   from `evals/.env` (gitignored, `KEY=value` lines). One key runs every harness live:

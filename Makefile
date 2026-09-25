@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  = -X main.Version=$(VERSION)
 
-.PHONY: build test cover lint fmt-check tidy smoke eval-t1 eval-t2 eval-adherence eval-flow eval-sdlc eval-matrix docs docs-dev package install-routes release-gate clean clean-evals help
+.PHONY: build test cover lint fmt-check tidy smoke bench bench-devserver bench-parallel eval-t1 eval-t2 eval-adherence eval-flow eval-sdlc eval-matrix docs docs-dev docs-export package install-routes release-gate clean clean-evals help
 
 help:             ## list the targets
 	@grep -hE '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -62,8 +62,21 @@ eval-matrix: build  ## the same Next.js workload across harnesses and integratio
 	set -a; for f in .env evals/.env; do [ -f "$$f" ] && . "./$$f"; done; set +a; \
 	bin/boxer-eval --tier matrix --parallel 3 --out docs/eval-matrix.md
 
-docs: ## build the documentation site into site/.next
+bench: build      ## performance against every other sandbox on this host; writes bench/RESULTS.md
+	bench/bench.sh
+	python3 bench/report.py bench/results.jsonl > bench/RESULTS.md
+
+bench-devserver: build  ## time to a Next.js dev server answering HTTP 200; four named scenarios, all conditions pinned
+	bench/devserver.sh
+
+bench-parallel: build  ## several sandboxes at once — the primary use case; time and host memory
+	bench/parallel.sh
+
+docs: ## build the documentation site; static export lands in site/out
 	cd site && npm install --no-audit --no-fund && npm run build
+
+docs-export:      ## static export exactly as GitHub Pages gets it, into site/out
+	cd site && npm ci --no-audit --no-fund && BOXER_BASE_PATH=/boxer npm run build
 
 docs-dev: ## serve the documentation site with hot reload
 	cd site && npm install --no-audit --no-fund && npm run dev
@@ -74,6 +87,9 @@ package: build    ## render the package and every client view into dist/, and re
 	# the release version is stamped into the release artifact, not into the checkout.
 	go run ./cmd/boxer package plugin --out dist/checked
 	rm -rf plugin && mv dist/checked/boxer plugin && rmdir dist/checked
+	# The published skill and its discovery index come from the same template, so they are
+	# regenerated here rather than edited: CI diffs all three trees.
+	go run ./cmd/boxer package skills
 
 install-routes:   ## install.sh and the npm package against a release staged on this machine
 	./scripts/install-routes.sh
@@ -94,5 +110,6 @@ clean:            ## remove build output and coverage
 
 clean-evals:      ## reclaim what the evaluation suite leaves on this host: scratch repos and its pack cache
 	@bin/boxer gc --all >/dev/null 2>&1 || true
-	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs
+	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs \
+	  "$${TMPDIR:-/tmp}"/boxer-sdlc-base-* "$${TMPDIR:-/tmp}"/bxm-*
 	@echo "reclaimed the eval scratch directories and pack cache"

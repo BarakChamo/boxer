@@ -72,13 +72,13 @@ func (b *Box) Down() error { return b.env.Down() }
 func (b *Box) Status() (Machine, bool, error) { return b.env.Exists() }
 
 // List returns every boxer-owned machine on the host.
-func List() ([]Machine, error) { return vm.New().Owned() }
+func List() ([]Machine, error) { return vm.Owned(vm.Host("")) }
 
 // Stop halts a machine by name; stopping a stopped machine is not an error.
-func Stop(name string) error { return vm.New().Stop(name) }
+func Stop(name string) error { return vm.Host("").Stop(name) }
 
 // Delete removes a machine by name.
-func Delete(name string) error { return vm.New().Delete(name) }
+func Delete(name string) error { return vm.Host("").Delete(name) }
 
 // LastUsed returns when the scope last ran a command, or the zero time when unknown.
 func LastUsed(name string) time.Time { return box.LastUsed(name) }

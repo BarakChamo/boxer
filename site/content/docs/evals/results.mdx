@@ -3,8 +3,12 @@ title: Support, measured
 description: Which harness works at which level, from the last full run.
 ---
 
-Everything here comes from the matrix tier. Nothing is listed as supported because the code exists
-— it is listed because a cell ran and scored.
+Everything here comes from the matrix tier. Nothing is listed as supported because the code
+exists; it is listed because a cell ran and scored.
+
+Last full run, 2026-09-21: **94.0% of weighted checks**, 47 of 55 cells at 100%, 2 skipped, $1.56,
+every cell on `zai/glm-5.3-flash` so that the integration level is the only variable. The full
+scorecard is `docs/eval-matrix-report.md`.
 
 ## By integration level
 
@@ -38,8 +42,10 @@ serve, so its cells skip rather than run.
 debugging port to drive, and its CLI drives cloud workspaces where boxer has nothing to sandbox.
 
 **fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
-and it resolves commands past a PATH shim — so outside the guest there is nothing for boxer to hold
-onto. Inside there is, and both of its cells score 100%.
+and it resolves commands past a PATH shim, so outside the guest there is nothing for boxer to hold
+onto. Inside there is: `add-a-page` scores 100%. `prove-and-install` scores 54% — the agent never
+recorded a platform and never installed the dependency, so nothing in that cell proves the work
+reached the guest. The mechanism is there; the model did not do the task.
 
 ## Reading a run
 

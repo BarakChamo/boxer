@@ -1,0 +1,6 @@
+{"contender":"smolvm","n":3,"cpus":2,"mem_g":4,"seconds":26.2,"ok":1}
+{"contender":"docker","n":3,"cpus":2,"mem_g":4,"seconds":21.7,"ok":1}
+{"contender":"podman","n":3,"cpus":2,"mem_g":4,"seconds":26.3,"ok":1}
+{"contender":"container","n":3,"cpus":2,"mem_g":4,"seconds":0.0,"ok":0}
+{"contender":"smolvm","n":3,"cpus":2,"mem_g":4,"seconds":25.8,"ok":1}
+{"contender":"docker","n":3,"cpus":2,"mem_g":4,"seconds":23.2,"ok":1}

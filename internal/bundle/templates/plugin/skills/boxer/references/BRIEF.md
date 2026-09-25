@@ -1,6 +1,7 @@
 # What the boxer sandbox is
 
-boxer runs commands in a [smolvm](https://smolmachines.com) microVM. One sandbox exists per scope
+boxer runs commands in a sandbox: a [smolvm](https://smolmachines.com) microVM by default, or
+Apple `container`, docker or podman when the repository chooses one — `boxer doctor` says which. One sandbox exists per scope
 — by default per git worktree, so two branches checked out side by side never share a build cache,
 a `node_modules`, or a port. The worktree is mounted into the guest read-write; everything else on
 the host is not there.
@@ -30,6 +31,16 @@ to the repository's `setup` list in `boxer.toml` rather than installing it on th
 
 `boxer status` reports whether the sandbox exists and is running; the first command creates it, so
 a cold start takes longer than the ones after it.
+
+## Servers and ports
+
+A port the sandbox forwards lands on a host port chosen per worktree, so two worktrees can both
+run a server on 3000. `boxer status --json` says where: `ports` maps each guest port to its host
+port, and `urls`, when the repository enables `[urls]`, maps it to a stable name served by
+[portless](https://github.com/vercel-labs/portless) — `https://<branch>.<repo>.localhost`, or the
+sandbox's own two-word name in place of the branch for a detached worktree. Prefer the URL; it
+does not change when the sandbox restarts. From inside the sandbox none of that applies: the server is at
+`127.0.0.1:<port>` there, and `$BOXER_URLS` / `$BOXER_PORTS` carry the host-side addresses.
 
 ## Reading a refusal
 

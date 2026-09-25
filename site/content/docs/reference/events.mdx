@@ -32,9 +32,25 @@ the hooks and the evaluation harness use, and it is the fastest way to see what 
 }
 ```
 
-`event` is one of `resolve`, `provision`, `run`, `rewrite`, `deny`, `setup`, `start`, `ready`,
-`gc`, `pack`. `outcome` is `ok`, `failed` or `skipped`. `payload` carries what that event needs and
+| `event` | |
+| --- | --- |
+| `resolve` | a scope was resolved from a directory and an identity |
+| `provision` | a sandbox was created or started |
+| `pack` | an environment pack was written or reused |
+| `run` | a command ran in the guest |
+| `rewrite` | a hook replaced a command with its sandboxed form |
+| `deny` | a command was refused |
+| `hook` | a hook was invoked |
+| `mcp` | an MCP tool was called |
+| `gc` | a sweep ran |
+| `error` | something failed outside the other names |
+
+`outcome` is `ok`, `error`, `denied` or `skipped`. `payload` carries what that event needs and
 nothing more.
+
+`duration_ms` is omitted when zero, as are `scope`, `harness`, `outcome` and `payload`. Treat a
+missing field as absent rather than as a default, and ignore a name you do not recognise: names
+are added, never repurposed.
 
 Command lines are omitted unless `record_commands = true`, because an event log that captures every
 command an agent runs is a different thing to store than one that captures what boxer did with

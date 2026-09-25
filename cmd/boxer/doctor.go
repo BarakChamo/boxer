@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/hook"
@@ -30,6 +31,7 @@ type doctorReport struct {
 	Inside       bool            `json:"inside"`
 	Smolvm       string          `json:"smolvm"`
 	SmolvmError  string          `json:"smolvm_error,omitempty"`
+	Backend      *vm.Caps        `json:"backend,omitempty"`
 	BoxerPath    string          `json:"boxer_path"`
 	Git          *doctorGit      `json:"git,omitempty"`
 	ConfigFiles  []string        `json:"config_files"`
@@ -44,6 +46,7 @@ type doctorReport struct {
 	Drift        []string        `json:"drift,omitempty"`
 	Signals      []hook.Signal   `json:"signals,omitempty"`
 	Storage      *box.Footprint  `json:"storage,omitempty"`
+	Denied       []string        `json:"denied_hosts,omitempty"`
 	Environment  *doctorEnv      `json:"environment,omitempty"`
 	Warnings     []string        `json:"warnings"`
 	Error        string          `json:"error,omitempty"`
@@ -52,7 +55,10 @@ type doctorReport struct {
 
 // scopeJSON is scope.Scope with the field names the JSON API promises.
 type scopeJSON struct {
-	Key       string `json:"key"`
+	Key string `json:"key"`
+	// Name is the key said out loud: "swift-crab" for sb-7e1852e4a3c3. Derived from the key, so
+	// nothing stores it and every boxer agrees.
+	Name      string `json:"name"`
 	Isolation string `json:"isolation"`
 	Worktree  string `json:"worktree"`
 	Degraded  bool   `json:"degraded"`
@@ -60,7 +66,7 @@ type scopeJSON struct {
 }
 
 func scopeRow(s scope.Scope) *scopeJSON {
-	return &scopeJSON{Key: s.Key, Isolation: s.Isolation, Worktree: s.Root, Degraded: s.Degraded, Reason: s.Reason}
+	return &scopeJSON{Key: s.Key, Name: s.Slug(), Isolation: s.Isolation, Worktree: s.Root, Degraded: s.Degraded, Reason: s.Reason}
 }
 
 // errorJSON is the agent-readable refusal (box.Error) as --json commands print it on stdout.
@@ -158,7 +164,7 @@ func loginShellDemotesShims(e *box.Env) string {
 
 func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	r := &doctorReport{Version: version(), Inside: vm.Inside(), ConfigFiles: []string{}, Settings: []doctorSetting{}, Warnings: []string{}}
-	client := vm.New()
+	var client vm.Backend = vm.New()
 	if e != nil {
 		client = e.VM
 	}
@@ -167,6 +173,8 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	} else {
 		r.Smolvm = v
 	}
+	caps := vm.CapsOf(client)
+	r.Backend = &caps
 	r.BoxerPath, _ = exec.LookPath("boxer")
 	if resolveErr != nil {
 		r.Error = resolveErr.Error()
@@ -213,6 +221,11 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	} else if ok {
 		row := machineRow(m)
 		r.Sandbox = &row
+		// A denied host is the most common reason a sandboxed build fails in a way the guest
+		// cannot explain. Reading it must never fail doctor: a diagnostic that dies takes the
+		// whole report with it.
+		// No since: doctor is asked what is wrong here, not what went wrong in one command.
+		r.Denied = box.DeniedHosts(client, e.Scope.Key, e.Cfg, time.Time{})
 	}
 	if e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both" {
 		sh := &doctorShims{OnPath: []string{}, Missing: []string{}}
@@ -242,7 +255,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	// What boxer costs this host, because "why is my disk full" is the question a sandbox tool
 	// has to be able to answer about itself.
-	owned, _ := client.Owned()
+	owned, _ := vm.Owned(client)
 	st := box.Usage(len(owned))
 	r.Storage = &st
 	if min := int64(e.Cfg.MinFreeGB * 1024 * 1024 * 1024); min > 0 && st.FreeBytes > 0 && st.FreeBytes < min {
@@ -259,10 +272,11 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		fmt.Fprintln(w, "inside:    this process is already in a boxer guest; hooks are silent and `boxer run` executes directly")
 	}
 	if r.SmolvmError != "" {
-		fmt.Fprintln(w, "smolvm:    MISSING —", r.SmolvmError)
+		fmt.Fprintln(w, "runtime:   MISSING —", r.SmolvmError)
 	} else {
-		fmt.Fprintln(w, "smolvm:   ", r.Smolvm)
+		fmt.Fprintln(w, "runtime:  ", r.Smolvm)
 	}
+	printCaps(w, r.Backend)
 	if r.BoxerPath == "" {
 		fmt.Fprintln(w, "boxer:     NOT on PATH — hooks and shims call `boxer` by name")
 	} else {
@@ -287,7 +301,7 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		fmt.Fprintln(w, r.Error)
 		return 1
 	}
-	fmt.Fprintf(w, "scope:     %s (%s) root %s\n", r.Scope.Key, r.Scope.Isolation, r.Scope.Worktree)
+	fmt.Fprintf(w, "scope:     %s (%s) — %s, root %s\n", r.Scope.Name, r.Scope.Key, r.Scope.Isolation, r.Scope.Worktree)
 	fmt.Fprintf(w, "image:     %s (%s)\n", r.Image, r.ImageReason)
 	if r.ImageWarning != "" {
 		fmt.Fprintln(w, "warning:  ", r.ImageWarning)
@@ -323,6 +337,10 @@ func printDoctor(r *doctorReport, w io.Writer) int {
 		}
 		fmt.Fprintf(w, "environment: %s — %s\n", env.Key, state)
 	}
+	if len(r.Denied) > 0 {
+		fmt.Fprintf(w, "denied:    %s — refused by the egress allowlist\n", strings.Join(r.Denied, ", "))
+		fmt.Fprintf(w, "           fix: add what the build needs to network.allow_hosts in boxer.toml\n")
+	}
 	if st := r.Storage; st != nil {
 		fmt.Fprintf(w, "storage:   %d sandbox(es), %d pack(s) %s cached, %s free (boxer gc --all reclaims the packs)\n",
 			st.Machines, st.PackCount, box.HumanBytes(st.PackBytes), box.HumanBytes(st.FreeBytes))
@@ -338,4 +356,43 @@ func yn(b bool) string {
 		return "yes"
 	}
 	return "-"
+}
+
+// printCaps says what this backend can do, at setup rather than three commands later.
+//
+// The boundary line is the one that earns its place. boxer's claim is that the agent cannot
+// escape, and "one kernel per sandbox" and "one kernel shared by all of them" are materially
+// different promises. Someone who picked a backend for its speed should be told which of the two
+// they bought, not left to infer it from the backend's name.
+func printCaps(w io.Writer, c *vm.Caps) {
+	if c == nil {
+		return
+	}
+	boundary := map[string]string{
+		"kernel":    "a kernel per sandbox",
+		"namespace": "one shared kernel",
+	}[c.Boundary]
+	if boundary == "" {
+		boundary = c.Boundary
+	}
+	fmt.Fprintf(w, "backend:   %s — %s\n", c.Backend, boundary)
+	for _, row := range []struct {
+		name string
+		on   bool
+		off  string
+	}{
+		{"worktree mount", c.HostMounts, "the guest gets a copy, not the same files"},
+		{"egress allowlist", c.Allowlist, "network.mode = \"allowlist\" is refused; use \"off\" or \"on\""},
+		{"secrets by name", c.SecretEnv, "secret values reach the backend's argument vector"},
+		{"environment cache", c.Packs, "image_setup runs again for every worktree"},
+		{"fork", c.Branch, "needs a backend that can branch a running machine"},
+		{"egress log", c.Egress, "denials are not recorded, so a short allowlist is silent"},
+		{"disk usage", c.DiskUsage, "sizes report as unmeasured"},
+	} {
+		if row.on {
+			fmt.Fprintf(w, "  %-18s yes\n", row.name)
+		} else {
+			fmt.Fprintf(w, "  %-18s no    — %s\n", row.name, row.off)
+		}
+	}
 }

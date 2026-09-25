@@ -188,7 +188,7 @@ func TestUnknownTablesWarnAndUnknownKeysFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Tasks["test"] != "make test" {
+	if cfg.Tasks["test"].Cmd != "make test" {
 		t.Fatalf("tasks: %v", cfg.Tasks)
 	}
 	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "[fromafuturerelease]") {
@@ -234,5 +234,59 @@ func TestTelemetryTable(t *testing.T) {
 	cfg, err = LoadFiles(p)
 	if err != nil || cfg.Telemetry.Sink != "stderr" || cfg.Sources["telemetry_sink"] != "BOXER_TELEMETRY_SINK" {
 		t.Fatalf("environment override: %+v %v", cfg.Telemetry, cfg.Sources)
+	}
+}
+
+// A task was a command string before it was a table, and a repository that wrote the string form
+// must keep working. The table form is how a task says what it is for, where its JUnit XML lands,
+// and how long it may take.
+func TestTasksAcceptBothSpellings(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "boxer.toml")
+	body := `
+[tasks]
+test = "go test ./..."
+
+[tasks.e2e]
+cmd         = "npm run e2e"
+description = "the browser suite"
+junit       = ["reports/junit.xml"]
+timeout     = "10m"
+`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFiles(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tasks["test"].Cmd != "go test ./..." || cfg.Tasks["test"].Description != "" {
+		t.Fatalf("string form: %+v", cfg.Tasks["test"])
+	}
+	e2e := cfg.Tasks["e2e"]
+	if e2e.Cmd != "npm run e2e" || e2e.Description != "the browser suite" || e2e.Timeout != "10m" {
+		t.Fatalf("table form: %+v", e2e)
+	}
+	if len(e2e.JUnit) != 1 || e2e.JUnit[0] != "reports/junit.xml" {
+		t.Fatalf("junit: %v", e2e.JUnit)
+	}
+}
+
+// A type that decodes its own subtree is invisible to Undecoded(), so the strictness promise has
+// to be kept by hand here or it quietly stops at the [tasks] boundary.
+func TestTaskTableRejectsUnknownKeyAndBadTimeout(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "boxer.toml")
+	if err := os.WriteFile(p, []byte("[tasks.test]\ncmd = \"x\"\ndescriptoin = \"typo\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("a misspelled task key must fail: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("[tasks.test]\ncmd = \"x\"\ntimeout = \"soon\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("an unparseable timeout must fail: %v", err)
 	}
 }

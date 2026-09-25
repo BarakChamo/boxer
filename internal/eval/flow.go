@@ -262,7 +262,12 @@ func (d Flow) runAgent(env *Env, c Cell) (Transcript, error) {
 	prompt := "Use the next-devtools MCP server to list this app's routes. Answer with the routes only."
 	cmd := exec.Command("claude", "-p", prompt, "--permission-mode", "bypassPermissions",
 		"--mcp-config", path, "--strict-mcp-config",
-		"--output-format", "stream-json", "--verbose", "--max-turns", "8")
+		// Twelve turns, not eight. The cell asks whether the agent reaches the dev server's tools
+		// through boxer, and a warm sandbox already has the server running — so the session spends
+		// its first turns discovering that `npm run dev` refuses because one is up, then calls the
+		// tools correctly, and used to run out of turns holding the right answer. A cap that fails
+		// a session which already made the call is measuring the budget, not the integration.
+		"--output-format", "stream-json", "--verbose", "--max-turns", "12")
 	cmd.Dir = env.Repo
 	cmd.Env = append(live.BaseEnv(), claude.modelEnv(&live)...)
 	var out bytes.Buffer

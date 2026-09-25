@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BarakChamo/boxer/internal/config"
 )
 
 type fakeDriver struct{ cells map[string][]Cell }
@@ -20,8 +22,22 @@ func TestAdherenceCells(t *testing.T) {
 	// Kimi-shaped: tool only, t1 and t2 alike.
 	kimi := fakeDriver{map[string][]Cell{"t2": {{Harness: "kimi", Mode: "tool", Entry: "user", Isolation: "worktree", Compliant: true, Intercept: []string{"uname"}}}}}
 	cells := AdherenceCells(kimi)
-	if len(cells) != 3 || cells[2].Mode != "tool" || cells[2].Intercept != nil || cells[2].Image != multistepImage {
+	if len(cells) != 6 || cells[2].Mode != "tool" || cells[2].Intercept != nil || cells[2].Image != multistepImage {
 		t.Fatalf("kimi cells: %+v", cells)
+	}
+	// The server cell rides the compliant tool cell, with a node image to serve from.
+	if cells[4].Scenario != "prep" || len(cells[4].Intercept) != 1 || cells[4].Intercept[0] != "*" {
+		t.Fatalf("prep cell: %+v", cells[4])
+	}
+	if cells[5].Scenario != "server" || cells[5].Mode != "tool" || cells[5].Image != multistepImage {
+		t.Fatalf("server cell: %+v", cells[5])
+	}
+	// The task cell intercepts everything on purpose, so a composed command line lands in the
+	// guest exactly as the declared task would and the cell measures only which was chosen. A
+	// narrower list lets a composed command escape to the host, where the tier's other oracles
+	// report it as a sandbox escape — a false alarm on the one signal that must never be one.
+	if cells[3].Scenario != "task" || len(cells[3].Intercept) != 1 || cells[3].Intercept[0] != "*" || cells[3].Shims {
+		t.Fatalf("task cell: %+v", cells[3])
 	}
 	if cells[0].Name() != "kimi/tool/user/worktree/brief" || cells[1].Scenario != "recovery" || cells[2].Tier != "t2" {
 		t.Fatalf("names: %s %s", cells[0].Name(), cells[1].Name())
@@ -32,7 +48,7 @@ func TestAdherenceCells(t *testing.T) {
 		"t1": {{Harness: "codex", Mode: "tool", Entry: "user", Isolation: "worktree", Compliant: false}, {Harness: "codex", Mode: "tool", Entry: "user", Isolation: "worktree", Compliant: true}},
 	}}
 	cells = AdherenceCells(codex)
-	if len(cells) != 3 || cells[0].Entry != "user" || !cells[0].Compliant || cells[2].Mode != "rewrite" || cells[2].Entry != "project" {
+	if len(cells) != 6 || cells[0].Entry != "user" || !cells[0].Compliant || cells[2].Mode != "rewrite" || cells[2].Entry != "project" {
 		t.Fatalf("codex cells: %+v", cells)
 	}
 	if AdherenceCells(fakeDriver{map[string][]Cell{"t2": {{Mode: "rewrite", Compliant: true}}}}) != nil {
@@ -134,5 +150,84 @@ func TestGrokBriefStillFailsInAdherence(t *testing.T) {
 	}
 	if deny("") {
 		t.Error("the mechanical matrix budgets grok's one denial")
+	}
+}
+
+// The server scenario's oracle: the page's text proves the agent reached this worktree's server,
+// and with named URLs on, the Host it was reached by must be the name.
+func TestJudgeServer(t *testing.T) {
+	env := &Env{RunID: "4242"}
+	if f := judgeServer(env, Transcript{Answer: "nothing useful"}); len(f) != 1 || f[0].Check != "answer" {
+		t.Fatalf("no page text: %+v", f)
+	}
+	// A live model phrases it; the text is found in the transcript.
+	named := judgeServer(env, Transcript{Answer: "The page says so", Raw: `"text":"4242@adherence.localhost:1355"`})
+	port := judgeServer(env, Transcript{Answer: "4242@127.0.0.1:61234"})
+	if ServerURLs() {
+		if len(named) != 0 || len(port) != 1 || port[0].Check != "url" {
+			t.Fatalf("with portless: named %+v, port %+v", named, port)
+		}
+	} else if len(named) != 0 || len(port) != 0 {
+		t.Fatalf("without portless either address is right: named %+v, port %+v", named, port)
+	}
+}
+
+// The server fixture is a boxer.toml written by string formatting, with a JavaScript one-liner
+// quoted inside TOML inside Go. It once shipped a `ready` probe the image could not run, and every
+// cell failed in prepare — measuring the fixture, not a harness. Parse what it writes, and check
+// the probe uses a program the image has.
+func TestServerFixtureIsValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	body := serverToml(multistepImage, Cell{Isolation: "worktree", Mode: "tool"}, "4242")
+	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFiles(filepath.Join(dir, "boxer.toml"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, body)
+	}
+	if len(cfg.Start) != 1 || !strings.Contains(cfg.Start[0], "4242@") || !strings.Contains(cfg.Ready, "node -e") {
+		t.Fatalf("start %q ready %q", cfg.Start, cfg.Ready)
+	}
+	if len(cfg.Network.Ports) != 1 || cfg.Network.Ports[0] != "auto:3000" {
+		t.Fatalf("ports %v", cfg.Network.Ports)
+	}
+}
+
+// The matrix's URLs mode must still write a valid configuration, and must actually withhold the
+// port: a prompt that hands it over tests nothing about finding it.
+func TestMatrixURLsMode(t *testing.T) {
+	if !ServerURLs() {
+		t.Skip("portless not installed")
+	}
+	t.Setenv("BOXER_EVAL_URLS", "1")
+	for _, c := range []Cell{{Mode: "rewrite", Isolation: "worktree"}, {Inside: "claude", Mode: "inside"}} {
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(matrixTOML(c, 3000)), 0o644)
+		cfg, err := config.LoadFiles(filepath.Join(dir, "boxer.toml"))
+		if err != nil || !cfg.URLs.Enabled {
+			t.Fatalf("%+v: %v enabled=%v", c, err, cfg.URLs.Enabled)
+		}
+	}
+	if p := matrixPrompt(SDLCTask{Prompt: "x"}, "61234", "hook"); strings.Contains(p, "61234") {
+		t.Fatalf("the host port leaked into the prompt:\n%s", p)
+	}
+}
+
+// The prep fixture, like the server one, is TOML built by string formatting: parse it.
+func TestPrepFixtureIsValidConfig(t *testing.T) {
+	env := &Env{Repo: filepath.Join(t.TempDir(), "repo")}
+	if err := env.mkrepo(Cell{Isolation: "worktree", Mode: "rewrite", Intercept: []string{"*"}, Scenario: "prep"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFiles(filepath.Join(env.Repo, "boxer.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Prep.Commands) != 1 || !strings.Contains(cfg.Prep.Commands[0], `"$BOXER_TARGET_OS"`) {
+		t.Fatalf("prep: %q", cfg.Prep.Commands)
+	}
+	if f := judgePrep(env, Transcript{Answer: "linux/musl"}); len(f) != 1 || f[0].Check != "prep" {
+		t.Fatalf("no prep-runs.log must be reported as prep not running: %+v", f)
 	}
 }

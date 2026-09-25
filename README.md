@@ -2,7 +2,7 @@
 
 Coding agents run shell commands. boxer makes those commands run in a
 [smolvm](https://smolmachines.com) microVM instead of on your machine — one VM per git worktree,
-started automatically, with your worktree mounted at the same path it has on the host.
+started automatically, with your worktree mounted in the guest at `/workspace`.
 
 The agent does not have to know. It types `npm test`, the command runs in the sandbox, the output
 comes back looking exactly as it would have. Nothing on your machine is at risk, and nothing about
@@ -48,17 +48,23 @@ strongest without being asked.
    dialect. It provisions the VM at session start and rewrites intercepted commands on every tool
    call, so the agent never sees a refusal. Where a harness can only allow or deny, it denies with
    an error naming `boxer_run`, and the agent uses the tool.
-3. **The plugin package.** `boxer package plugin` renders one
-   [Agent Plugins 1.0.0](https://agent-plugins.org) package valid for every client at once, with
-   the native manifests today's loaders read, so it installs everywhere now.
-4. **Shell substitution — no integration at all.** `boxer shim install --shell` writes a shell
-   binary that is really the sandbox. Point a harness's `shell_path` at it and its entire
-   interactive shell runs in the guest — pipelines, compound lines and all. Nothing is recognised
-   or rewritten, so nothing is missed.
+3. **The OpenCode plugin.** OpenCode loads a TypeScript plugin rather than exposing a hook API.
+   The plugin does the same job in-process, and enforces the same way.
+4. **PATH shims — no harness cooperation at all.** `boxer shim install` writes one file per entry
+   in `intercept`, each of which re-runs itself in the guest. `boxer shim install --shell` writes
+   `boxer-bash` instead, a shell that is really the sandbox: point a harness's shell setting at it
+   and its whole interactive shell runs in the guest, pipelines and compound lines included.
+   Nothing is recognised or rewritten, so nothing is missed. Shims hold where `PATH` does, which
+   a login shell can undo.
 5. **Inside mode.** `boxer shell claude`, `boxer acp gemini`: the harness itself runs in the VM.
    There is nothing to hook, because the agent is not on your machine.
 
-Each one is explained, with the commands, in [site/content/docs/start/harnesses.mdx](site/content/docs/start/harnesses.mdx).
+Each one is explained, with the commands, in [site/content/docs/start/harnesses.mdx](site/content/docs/start/harnesses.mdx)
+and [site/content/docs/guides/enforcement.mdx](site/content/docs/guides/enforcement.mdx).
+
+`boxer package plugin` is a separate thing, and not a level: it renders one
+[Agent Plugins 1.0.0](https://agent-plugins.org) package valid for every client at once, with the
+native manifests today's loaders read, so the levels above install everywhere now.
 
 ## Where each harness is verified
 
@@ -82,26 +88,63 @@ every skip reason: [docs/status.md](docs/status.md).
 Orchestrators — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica — have their own verified
 paths in [docs/orchestrators.md](docs/orchestrators.md).
 
+## When a run fails
+
+```sh
+boxer run --junit junit.xml -- npm test   # which tests failed, not a log to scrape
+boxer capsule new                         # the failure as a committable capsule.toml
+boxer capsule replay capsule.toml         # does it still fail? exit 0 means yes
+```
+
+The worktree is mounted, not copied, so boxer reads the report the guest just wrote without
+fetching anything. A capsule records what ran, against which commit, under which configuration,
+and what outcome counts as reproducing it — enough for someone else to run, and small enough to
+attach to an issue.
+
+## Keeping and forking a sandbox
+
+```sh
+boxer pack save base       # keep this prepared guest; gc never touches a named pack
+boxer fork --prepare       # make this sandbox a branch source
+boxer fork --count 4       # four copy-on-write children, warm, no boot
+```
+
+A fork starts from the parent's memory and disks rather than booting, which is what makes four
+warm workers cheap. They share this worktree: smolvm cannot branch a staged mount, so a fork is
+for work that shards cleanly rather than for isolated copies — a second git worktree is still
+how you get one of those.
+
 ## Watching what is running
 
 ```sh
-boxer ls --resources     # every sandbox: who it belongs to, what it costs in memory and disk
+boxer ls -A              # every sandbox on every backend: branch, clean/dirty/gone, where it serves
+boxer ls --resources     # the same with memory and disk; --pr adds each worktree's pull request
+boxer rm --gone          # remove sandboxes whose worktree was deleted; rm -i to choose
+boxer backends --probe   # which runtimes are installed, answering, and actually able to run a sandbox
+boxer integrations       # which harnesses and orchestrators are here, and whether boxer is wired in
+boxer url                # where this worktree's dev server is
 boxer watch              # a live stream: created, running, stopped, gone, and events as they happen
-boxer doctor             # this worktree: what is resolved, what is cached, what is free
+boxer doctor             # this worktree: what is resolved, what is cached, what is free, what egress was denied
 boxer gc --all           # reclaim every stopped sandbox and unreferenced pack
 ```
 
-A sandbox is about half a gigabyte, so boxer reclaims after itself: any command that provisions one
-starts a background sweep, at most every six hours, and refuses to cache an image when free space
-is under five gigabytes. `boxer watch --json` is one JSON document per line, which is what a
+A sandbox costs about 700 MB of disk and around a gigabyte resident, against a default allocation
+of 4 GB, so boxer reclaims after itself: any command that provisions one starts a background
+sweep, at most every six hours, and refuses to cache an image when free space is under five
+gigabytes. `boxer watch --json` is one JSON document per line, which is what a
 dashboard would read.
+
+Output is for whoever is reading it: colour, tables and a question before anything destructive at
+a terminal; plain text and never a prompt for an agent or a pipe. `--json`, or `BOXER_OUTPUT=json`,
+on anything with a JSON form.
 
 ## Configuration, briefly
 
 `boxer.toml` in the worktree, the repository, then `~/.config/boxer/`; earlier wins. A misspelled
 key is an error, because silently ignoring one silently changes what is enforced; an unknown
 top-level table is only a warning, so a repository that adopts a newer boxer's feature still loads
-in an older one. Every scalar is also `BOXER_<KEY>` in the environment.
+in an older one. Fifteen scalar settings are also readable as `BOXER_<KEY>`, for harnesses that
+offer no other way to configure a subprocess; the lists are repository policy and are not.
 
 A `.devcontainer/devcontainer.json`, if the repository already has one, supplies the image,
 lifecycle commands, ports, environment and bind mounts; `boxer.toml` overrides it and `boxer doctor`
@@ -110,10 +153,10 @@ says which file each value came from.
 ```toml
 isolation   = "worktree"   # one VM per worktree; repo is wider, session and subagent narrower
 mode        = "rewrite"    # rewrite | tool | off
-intercept   = ["npm", "bun", "node", "python", "go", "make"]
-passthrough = ["git", "gh", "ssh", "boxer"]
+intercept   = ["npm", "bun", "node", "python", "go", "make"]   # abridged; the real default is longer
+passthrough = ["git", "gh", "ssh", "boxer", "smolvm"]
 image       = ""                # default: detected from the lockfile, else debian:bookworm-slim
-setup       = ["bun install"]   # once per VM, inside the guest
+setup       = ["bun install"]   # once per worktree; image_setup is the per-image half
 
 [tasks]                         # named commands the agent runs by name, not by composing a shell line
 test  = "bun test"
@@ -153,10 +196,18 @@ each one changes, are in [site/content/docs/reference/configuration.mdx](site/co
 ## Documentation
 
 **Using boxer:** [install](site/content/docs/start/install.mdx) · [configure](site/content/docs/reference/configuration.mdx) ·
-[integrate](site/content/docs/start/harnesses.mdx) · [troubleshoot](site/content/docs/guides/troubleshooting.mdx) · [API](site/content/docs/reference/json.mdx)
+[integrate](site/content/docs/start/harnesses.mdx) · [tasks](site/content/docs/guides/tasks.mdx) ·
+[run the harness inside](site/content/docs/guides/inside.mdx) ·
+[security model](site/content/docs/concepts/security.mdx) ·
+[troubleshoot](site/content/docs/guides/troubleshooting.mdx)
 
-**Working on boxer:** [architecture](docs/architecture.md) ·
-[evaluation plan](docs/eval-plan.md) · [requirements](docs/requirements.md) ·
+**Building on boxer:** [the three interfaces](site/content/docs/guides/building-on-boxer.mdx) ·
+[JSON output](site/content/docs/reference/json.mdx) · [MCP](site/content/docs/reference/mcp.mdx) ·
+[Go package](site/content/docs/reference/go.mdx)
+
+**Working on boxer:** [architecture](docs/architecture.md) · [testing](docs/testing.md) ·
+[adding a harness](docs/adding-a-harness.md) · [evaluation plan](docs/eval-plan.md) ·
+[requirements](docs/requirements.md) ·
 [releasing and the stability contract](docs/release.md) · [CONTRIBUTING](CONTRIBUTING.md)
 
 ## Verification
@@ -173,7 +224,7 @@ make eval-t2       # the same cells against live models, a few cents
 Last full run on Apple Silicon with smolvm 1.16.1 (2026-09-18): smoke 53/53; T1 67 pass, 0 fail,
 1 skip, run twice with identical per-cell verdicts; T2 live 42 pass, 0 fail, 14 skips for $0.19; adherence 80 of 96 live cells across four
 models, with one harness verdict (Grok, a known finding) and no command reaching the host. One cell, Codex over ACP inside the guest,
-failed once in seven runs and passed on every repeat; it is named in
+failed once in nine runs and passed on every repeat; it is named in
 [docs/status.md](docs/status.md) along with every skip reason.
 
 ## Licence

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/BarakChamo/boxer/internal/vm"
@@ -30,12 +31,25 @@ case "$1" in --version) verb="--version";; esac
 faildir="$FAKE_STATE.fail"
 fail="$faildir/$(echo "$verb" | tr ' /-' '___')"
 if [ -f "$fail" ]; then echo "Error: $(cat "$fail")" >&2; exit 1; fi
+# A verb that fails a fixed number of times and then succeeds, for the retry paths. smolvm keeps
+# its machine records in SQLite, so concurrent creates lose a race with "database is locked"; a
+# fake that can only fail forever cannot tell a caller that retries from one that gives up.
+lockf="$faildir/lock_$(echo "$verb" | tr ' /-' '___')"
+if [ -f "$lockf" ]; then
+  n=$(cat "$lockf")
+  if [ "$n" -gt 0 ]; then
+    echo $((n-1)) > "$lockf"
+    echo "Error: database operation failed: reserve vm '$3': database is locked" >&2
+    exit 1
+  fi
+fi
 
 machine_json() {
   n=$(basename "$1"); s=$(sed -n 1p "$1"); img=$(sed -n 3p "$1"); labels=$(sed -n 5p "$1")
   # Labels are whatever was passed at create time, as smolvm does it: a fake that models a fixed
   # set silently drops every label added later, and the test that checks for one proves nothing.
-  [ -n "$labels" ] || labels='"boxer.scope":"'"$n"'"'
+  # No default label: a machine created without one has none, and boxer must not treat a machine
+  # it did not create as its own. Synthesising a label here would hide exactly that bug.
   printf '{"name":"%s","state":"%s","image":"%s","labels":{%s},"created_at":1,"pid":%s,"cpus":2,"memory_mib":1024}' \
     "$n" "$s" "$img" "$labels" "$$"
 }
@@ -45,6 +59,10 @@ case "$verb" in
     sep=""; printf '['
     for f in "$dir"/*; do
       [ -f "$f" ] || continue
+      # Sidecars (.setup, .started, .harness-*, .branchable) record guest state for a machine that
+      # is already listed. A machine name never contains a dot, so this is what tells them apart:
+      # without the guard, ls and gc would see machines that do not exist.
+      case "${f##*/}" in *.*) continue;; esac
       printf '%s' "$sep"; machine_json "$f"; sep=","
     done
     printf ']\n' ;;
@@ -105,19 +123,79 @@ case "$verb" in
   "machine start"|"machine stop")
     state=running; [ "$2" = stop ] && state=stopped
     # A stop empties the guest's tmpfs, so the services have to be started again.
-    name=""; shift 2
-    while [ $# -gt 0 ]; do case "$1" in -n|--name) name="$2"; shift;; esac; shift; done
+    name=""; branchable=""; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in -n|--name) name="$2"; shift;; --branchable) branchable=1;; esac; shift
+    done
     [ -f "$dir/$name" ] || { echo "Error: machine not found" >&2; exit 1; }
-    [ "$state" = stopped ] && rm -f "$dir/$name.started"
+    # Branchability is a property of the current boot: a stop takes it away, exactly as the memfd
+    # and the control socket go away with the process.
+    [ "$state" = stopped ] && rm -f "$dir/$name.started" "$dir/$name.branchable"
+    [ -n "$branchable" ] && touch "$dir/$name.branchable"
     sed "1s/.*/$state/" "$dir/$name" > "$dir/$name.tmp" && mv "$dir/$name.tmp" "$dir/$name" ;;
   "machine delete")
     name=""; shift 2
     while [ $# -gt 0 ]; do case "$1" in -n|--name) name="$2"; shift;; esac; shift; done
-    rm -f "$dir/$name" "$dir/$name.setup" ;;
-  "machine exec")
-    name=""; shift 2
+    # --cascade takes the children branched from it, as the real one does.
+    rm -f "$dir/$name" "$dir/$name".* ;;
+  "machine branch")
+    shift 2; from=""; child=""; batch=""
     while [ $# -gt 0 ]; do
-      case "$1" in --) shift; break;; --name) name="$2"; shift;; -w|-e) shift;; esac; shift
+      case "$1" in
+        --from) from="$2"; shift;;
+        -n|--name) child="$2"; shift;;
+        # A prefix or a count makes it a batch branch, which the real smolvm answers only after
+        # the source workload runs smolvm-branch-ready. boxer never asks for one; the fake
+        # refuses it so that a change which starts asking fails here rather than hanging for ten
+        # minutes against a real VM.
+        --name-prefix|--count) batch=1; shift;;
+        -e|--secret-env|-p|--ready-timeout) shift;;
+      esac; shift
+    done
+    [ -f "$dir/$from" ] || { echo "Error: machine not found" >&2; exit 1; }
+    [ -f "$dir/$from.branchable" ] || { echo "Error: machine is not branchable" >&2; exit 1; }
+    [ -n "$batch" ] && { echo "Error: wait for forkpoint: the workload did not reach a branchpoint" >&2; exit 1; }
+    [ -n "$child" ] || { echo "Error: no child name" >&2; exit 1; }
+    # A branch copies the source's disk and RAM, so the child starts running with the guest state
+    # the parent had: the markers travel or the child would repeat setup.
+    sed "1s/.*/running/" "$dir/$from" > "$dir/$child"
+    for m in "$dir/$from".setup "$dir/$from".harness-* "$dir/$from".started; do
+      [ -f "$m" ] || continue
+      cp "$m" "$dir/$child.$(basename "$m" | sed "s/^$from\.//")"
+    done
+    echo "$child" ;;
+  "machine sync")
+    name=""; shift 2
+    while [ $# -gt 0 ]; do case "$1" in -n|--name) name="$2"; shift;; esac; shift; done
+    [ -f "$dir/$name" ] || { echo "Error: machine not found" >&2; exit 1; }
+    touch "$dir/$name.synced" ;;
+  "machine update")
+    name=""; shift 2
+    add=""; while [ $# -gt 0 ]; do
+      case "$1" in -n|--name) name="$2"; shift;; -v) add="$2"; shift;; --remove-volume) shift;; esac; shift
+    done
+    [ -f "$dir/$name" ] || { echo "Error: machine not found" >&2; exit 1; }
+    # The real one refuses on a running machine, and boxer has to stop first because of it.
+    [ "$(sed -n 1p "$dir/$name")" = running ] && { echo "Error: machine is running" >&2; exit 1; }
+    [ -n "$add" ] && echo "$add" > "$dir/$name.volume"
+    : ;;
+  "machine exec")
+    name=""; secrets=""; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --) shift; break;;
+        --name) name="$2"; shift;;
+        # A secret is passed by name, never by value: the test that matters reads $FAKE_LOG and
+        # asserts the value is absent from it, so the fake has to resolve the name the way smolvm
+        # does rather than merely tolerate the flag.
+        --secret-env) secrets="$secrets $2"; shift;;
+        -w|-e|--timeout|--secret-file|-u) shift;;
+      esac
+      shift
+    done
+    for s in $secrets; do
+      g=${s%%=*}; h=${s#*=}
+      eval "v=\$$h"; eval "export $g=\"\$v\""
     done
     if [ -f "$FAKE_STATE.flaky" ]; then
       # Drop the transport once for the first exec whose argv contains the marker's text.
@@ -139,7 +217,14 @@ case "$verb" in
           h=${*##*harness-}; touch "$dir/$name.harness-${h%% *}"; exit 0;;
       esac
     fi
+    # The mount-readiness probe. The fake ignores -w and runs in boxer's own directory, so it
+    # answers for the guest instead: its mount is always the live worktree.
+    case "$*" in *"boxer-mount-probe"*) exit 0;; esac
     exec "$@" ;;
+  "machine egress-events")
+    # Egress denials are the only record of why an allowlisted guest could not reach a host: the
+    # guest itself sees a DNS or connect error and nothing names the cause.
+    if [ -f "$FAKE_STATE.egress" ]; then cat "$FAKE_STATE.egress"; else echo "[]"; fi ;;
   "machine data-dir")
     # Real smolvm prints where a machine's disks live; the fake points at its own state, which is
     # small but real, so a resource measurement has something honest to walk.
@@ -163,6 +248,22 @@ func FailExecOnce(t *testing.T, text string) {
 // FailVerb makes every later invocation of one smolvm verb ("machine stop", "pack create",
 // "--version") fail with message, until StopFailing. Error paths are most of what a VM layer has
 // to get right and none of them are reachable from a fake that always succeeds.
+// LockVerb makes the next n calls to verb fail the way smolvm's store does under concurrent use,
+// after which the verb succeeds. Nothing may treat that error as a statement about the request:
+// boxer once read it as a corrupt environment pack and deleted the pack.
+func LockVerb(t *testing.T, verb string, n int) {
+	t.Helper()
+	dir := os.Getenv("FAKE_STATE") + ".fail"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "lock_"+verbFile(verb))
+	if err := os.WriteFile(p, []byte(strconv.Itoa(n)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(p) })
+}
+
 func FailVerb(t *testing.T, verb, message string) {
 	t.Helper()
 	dir := os.Getenv("FAKE_STATE") + ".fail"
@@ -260,4 +361,13 @@ func RepoIn(t *testing.T, toml string) string {
 	dir := Repo(t, toml)
 	t.Chdir(dir)
 	return dir
+}
+
+// SetEgress makes the fake report these egress events, as smolvm's `machine egress-events --json`
+// would. The argument is the JSON array verbatim.
+func SetEgress(t *testing.T, jsonArray string) {
+	t.Helper()
+	if err := os.WriteFile(os.Getenv("FAKE_STATE")+".egress", []byte(jsonArray), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -1,0 +1,107 @@
+---
+title: Running the harness inside
+description: When the agent itself belongs in the VM, and what it costs to put it there.
+---
+
+Every other integration level leaves the harness on the host and intercepts what it runs. Inside
+mode moves the harness itself into the guest. There is no host process left to intercept, so
+nothing can be missed — not a command composed in an unusual way, not a login shell that rebuilt
+`PATH`, not a program that was never on `intercept`.
+
+```sh
+boxer shell claude          # a terminal harness, in the VM
+boxer acp gemini            # the harness's ACP server, stdio piped to an editor
+```
+
+Supported: `claude`, `codex`, `fx`, `gemini`, `kimi`, `opencode`, `pi`, `grok`, `copilot`. `pi` has
+no ACP server, so it is `shell` only.
+
+## When it is the right answer
+
+- **The threat model is a hostile agent, not a careless one.** Outside mode leaves `git`, `gh` and
+  `ssh` on the host by design, and a command boxer does not recognise runs there too. Inside mode
+  has no host shell to reach.
+- **The harness cannot be integrated.** fx has no hooks, cannot be denied headlessly, and resolves
+  commands past a PATH shim. Outside the guest there is nothing to hold onto; inside there is.
+- **You want one answer instead of five.** No hook dialect, no shim directory, no rewrite rules.
+
+## What it costs
+
+The harness needs its credentials, its configuration and its model API. All three have to reach
+the guest, and each is a decision you are making rather than one boxer makes for you.
+
+**Configuration travels by mount.** Every harness config directory that exists on the host —
+`~/.claude`, `~/.codex`, `~/.gemini`, and so on — is mounted read-write at the same path in the
+guest, and the harness's config variable is set to point at it. Sessions and file-based logins are
+therefore shared with the host rather than recreated.
+
+**Keychain logins do not travel.** A login stored in the macOS Keychain has no Keychain to read
+inside a Linux guest. boxer detects the case and prints the fix before the run rather than after
+the failure:
+
+```console
+$ boxer shell claude
+boxer: Claude Code's macOS Keychain login does not enter the VM; run `claude setup-token`
+       on the host and export CLAUDE_CODE_OAUTH_TOKEN
+```
+
+Copilot's device login lands under `~/.copilot`, which is mounted, so it travels. fx keeps its
+credential in the Keychain unless told otherwise, so boxer sets `FX_DISABLE_KEYCHAIN=1` and reads
+`AI_GATEWAY_API_KEY` from the environment.
+
+**The model API has to be reachable.** Inside mode adds each harness's own API hosts to the
+network allowlist — `api.anthropic.com`, `api.openai.com`, `api.x.ai` and the rest — along with
+the npm registry and Debian's. A tighter allowlist of your own has to include them.
+
+**The VM carries the harness as well as the work.** Give it more memory than an outside sandbox.
+The default image is `mirror.gcr.io/library/node:24-bookworm-slim`, since most of these harnesses
+are npm packages.
+
+**The harness's own sandbox has to come off.** Codex's bwrap cannot start inside the guest, and
+Claude Code declines to run as root. boxer sets what each one needs — `IS_SANDBOX=1`,
+`sandbox_mode="danger-full-access"` — because the VM is the sandbox now and a nested one only
+fails.
+
+## The first run installs
+
+The harness is installed in the guest once, recorded by a marker, and the result is packed. Later
+VMs from that pack start with it already there.
+
+```console
+$ boxer shell codex
+boxer: installing codex in the sandbox (once per host)
+```
+
+If that install is interrupted, `boxer up --recreate` is the reset.
+
+## Paths
+
+Inside mode mounts the worktree at its **host path**, not at `/workspace`. The harness is in the
+guest but everything it prints — file references, diffs, error messages — is read on the host, so
+the two sides have to agree on what a path means.
+
+## Editors over ACP
+
+`boxer acp <harness>` speaks the harness's ACP server over stdio, which is what an ACP client
+expects to spawn. Point the editor's agent command at it and the agent runs in the VM with the
+editor on the host.
+
+```json
+{ "command": "boxer", "args": ["acp", "gemini"] }
+```
+
+## Choosing between inside and outside
+
+| | Outside | Inside |
+| --- | --- | --- |
+| What runs on the host | the harness | nothing |
+| Can a command miss the sandbox | yes, for what `intercept` does not name | no |
+| Credentials in the guest | none | the harness's |
+| Memory | the work | the work and the harness |
+| Harness support | nine, at varying levels | nine, all through one mechanism |
+
+The two sets of nine are not the same nine: DSH has no inside row, and fx has no outside one.
+"One mechanism" is not "no differences" — `pi` has no ACP server, so it is `boxer shell` only.
+
+Both placements share the scope, the image and the packs. They differ only in where the agent
+process lives.

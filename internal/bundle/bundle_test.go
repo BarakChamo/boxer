@@ -1,6 +1,8 @@
 package bundle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -223,5 +225,135 @@ func TestVersionIsStampedIntoManifestsAndSkill(t *testing.T) {
 		if !strings.Contains(read(t, filepath.Join(dir, f)), "0.9.1-test") {
 			t.Errorf("%s: version not stamped", f)
 		}
+	}
+}
+
+// The skill is published three times — inside the plugin, at the installer path, and in the
+// site's discovery index — and three copies of one document are only safe while something proves
+// they are the same document.
+func TestPublishedSkillMatchesThePluginsCopy(t *testing.T) {
+	dir := t.TempDir()
+	skills, wellKnown := filepath.Join(dir, "skills"), filepath.Join(dir, "well-known")
+	if _, err := RenderSkills("1.2.3", skills, wellKnown); err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(dir, "pkg")
+	if _, err := Render(Package, "1.2.3", pkg); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join(pkg, "skills", "boxer", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		filepath.Join(skills, "boxer", "SKILL.md"),
+		filepath.Join(wellKnown, "agent-skills", "boxer", "SKILL.md"),
+	} {
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("%s differs from the plugin's copy", p)
+		}
+	}
+	// The index has to verify the exact bytes it points at, or a client cannot trust what it
+	// fetched, and it has to carry the skill's own description rather than a second one.
+	b, err := os.ReadFile(filepath.Join(wellKnown, "agent-skills", "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Skills        []struct {
+			Name, Description, URL, Digest, Version string
+		}
+	}
+	if err := json.Unmarshal(b, &index); err != nil {
+		t.Fatal(err)
+	}
+	if len(index.Skills) != 1 || index.Skills[0].Name != "boxer" || index.Skills[0].Version != "1.2.3" {
+		t.Fatalf("index: %+v", index)
+	}
+	sum := sha256.Sum256(want)
+	if index.Skills[0].Digest != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatalf("digest does not match the published bytes: %s", index.Skills[0].Digest)
+	}
+	if !strings.Contains(index.Skills[0].Description, "boxer sandbox") {
+		t.Fatalf("the index must carry the skill's own description: %q", index.Skills[0].Description)
+	}
+	if !strings.HasPrefix(index.Skills[0].URL, SiteOrigin+"/.well-known/") {
+		t.Fatalf("url: %q", index.Skills[0].URL)
+	}
+	// The scripts are the spec's executable layer and have to arrive runnable.
+	st, err := os.Stat(filepath.Join(skills, "boxer", "scripts", "run"))
+	if err != nil || st.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("scripts must be executable: %v %v", st, err)
+	}
+}
+
+// Either half can be rendered alone: the Makefile writes both, but the site build wants only the
+// discovery index and a skill manager wants only the installer path.
+func TestSkillsRenderEitherHalfAlone(t *testing.T) {
+	dir := t.TempDir()
+	files, err := RenderSkills("1.2.3", filepath.Join(dir, "skills"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.Contains(f, "well-known") {
+			t.Fatalf("no index was asked for: %v", files)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "boxer", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderSkills("1.2.3", "", filepath.Join(dir, "wk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wk", "agent-skills", "index.json")); err != nil {
+		t.Fatal(err)
+	}
+	// Rendering twice is how CI checks for drift, so it must overwrite rather than accumulate.
+	if _, err := RenderSkills("1.2.3", filepath.Join(dir, "skills"), filepath.Join(dir, "wk")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(mustReadDir(t, filepath.Join(dir, "skills", "boxer"))); n != 3 {
+		t.Fatalf("SKILL.md, references and scripts, not more: %d", n)
+	}
+}
+
+func mustReadDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	e, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// The index takes its description from the skill's own frontmatter, so the two cannot disagree.
+// A skill with none yields an empty string rather than an invented one.
+func TestSkillDescriptionComesFromTheDocument(t *testing.T) {
+	if got := skillDescription([]byte("---\nname: boxer\ndescription:  run things \n---\n")); got != "run things" {
+		t.Fatalf("%q", got)
+	}
+	if got := skillDescription([]byte("# no frontmatter\n")); got != "" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Writing is the one step that touches a filesystem boxer does not own, so it reports rather
+// than panics when the destination refuses.
+func TestWriteAllReportsAnUnwritableDestination(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeAll(file, map[string][]byte{"a/b.txt": []byte("x")}); err == nil {
+		t.Fatal("writing under a regular file must fail")
+	}
+	if _, err := RenderSkills("1.2.3", file, ""); err == nil {
+		t.Fatal("RenderSkills must report it too")
 	}
 }

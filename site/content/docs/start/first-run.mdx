@@ -15,23 +15,34 @@ Between those two lines boxer:
 
 1. Resolved the **scope** — the git worktree you are in. One worktree, one VM.
 2. Read `boxer.toml`, if there is one, and inferred an image if there is not.
-3. Created the VM, mounting the worktree at the same absolute path it has on the host.
+3. Created the VM, mounting the worktree at `/workspace` in the guest.
 4. Ran the command inside, and streamed its output back.
 
-The path matters more than it looks. A worktree mounted at the same path means an agent's
-absolute paths keep working, error messages point at real files, and anything that writes a path
-into a config file writes one that is true on both sides.
+One mount point, and boxer maps your working directory into it. Run `boxer run` from a
+subdirectory and the command runs in the matching subdirectory of `/workspace`, so relative paths
+mean what they look like. Absolute host paths do not survive the crossing — `mount_at` changes the
+guest path, and inside mode mounts at the host path instead precisely so that they do.
 
 ## Seeing what exists
 
 ```sh
 boxer ls          # every sandbox on this machine, with its worktree
-boxer status      # this worktree's sandbox: state, image, ports, resources
-boxer logs        # what the sandbox has been asked to do
+boxer status      # this worktree's sandbox: state, image, ports, mount
 ```
 
-`boxer down` stops this worktree's VM; `boxer down --all` stops every one. Nothing is lost —
-a stopped sandbox keeps its disk, and starting it again is fast.
+`boxer logs` reads the event log, which is off by default. Turn it on with `[telemetry] enabled =
+true` in `boxer.toml` first, or it prints nothing.
+
+<Callout type="warn">
+`boxer down` **deletes** this worktree's sandbox, and `boxer down --all` deletes every one. It is
+not a pause. The worktree on the host is untouched, but the guest's filesystem, its installed
+dependencies and its environment pack markers are gone, and the next command provisions again from
+the pack.
+</Callout>
+
+The second command in the same worktree is fast because the first one left an **environment
+pack** behind: a snapshot of the guest that later VMs start from. [Scopes and
+packs](/docs/concepts/scopes-and-packs) explains what is in one and what invalidates it.
 
 ## Reclaiming space
 

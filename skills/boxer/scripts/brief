@@ -1,0 +1,3 @@
+#!/bin/sh
+# Print the resolved brief for this checkout.
+exec boxer brief "$@"

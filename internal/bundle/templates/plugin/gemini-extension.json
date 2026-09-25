@@ -1,7 +1,7 @@
 {
   "name": "boxer",
   "version": "[[.Version]]",
-  "description": "Runs shell commands in a smolvm microVM keyed to the git worktree.",
+  "description": "Runs shell commands in a sandbox — a microVM or a container — keyed to the git worktree.",
   "contextFileName": "AGENTS.md",
   "mcpServers": {
     "boxer": {

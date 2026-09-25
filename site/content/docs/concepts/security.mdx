@@ -1,0 +1,126 @@
+---
+title: The security model
+description: What the boundary holds against, what it does not, and the ways out that are there on purpose.
+---
+
+boxer's threat model is **a careless agent, not a hostile one**. That sentence decides everything
+below, and it is worth reading before you rely on boxer for something it was not built for.
+
+## What the boundary is
+
+A smolvm microVM whose only mount is the git worktree. A command in the guest cannot read your
+home directory, your SSH keys, your cloud credentials or anything else outside the worktree, and
+the network is an allowlist by default: the registry hosts needed for the image, plus whatever you
+name in `allow_hosts`, and nothing else.
+
+That is a real isolation boundary. A postinstall script in a dependency tree runs somewhere with
+nothing worth taking, and a command that decides to reconfigure the machine reconfigures a machine
+you can delete with `boxer down`.
+
+<Callout type="warn">
+The worktree is mounted read-write, and it is your real worktree. `rm -rf` inside it deletes your
+files, from the guest exactly as from the host. The boundary is around everything else on your
+machine, not around the code the agent was asked to work on.
+</Callout>
+
+## What it is not
+
+boxer is not a defence against an agent that can choose to run something on the host. Several
+paths stay on the host deliberately, and each is a hole if your threat model is adversarial:
+
+**`passthrough` programs.** `git`, `gh`, `ssh`, `boxer` and `smolvm` run unsandboxed by design.
+They need your credentials and your real repository. `gh` alone is enough to reach anything your
+GitHub token reaches.
+
+**`mode = "off"` and `enforcement = "audit"`.** Neither sandboxes anything. `audit` is for
+learning what an agent runs before you start refusing it anything.
+
+**Whatever `intercept` does not name.** In `rewrite` mode boxer rewrites the commands it
+recognises. A command it does not recognise runs on the host. PATH shims and `tool` mode narrow
+this; `enforcement = "both"` is the default for exactly this reason. It narrows the gap rather
+than closing it.
+
+`on_sandbox_unavailable = "passthrough"` is one more, and it is off by default: when a sandbox
+cannot be provisioned, the command runs on the host instead of failing. Useful, and a decision you
+have to make explicitly.
+
+## If the threat model is adversarial
+
+Run the harness inside the guest.
+
+```toml
+integration = "inside"
+```
+
+```sh
+boxer shell claude
+```
+
+There is no host shell to reach, because the agent is not on the host. Nothing is intercepted,
+so nothing can be missed. See [Running the harness inside](/docs/guides/inside) for what it costs
+— principally that the harness's credentials now have to be in the guest.
+
+## Repository configuration is executable input
+
+A `boxer.toml`, a skill or a plugin in a repository is code you are about to run. `setup`,
+`image_setup`, `start` and `[tasks]` all execute in the guest. Hooks and MCP servers named in a
+harness's configuration execute **on the host**.
+
+Treat a repository's boxer configuration with the same suspicion as its `Makefile` or its
+`package.json` install scripts. boxer never fetches configuration or content from the network, so
+what runs is what is in the checkout you can read.
+
+## Secrets
+
+```toml
+[env]
+NODE_ENV = "development"       # configuration. Baked into the pack.
+
+env_passthrough = ["CI"]       # read from the host at run time
+secrets         = ["NPM_TOKEN"]# same, and never written anywhere
+```
+
+`env` is snapshotted into the environment pack, which persists on disk. Anything you would not
+want in a snapshot belongs in the other two lists, which are resolved on the host at run time and
+passed to the guest process — not stored in VM metadata, not written to any file boxer creates.
+
+`env_passthrough` is an explicit allowlist, empty but for `CI`. The host environment does not leak
+into the guest by default.
+
+Both lists are forwarded **by name**, through smolvm's `--secret-env`: boxer passes
+`NPM_TOKEN=NPM_TOKEN`, smolvm reads the value out of its own environment, and the value never
+appears in an argument vector. That matters because argument vectors are world-readable on a
+normal machine — `ps` shows every other process on the host exactly what you forwarded.
+
+They reach `setup` and `image_setup` as well as ordinary commands, because a build that needs a
+registry token needs it while installing. What they never reach is the pack: a snapshot is taken
+of the filesystem, and a variable resolved per invocation is not in it.
+
+## What boxer records
+
+Nothing that leaves the machine, and nothing at all unless you ask — with one local exception,
+below.
+
+With no `[telemetry]` table and no `BOXER_TRACE`, boxer writes no log, no metrics and nothing to
+the network. Turned on, events carry scope names, harness names, durations and outcomes. Command
+lines are elided unless you also set `record_commands = true`, because a log of every command an
+agent runs is a different thing to store than a log of what boxer did with them.
+
+The exception is the last-run record: after every command, boxer writes
+`$XDG_STATE_HOME/boxer/runs/<scope>.json`, mode 0600, holding that command verbatim, its exit
+code, and a bounded tail of its output. It is what `boxer capsule new` captures and what
+`boxer status --json` reports. `record_commands` does not gate it, because that setting guards
+the event *sink* — a file or an OTLP endpoint, either of which can be shipped off the host — and
+this is a file beside the worktree it describes. Delete the directory at any time; nothing reads
+it to decide anything.
+
+Nothing leaves the machine unless you set an `endpoint` — which only a binary built with
+`-tags otel` can use at all, since the default build contains no exporter. See
+[Events](/docs/reference/events).
+
+## Reporting a vulnerability
+
+Privately, through [GitHub's private vulnerability
+reporting](https://github.com/BarakChamo/boxer/security/advisories/new). Expect an acknowledgement
+within three working days and a fix or a plan within fourteen. Until 1.0 only the latest release
+is supported; from 1.0, the latest minor of the current major.

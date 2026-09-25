@@ -260,3 +260,38 @@ func TestNotificationsAndSessionIsolation(t *testing.T) {
 		t.Fatalf("session isolation must not warm a worktree-keyed VM: %v", ls)
 	}
 }
+
+// Where a server is reachable is the question an agent asks status most, and the answer is
+// different in every worktree, so the tool says it rather than sending the agent to the CLI: the
+// named URL where there is one, the forwarded host port where there is not.
+func TestStatusSaysWhereServersAre(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"network = { ports = [\"auto:3000\", \"auto:4000\"] }\n")
+	call := func() string {
+		var r map[string]any
+		json.Unmarshal([]byte(serve(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"`+dir+`"}}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"boxer_status","arguments":{"cwd":"`+dir+`"}}}`)[1]), &r)
+		return text(r)
+	}
+	out := call()
+	if !strings.Contains(out, "guest port 3000: http://127.0.0.1:") || !strings.Contains(out, "guest port 4000: http://127.0.0.1:") {
+		t.Fatalf("forwarded ports: %s", out)
+	}
+	key := strings.Fields(strings.TrimPrefix(out, "scope "))[0]
+	reg := filepath.Join(os.Getenv("XDG_STATE_HOME"), "boxer", "urls")
+	if err := os.MkdirAll(reg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, guest := range map[string]string{"web.demo": "3000", "admin.demo": "9000"} {
+		b, _ := json.Marshal(map[string]string{"scope": key, "guest": guest, "host": "1", "name": name, "url": "https://" + name + ".localhost"})
+		if err := os.WriteFile(filepath.Join(reg, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out = call()
+	for _, want := range []string{"guest port 3000: https://web.demo.localhost", "guest port 4000: http://127.0.0.1:", "guest port 9000: https://admin.demo.localhost"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}

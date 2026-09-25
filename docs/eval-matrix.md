@@ -81,6 +81,39 @@ Claims are declared before the cell runs, so a cell that dies early reports whic
 unanswered rather than quietly shortening its own scorecard. The report scores by level, by harness
 and by claim.
 
+## Results, 2026-09-25
+
+Two runs of all 55 cells on the same binary, one after the other, three at a time. The first with
+`BOXER_EVAL_URLS=1` — every sandbox named through portless and no address in the prompt, so each
+agent had to find its own worktree's server — and the second without, as the control.
+
+| level | default | URLs mode |
+| --- | --- | --- |
+| hook rewrite | 12/12 | 11/12 |
+| tool mode | 10/10 | 10/10 |
+| command shims | 8/8 | 8/8 |
+| shell shims | 7/8 | 8/8 |
+| shell substitution | 1/1 | 1/1 |
+| inside | 10/10 | 6/10 |
+| orchestrator | 6/6 | 6/6 |
+| **overall** | **99.4%**, 54 of 55 at 100%, $1.89 | **98.7%**, 50 of 55 at 100%, $3.04 |
+
+The default run's one miss is `codex/bash-shim`: Codex spawned its shell by absolute path in that
+run, so the `bash` shim was bypassed and the work ran on the host — the known limit of that level,
+and the reason the matrix scores it separately. The URLs run's rewrite miss is Grok starting its
+own dev server instead of using the one it was given.
+
+The inside difference was the one worth chasing, and it did not hold up. Four inside cells lost
+their dev server in the URLs run and none in the control, so the inside cells were run again, alone,
+alternating the two modes, twice each: URLs mode 19 of 20, default 20 of 20. Every failure in both
+passes is `inside/fx/add-a-page` or its dev server — 2 of 3 URLs-mode runs of that cell against
+0 of 3 without, and the published run before this one lost an fx inside cell the same way with no
+URLs involved. None of the failing agents read the URL variables or touched their server. The
+evidence points at fx and the dev server's own stability in the guest rather than at URLs; it is
+not proof, and it is recorded here as open rather than closed.
+
+Reports: `eval-matrix-report.md` (default) and `eval-matrix-urls-report.md`.
+
 ## Results, 2026-09-20
 
 **99.2%** of weighted checks, **52 of 53 cells at 100%**, three at a time, $3.06.

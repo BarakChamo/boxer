@@ -1,0 +1,102 @@
+---
+title: MCP server
+description: The two tools, the brief resource, and the lifecycle signals that come with them.
+---
+
+```sh
+boxer mcp [--harness NAME]
+```
+
+Speaks MCP over stdio, newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It is the one
+integration that works on any harness that speaks MCP, including one nobody has integrated.
+
+`--harness` selects the `[harness.<name>]` override layer, so a harness with its own `mode` gets
+it here too.
+
+## Registering it
+
+```json
+{
+  "mcpServers": {
+    "boxer": { "command": "boxer", "args": ["mcp"] }
+  }
+}
+```
+
+`boxer install <harness>` writes this for you, in whatever file that harness reads.
+
+## Tools
+
+### `boxer_run`
+
+| Field | Type | |
+| --- | --- | --- |
+| `command` | string | required. A POSIX shell line, executed with `sh -c` in the guest |
+| `cwd` | string | optional. A host directory; defaults to the repository root |
+
+Returns stdout and stderr, followed by `[exit N]`. `isError` is set when the exit is non-zero or
+when boxer refused — a refusal carries the same `reason`/`cause`/`fix` text as the CLI, so an
+agent reading the tool result gets the instruction rather than a bare failure.
+
+### `boxer_status`
+
+| Field | Type | |
+| --- | --- | --- |
+| `cwd` | string | optional |
+
+One line: scope, isolation, state, image, worktree and mount path. When no sandbox exists yet it
+says so, and names the image it would boot.
+
+### How `cwd` is interpreted
+
+An MCP client may hand over a host path or a guest path, and it is usually not deliberate about
+which. boxer takes both:
+
+- A host path inside the worktree becomes the matching guest directory.
+- A path under the guest mount maps back to the host worktree.
+- Anything else falls back to the server's own working directory, and the result says so with a
+  `note:` line rather than silently running somewhere the caller did not mean.
+
+## Resource
+
+One resource, `boxer://brief`, `text/markdown`. It is the same brief `boxer brief` prints and the
+hooks inject, resolved for the server's working directory: the mount, the mode, the intercept
+list, the passthrough list, and the declared tasks with what each one is for.
+
+It is also where an agent is told when the usual promise does not hold: a sandbox
+[prepared for forking](/docs/guides/forking) works on a copy of the worktree, and the brief says
+so in place of "the same files" for as long as that is true.
+
+It is generated rather than stored, so published content never carries a rendered copy of
+someone's configuration.
+
+## Lifecycle signals
+
+The MCP lifecycle doubles as a session signal for harnesses that have no hook API:
+
+- **`initialize`** provisions the server's own scope in the background when `create_on` includes
+  `mcp` (it does by default), so the sandbox is warm before the first command.
+- **stdin EOF** records the scope's last use, so `gc` can tell an idle sandbox from a busy one.
+
+That is why registering the MCP server is worth doing even on a harness where hooks already
+enforce.
+
+## Running someone else's MCP server in the sandbox
+
+The reverse direction. Some MCP servers have to sit next to the code — `next-devtools-mcp` talks
+to a running Next.js dev server, so it has to be wherever that server is. `boxer run` is a clean
+stdio pipe, which is all an MCP client needs:
+
+```json
+{
+  "mcpServers": {
+    "next-devtools": {
+      "command": "boxer",
+      "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"]
+    }
+  }
+}
+```
+
+The harness stays on the host and talks to a tool inside the guest. Nothing bridges, and the tool
+does not know boxer exists.

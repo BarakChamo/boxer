@@ -15,11 +15,12 @@ path outside the worktree, and the network is an allowlist by default.
 It is **not** a defence against a malicious agent that can choose what to run on the host. Three
 paths deliberately stay on the host:
 
-- `passthrough` programs (`git`, `gh`, `ssh`, `boxer` itself) run unsandboxed by design.
+- `passthrough` programs (`git`, `gh`, `ssh`, `boxer` and `smolvm`) run unsandboxed by design.
 - `mode = "off"` and `enforcement = "audit"` do not sandbox anything.
 - In `rewrite` mode, boxer rewrites commands it recognises. A command it does not recognise runs on
-  the host. PATH shims and `tool` mode close that gap; `enforcement = "both"` is the default for
-  this reason.
+  the host. PATH shims and `tool` mode narrow that gap rather than closing it: a shim loses to a
+  login shell, and `tool` mode depends on the agent taking the tool it is left with.
+  `enforcement = "both"` is the default for this reason.
 
 If your threat model is a hostile agent rather than a careless one, run the harness **inside** the
 guest (`integration = "inside"`, `boxer shell <harness>`), where there is no host shell to reach.
@@ -33,9 +34,16 @@ never fetches configuration or content from the network.
 
 ## Secrets
 
-`secrets` are resolved on the host at run time and passed to the guest process; they are not stored
-in VM metadata or in any configuration file boxer writes. `env_passthrough` is an explicit
+`secrets` and `env_passthrough` are resolved on the host at run time and passed to the guest by
+*name*, through smolvm's `--secret-env`: boxer never puts the value in an argument vector, where
+`ps` would show it to every other process on the machine. They are not stored in VM metadata, in
+an environment pack, or in any configuration file boxer writes. `env_passthrough` is an explicit
 allowlist, empty but for `CI` by default.
+
+One thing boxer does write: after every command it records that command, its exit code and a
+bounded tail of its output to `$XDG_STATE_HOME/boxer/runs/<scope>.json`, mode 0600, so a failure
+can be explained and replayed. It never leaves the machine and nothing reads it to make a
+decision; delete it whenever you like.
 
 Telemetry is off unless you turn it on. With `[telemetry] enabled = true`, events record scope
 names, harness names, durations and outcomes; command lines are elided unless you also set

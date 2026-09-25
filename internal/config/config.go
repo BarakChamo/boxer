@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -19,6 +20,12 @@ type Network struct {
 	Mode       string   `toml:"mode"`
 	AllowHosts []string `toml:"allow_hosts"`
 	Ports      []string `toml:"ports"`
+	// DNS is the resolver a networked guest uses. Empty (the default) means the host's own
+	// caching resolver, which is what makes name lookups cost milliseconds instead of ~400ms
+	// each: smolvm otherwise points the guest at public resolvers, so every lookup is an
+	// internet round trip and nothing caches. "off" restores that default; an address is used
+	// as given, for a host whose resolver the guest cannot reach.
+	DNS string `toml:"dns"`
 }
 
 // Worktree mirrors the [worktree] table. Manage is "off" (boxer only reacts to worktrees others
@@ -46,6 +53,114 @@ type Telemetry struct {
 	Path           string `toml:"path"`
 	RecordCommands bool   `toml:"record_commands"`
 	Endpoint       string `toml:"endpoint"`
+}
+
+// Task is one [tasks] entry. A bare string is the command line; a table adds what an agent and a
+// run need to know about it:
+//
+//	test = "go test ./..."
+//
+//	[tasks.e2e]
+//	cmd         = "npm run e2e"
+//	description = "the browser suite; needs the dev server"
+//	junit       = ["reports/junit.xml"]
+//	timeout     = "10m"
+type Task struct {
+	Cmd         string            `toml:"cmd"`
+	Description string            `toml:"description"`
+	JUnit       []string          `toml:"junit"`
+	Timeout     string            `toml:"timeout"`
+	Env         map[string]string `toml:"env"`
+}
+
+// UnmarshalTOML accepts both spellings. It also rejects an unknown key itself, because a type that
+// decodes its own subtree is invisible to Undecoded(): without this, boxer's promise that a
+// misspelled key is an error would quietly stop at the [tasks] boundary.
+func (t *Task) UnmarshalTOML(v any) error {
+	switch x := v.(type) {
+	case string:
+		t.Cmd = x
+		return nil
+	case map[string]any:
+		for _, k := range sortedTaskKeys(x) {
+			var err error
+			switch k {
+			case "cmd":
+				t.Cmd, err = taskString(k, x[k])
+			case "description":
+				t.Description, err = taskString(k, x[k])
+			case "timeout":
+				t.Timeout, err = taskString(k, x[k])
+			case "junit":
+				t.JUnit, err = taskStrings(k, x[k])
+			case "env":
+				t.Env, err = taskMap(k, x[k])
+			default:
+				err = fmt.Errorf("unknown key %q; allowed: cmd, description, junit, timeout, env", k)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("want a command string or a table")
+}
+
+func sortedTaskKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func taskString(key string, v any) (string, error) {
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("%s: want a string", key)
+	}
+	return s, nil
+}
+
+func taskStrings(key string, v any) ([]string, error) {
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: want a list of strings", key)
+	}
+	out := make([]string, 0, len(list))
+	for _, e := range list {
+		s, ok := e.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s: want a list of strings", key)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+func taskMap(key string, v any) (map[string]string, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: want a table of strings", key)
+	}
+	out := make(map[string]string, len(m))
+	for k, e := range m {
+		s, ok := e.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s.%s: want a string", key, k)
+		}
+		out[k] = s
+	}
+	return out, nil
+}
+
+// Results mirrors the [results] table: where a run should look for JUnit XML, and whether failing
+// tests turn a green exit red.
+type Results struct {
+	Auto               []string `toml:"auto"`
+	FailOnTestFailures bool     `toml:"fail_on_test_failures"`
 }
 
 // Config is the fully resolved configuration.
@@ -82,6 +197,34 @@ type Config struct {
 	OnSandboxUnavailable string   `toml:"on_sandbox_unavailable"`
 	Intercept            []string `toml:"intercept"`
 	Passthrough          []string `toml:"passthrough"`
+
+	// Prep runs on the *host*, in the worktree, before the sandbox exists — devcontainer's
+	// `initializeCommand`. It is for installing dependencies faster than a guest can, and it is
+	// opt-in because it is only safe for packages that ship prebuilt platform binaries: anything
+	// that compiles at install time builds for the host and fails inside the guest. `setup` is
+	// the always-correct alternative.
+	Prep PrepConfig `toml:"prep"`
+
+	// Cache mounts the host's package caches into the guest, read-only. The install still runs
+	// in the guest, so every binary is still chosen for the guest's platform; only the download
+	// is saved. Enabled by default because it cannot change a result, only a duration.
+	Cache CacheConfig `toml:"cache"`
+
+	// URLs names forwarded ports through portless. See URLsConfig.
+	URLs URLsConfig `toml:"urls"`
+
+	// User is the guest user boxer runs `setup`, `start` and every command as — a name or
+	// uid[:gid]; empty means the image's own USER. `image_setup` always runs as root, because it
+	// changes the image and that is root's job. devcontainer's remoteUser lands here.
+	User string `toml:"user"`
+
+	// Backend is what hosts the sandbox. "smolvm" gives a microVM per worktree — a kernel each,
+	// which is the boundary boxer's promises are written against. "docker" and "podman" give a
+	// container: faster to start, ordinary OCI images, and one kernel shared between every
+	// sandbox on the machine. They also cannot enforce `network.mode = "allowlist"`, and refuse
+	// it rather than run with egress boxer said it would deny. `boxer doctor` prints which
+	// capabilities the chosen backend actually has.
+	Backend string `toml:"backend"`
 
 	Image    string `toml:"image"`
 	Smolfile string `toml:"smolfile"`
@@ -121,8 +264,9 @@ type Config struct {
 	// Tasks are the repository's named command lines: `boxer run --task test`. Naming a task is
 	// how an agent runs the repository's real commands without composing a shell line that the
 	// intercept list may or may not catch (R-CFG-4).
-	Tasks map[string]string `toml:"tasks"`
+	Tasks map[string]Task `toml:"tasks"`
 
+	Results   Results             `toml:"results"`
 	Network   Network             `toml:"network"`
 	Telemetry Telemetry           `toml:"telemetry"`
 	Worktree  Worktree            `toml:"worktree"`
@@ -140,6 +284,10 @@ type Config struct {
 // Defaults are the values with no file present.
 func Defaults() Config {
 	return Config{
+		Backend:               "smolvm",
+		Cache:                 CacheConfig{Enabled: true, Managers: []string{"auto"}},
+		Prep:                  PrepConfig{Target: "auto"},
+		URLs:                  URLsConfig{Provider: "portless"},
 		Isolation:             "worktree",
 		OnMissingID:           "degrade",
 		RequireWorktree:       "warn",
@@ -166,7 +314,7 @@ func Defaults() Config {
 		Telemetry:             Telemetry{Sink: "none"},
 		Worktree:              Worktree{Manage: "off"},
 		Harness:               map[string]Override{},
-		Tasks:                 map[string]string{},
+		Tasks:                 map[string]Task{},
 		Sources:               map[string]string{},
 		RequireLinkedWorktree: false,
 	}
@@ -187,12 +335,18 @@ func Load(worktreeRoot, repoRoot string) (Config, error) {
 	}
 	// The devcontainer file is read first and overridden by everything: it is where a repository
 	// already wrote its environment down, and boxer.toml is how you disagree with it.
+	// ${localWorkspaceFolder} is the folder the tool opened, which for boxer is this worktree even
+	// when the file itself is read from the repository root.
+	workspace := worktreeRoot
+	if workspace == "" {
+		workspace = repoRoot
+	}
 	for _, root := range []string{repoRoot, worktreeRoot} {
 		if root == "" {
 			continue
 		}
 		if dc := findDevcontainer(root); dc != "" {
-			if err := cfg.mergeDevcontainer(dc); err != nil {
+			if err := cfg.mergeDevcontainer(dc, workspace); err != nil {
 				return cfg, err
 			}
 			break
@@ -287,6 +441,12 @@ func (c *Config) merge(path string) error {
 // settable by environment for harnesses that only offer environment control). Lists are not
 // overridable; they are repository policy.
 var envKeys = map[string]func(c *Config, v string) error{
+	"BOXER_BACKEND": func(c *Config, v string) error { c.Backend = v; return nil },
+	"BOXER_URLS": func(c *Config, v string) error {
+		b, err := strconv.ParseBool(v)
+		c.URLs.Enabled = b
+		return err
+	},
 	"BOXER_ISOLATION":              func(c *Config, v string) error { c.Isolation = v; return nil },
 	"BOXER_ON_MISSING_ID":          func(c *Config, v string) error { c.OnMissingID = v; return nil },
 	"BOXER_REQUIRE_WORKTREE":       func(c *Config, v string) error { c.RequireWorktree = v; return nil },
@@ -347,6 +507,40 @@ func (c Config) ForHarness(name string) Config {
 	return out
 }
 
+// PrepConfig is the host-side preparation step.
+type PrepConfig struct {
+	Commands []string `toml:"commands"`
+	// Target is the platform the guest runs, exposed to the commands as BOXER_TARGET_*.
+	// "auto" (the default) derives it from the image; "none" exposes nothing; or give it
+	// explicitly as os/cpu/libc, e.g. "linux/arm64/musl".
+	Target string `toml:"target"`
+}
+
+// CacheConfig selects which host package caches are offered to the guest.
+type CacheConfig struct {
+	Enabled bool `toml:"enabled"`
+	// Managers is "auto" (detect from lockfiles, the default) or an explicit list: npm, pnpm,
+	// yarn, bun, uv, poetry, cargo, go.
+	Managers []string `toml:"managers"`
+}
+
+// URLsConfig gives each sandbox's forwarded ports a stable, named URL through portless
+// (github.com/vercel-labs/portless), so a dev server is `https://fix-ui.myapp.localhost` in every
+// worktree instead of a host port that differs in each. Off by default: it needs portless on the
+// host and a proxy running, and without it nothing about a sandbox changes.
+type URLsConfig struct {
+	Enabled bool `toml:"enabled"`
+	// Provider is what serves the names. "portless" is the only one; the key exists so a config
+	// that says which one it means stays correct if there is ever a second.
+	Provider string `toml:"provider"`
+	// Name is the base hostname, before any worktree prefix. Empty means the repository's
+	// directory name, which is what portless itself would pick.
+	Name string `toml:"name"`
+	// Names labels guest ports: {"3000" = "web", "8080" = "api"} gives web.myapp and api.myapp.
+	// A single forwarded port needs no label; several without one are named by their number.
+	Names map[string]string `toml:"names"`
+}
+
 // Validate rejects values outside their enumerations so a typo cannot silently disable
 // enforcement (R-CFG-2).
 func (c Config) Validate() error {
@@ -354,6 +548,8 @@ func (c Config) Validate() error {
 		key, val string
 		allowed  []string
 	}{
+		{"backend", c.Backend, []string{"smolvm", "docker", "podman", "container"}},
+		{"urls.provider", c.URLs.Provider, []string{"portless"}},
 		{"isolation", c.Isolation, []string{"repo", "worktree", "session", "subagent"}},
 		{"on_missing_id", c.OnMissingID, []string{"degrade", "fail"}},
 		{"require_worktree", c.RequireWorktree, []string{"off", "warn", "require"}},
@@ -385,9 +581,15 @@ func (c Config) Validate() error {
 			return fmt.Errorf("harness.%s.mode = %q", name, o.Mode)
 		}
 	}
-	for name, cmd := range c.Tasks {
-		if strings.TrimSpace(cmd) == "" {
+	for _, name := range c.TaskNames() {
+		t := c.Tasks[name]
+		if strings.TrimSpace(t.Cmd) == "" {
 			return fmt.Errorf("tasks.%s is empty; give it a command line", name)
+		}
+		if t.Timeout != "" {
+			if _, err := time.ParseDuration(t.Timeout); err != nil {
+				return fmt.Errorf("tasks.%s.timeout = %q: %w", name, t.Timeout, err)
+			}
 		}
 	}
 	if _, err := MemoryMiB(c.Memory); err != nil {

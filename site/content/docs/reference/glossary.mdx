@@ -1,0 +1,93 @@
+---
+title: Glossary
+description: The terms boxer's documentation uses as terms of art.
+---
+
+**ACP (Agent Client Protocol).** The protocol an editor uses to drive a coding agent as a
+subprocess over stdio. `boxer acp <harness>` starts the harness's ACP server inside the guest, so
+the editor stays on the host and the agent does not.
+
+**Adherence.** How often a live model follows the brief when nothing enforces it and the prompt
+never mentions boxer. Measured by its own [evaluation tier](/docs/evals), because the skill asks
+rather than enforces.
+
+**Brief.** The prose summary of how this checkout runs commands — the mount, the mode, the
+intercept list, the passthrough list, the declared tasks. `boxer brief` prints it, the hooks
+inject it, and the MCP server serves it at `boxer://brief`. It is generated from the resolved
+configuration, never stored.
+
+**Cell.** One row of an evaluation matrix: a harness at an integration level, running one task in
+its own worktree with its own sandbox. A cell scores thirteen claims, not one verdict.
+
+**Enforcement.** Which mechanisms are live — `hook`, `shim`, `both` or `audit`. Distinct from
+`mode`, which is what those mechanisms do with a command they catch.
+
+**Guest.** Inside the VM. As opposed to the **host**, your machine.
+
+**Harness.** A coding agent's CLI: Claude Code, Codex, OpenCode, and the rest. boxer's core
+contains no harness name; a harness is a row in a table.
+
+**Integration level.** One of the five ways a command reaches the guest — MCP and skill, hooks,
+the OpenCode plugin, PATH shims, inside mode. They stack, and `boxer install` picks the strongest
+the harness supports.
+
+**Intercept.** The list of program names boxer sandboxes. Its opposite is **passthrough**, the
+list that stays on the host.
+
+**Isolation.** What a scope is keyed to: `repo`, `worktree`, `session` or `subagent`.
+
+**Inside mode.** `integration = "inside"`. The harness itself runs in the VM, so there is nothing
+to intercept. As opposed to **outside**, the default, where the harness runs on the host and the
+commands it issues are sandboxed.
+
+**Mode.** What happens to a command boxer catches: `rewrite` turns it into `boxer run`, `tool`
+denies the shell and leaves `boxer_run`, `off` does nothing.
+
+**Orchestrator.** A tool that cuts a worktree per task and starts a harness in it — Conductor, T3
+Code, Paperclip, herdr, OpenHands, Multica. boxer keys to the worktree, so these need no special
+arrangement.
+
+**Pack.** A snapshot of a guest after `image_setup` has run, taken with `smolvm pack create` and
+keyed on everything that shaped it. It is what makes the second worktree fast. See
+[Scopes and packs](/docs/concepts/scopes-and-packs).
+
+**Named pack.** A pack someone saved with `boxer pack save`. It lives outside the swept cache, so
+`gc` never reclaims it. It carries what is installed, not what is running.
+
+**Placement.** Whether the harness runs inside the guest or outside it. Part of the scope key, so
+the two placements of one worktree own two VMs.
+
+**Rewrite.** Replacing a command with its sandboxed form before it runs. The agent sees no
+refusal and learns nothing.
+
+**Scope.** The identity of one sandbox: `sb-` plus twelve hex characters of a SHA-256, and also
+the VM's name. What goes into the hash is decided by `isolation`. The two words printed beside it
+— `swift-crab` — are derived from the same hash, so they cost no state, and `--scope` takes
+either form.
+
+**Capsule.** A `capsule.toml`: a failure recorded well enough to run again — the command, the
+commit, the parts of the configuration that matter, and what outcome counts as reproducing it.
+`boxer capsule replay` exits 0 when it still fails.
+
+**Fork.** A copy-on-write child of a running sandbox, branched from its memory and disks rather
+than booted. Children share the parent's worktree — smolvm cannot branch a staged mount — so they
+are warm workers over one set of files rather than isolated environments. See
+[Forking](/docs/guides/forking).
+
+**Shim.** A file on `PATH` named after a program, which re-runs itself in the guest. Enforcement
+with no harness cooperation at all — where `PATH` holds.
+
+**Skill.** The Agent Skill boxer installs, telling the agent that commands here go through boxer.
+It asks rather than enforces; it is the floor for a harness nobody has integrated.
+
+**smolvm.** The microVM runtime boxer sits on. It owns the machines, the images and the packs;
+boxer keeps no state of its own beyond a few markers.
+
+**Task.** A named command line in `[tasks]`, run with `boxer run --task <name>`. The
+deterministic path: nothing depends on the intercept list recognising a line a model composed.
+
+**Tier.** One level of evaluation — `t1`, `t2`, `adherence`, `flow`, `sdlc`, `matrix` — differing
+in what it asks and what it costs.
+
+**Worktree.** A git working tree. boxer's default unit of isolation, because it is the unit agents
+already work in.

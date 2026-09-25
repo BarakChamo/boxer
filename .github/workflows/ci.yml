@@ -75,6 +75,13 @@ jobs:
           go run ./cmd/boxer package plugin --out /tmp/checked
           diff -r /tmp/checked/boxer plugin || {
             echo "plugin/ is stale; run 'make package' and commit the result"; exit 1; }
+      - name: The published skill and its discovery index match the templates
+        run: |
+          # skills/ and site/public/.well-known/ are projections of the same SKILL.md the plugin
+          # carries. Three copies of one document are fine only while something proves they agree.
+          go run ./cmd/boxer package skills
+          git diff --exit-code -- skills site/public/.well-known || {
+            echo "skills/ or the .well-known index is stale; run 'make package' and commit the result"; exit 1; }
       - name: Agent Skills conformance
         run: |
           npx --yes @agentskills/skills-ref validate ./plugin/skills/boxer || \

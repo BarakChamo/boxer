@@ -93,8 +93,9 @@ do not shell out, so they keep touching the host. This is worth having, because 
 builds, tests, installs, and network egress reproducible and contained. It is not a security
 boundary against a hostile agent.
 
-`boxer` is specified for execution isolation. A future mode that runs the whole harness inside the
-VM is the only way to get file isolation and is out of scope here, noted in §11.
+`boxer` is specified for execution isolation first. File isolation needs the harness itself inside
+the VM, which is what `integration = "inside"` does (R-INT). Outside mode remains the default and
+remains execution isolation only.
 
 ### 2.3 One backend, no abstraction
 
@@ -366,7 +367,7 @@ require_worktree   = "warn"       # off | warn | require
 require_linked_worktree = false
 
 # Lifecycle
-create_on          = ["session_start", "run"]   # run = provision lazily on first sandboxed command
+create_on          = ["session_start", "run", "mcp"]  # run = lazily on first sandboxed command; mcp = on MCP initialize
 destroy_on         = []                    # session_end | subagent_stop | never; gc reaps orphaned worktrees
 idle_timeout       = "2h"                  # gc reaps beyond this; "never" to disable
 auto_reclaim       = true                  # an ordinary command sweeps in the background, at most every…
@@ -379,13 +380,16 @@ reuse_existing     = true
 mode               = "rewrite"    # rewrite | tool | off  (per-harness override: [harness.<name>].mode)
 enforcement        = "both"       # hook | shim | both | audit
 on_sandbox_unavailable = "fail"   # fail | passthrough
-intercept          = ["npm", "pnpm", "yarn", "bun", "node", "python", "pytest", "cargo", "go", "make"]
-passthrough        = ["git", "gh", "ssh", "boxer"]
+# The interpreters are in the default list, which is why enforcement = "shim" needs a narrower one.
+intercept          = ["npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno", "python", "python3",
+                      "pip", "uv", "pytest", "cargo", "rustc", "go", "make", "cmake"]
+passthrough        = ["git", "gh", "ssh", "boxer", "smolvm"]
 
 # Guest
 image              = ""           # OCI ref; default detected from lockfile, else boxer base
 smolfile           = ""           # path; wins over image
-setup              = []                    # once per VM; the result is cached as an environment pack
+image_setup        = []                    # once per image; the result is cached as an environment pack
+setup              = []                    # once per worktree; lands in the mounted files, which no pack carries
 start              = []                    # every VM start, detached: this is how a service runs
 ready              = ""                    # polled until it exits zero before the sandbox counts as up
 ready_timeout      = "60s"
@@ -393,18 +397,19 @@ mounts             = []                    # extra host dirs, "host:guest[:ro]"
 mount_at           = "/workspace"
 cpus               = 4
 memory             = "4G"
-env_passthrough    = ["CI", "NODE_ENV"]   # names only; never values in config
+env_passthrough    = ["CI"]               # names only; never values in config
 secrets            = []                   # host-resolved references, per smolvm's secret model
 
 # Set in the guest for every command, setup included. Secrets belong in env_passthrough or
 # secrets, which are read from the host at run time and never enter an environment pack.
 [env]
-NODE_ENV           = "test"
+NODE_ENV           = "development"
 
-# Network: off by default, matching smolvm
+# Network: allowlist by default. The hosts needed to pull the image are always admitted; the list
+# below is empty by default and is what a repository adds on top.
 [network]
 mode               = "allowlist"  # off | allowlist | on
-allow_hosts        = ["registry.npmjs.org", "github.com"]
+allow_hosts        = []
 ports              = []
 
 # Per-harness overrides; any top-level key may appear here
@@ -423,6 +428,46 @@ mode               = "tool"       # block-only hooks; shims installed by `boxer 
   declared rather than composing a shell line whose sandboxing depends on the intercept list
   matching it. An unknown name is refused in the §3.6 shape with `cause` `NO_SUCH_TASK` and a
   `fix:` line listing the declared names.
+- **R-CFG-4a.** A task may be a table instead of a string: `cmd`, plus `description`, `junit`,
+  `timeout` and `env`. The string form keeps working, because a repository's `boxer.toml` outlives
+  the binary in both directions. The description reaches `boxer tasks` and the brief, since
+  choosing between tasks is the decision an agent has to make; an unknown key inside the table is
+  a hard error like any other, which the table's own decoder has to enforce because a type that
+  decodes its own subtree is invisible to the file-level unknown-key check.
+- **R-CFG-6.** `secrets` and `env_passthrough` are forwarded by *name*, never by value: boxer
+  passes `NAME=NAME` to smolvm's `--secret-env` and smolvm reads the value from its own
+  environment. A value in an argument vector is a value in `ps`, readable by every other process
+  on the host. They reach `setup` and `image_setup` as well as ordinary commands, and never reach
+  a pack or an event.
+- **R-RUN-8.** A run may be pointed at JUnit XML — `--junit`, a task's `junit` list, or
+  `[results] auto` — and boxer prints which tests failed. Parsing is on the host, reading the
+  mounted worktree, so nothing is fetched from the guest. Counts come from the cases and not from
+  the `tests=`/`failures=` attributes, and a report whose mtime precedes the run is ignored.
+  `--fail-on-test-failures` turns exit 0 into 1 when the report is red, and never replaces a
+  non-zero exit code.
+- **R-RUN-9.** Every run writes a record for its scope under `$XDG_STATE_HOME/boxer/runs`, mode
+  0600: the command as a replayable shell line, the task, the directory, the exit code, the image
+  and pack, HEAD and dirtiness, the configuration files, bounded tails of both streams, and the
+  test summary. Nothing reads it to decide anything; it exists to explain a failure and to seed a
+  capsule, and `gc` removes it with its sandbox.
+- **R-RUN-10.** `boxer capsule new|inspect|replay` turns that record into a committable
+  `capsule.toml`, with a `capsule.patch` when the tree was dirty. Replay overlays the captured
+  configuration rather than re-reading `boxer.toml`, refuses a dirty or drifted tree without an
+  explicit flag, never applies the patch unless asked, and exits 0 when the recorded outcome
+  reproduced and 1 when it did not.
+- **R-VM-6.** `boxer pack save|ls|use|rm <name>` keeps a prepared guest as a named artifact. Named
+  packs live outside the swept cache, so `gc` never reclaims one. A named pack is a filesystem
+  snapshot: smolvm's `.smolcheckpoint` carries RAM but is refused on any machine holding a host
+  mount, which every boxer sandbox does.
+- **R-VM-7.** `boxer fork` branches the sandbox into copy-on-write children that start from the
+  parent's memory and disks rather than booting. Children share the parent's worktree: a branch
+  inherits its parent's mounts and smolvm refuses to branch a staged mount, so boxer cannot offer
+  a per-child copy and the guide says so rather than implying isolation it does not have.
+  Preparation is explicit because it restarts the sandbox. Children are named `<scope>-f<n>`, are
+  addressable by `--scope`, and are reclaimed by `gc` once their parent is gone.
+- **R-VM-8.** boxer deletes only machines it can prove it owns — a `boxer.` label, or a fork child
+  of one of its scopes. A name alone is not proof, and a machine boxer did not create survives
+  `boxer gc --all`.
 - **R-CFG-5.** A `boxer.toml` outlives the binary that reads it, so an unknown top-level *table* is
   a warning (reported by `doctor`) and the file still loads: a repository that adopts a newer
   feature stays usable by an older boxer. Every other unknown key remains a hard error, because a
@@ -436,8 +481,13 @@ mode               = "tool"       # block-only hooks; shims installed by `boxer 
   `Cargo.lock`, `go.sum`), pinned from `.tool-versions`, `.nvmrc`, or `engines` when present, else
   the current LTS. With no lockfile, the boxer base image: Debian slim with git, curl,
   build-essential, and CA certificates. `doctor` prints the chosen image and the reason.
-- **R-GUEST-2.** `setup` runs once per VM creation, never per session; completion is a marker file in
-  the guest overlay, so boxer keeps no host-side state. A failing step deletes the VM, so `run` then
+- **R-GUEST-2.** There are two setup lists, and the split is load-bearing. `image_setup` changes the
+  guest image, runs once per image, and its result is captured in the environment pack, so a later
+  VM built from that pack skips it. `setup` prepares *this worktree*, usually by installing
+  dependencies into it, and runs once per worktree: a pack carries the guest's filesystem and the
+  worktree is mounted from the host, so no pack can carry it. Putting a dependency install in
+  `image_setup` yields a pack whose marker says the work is done and a worktree with nothing in it.
+  Completion of each is a marker file in the guest overlay, so boxer keeps no host-side state. A failing step deletes the VM, so `run` then
   refuses with `fix: boxer up`. boxer never auto-runs a dependency install; that is repository
   policy and belongs in the committed `boxer.toml`.
 - **R-GUEST-3.** Image pulls happen inside the guest, so the default network mode is `allowlist`
@@ -689,21 +739,28 @@ available there, so DSH is a tool-mode harness. All of this is **verified 2026-0
 `@deepseek-ai/dsh` 0.1.5-rc.2, live through the Vercel AI Gateway, and both levels are covered by
 `boxer-eval` at t1 and t2.
 
-- **R-LVL-1.** Level 0 is the default integration and `tool` the default mode. A repository that
-  installs nothing but the MCP server and the skill is fully supported on every harness.
-- **R-LVL-2.** Command rewrite is opt-in (`mode = "rewrite"`), available where verified: Claude
-  Code, Codex, Gemini CLI, OpenCode, pi. Kimi ignores `updatedInput` and its shell ignores PATH
+- **R-LVL-1.** Level 0 — the MCP server and the skill — is the floor: a repository that installs
+  nothing else is supported on every harness. The shipped defaults are `integration = "outside"`
+  and `mode = "rewrite"`, because `boxer install` writes the strongest integration a harness
+  supports and rewriting is what that integration does wherever hooks accept one. `tool` is the
+  default only for the harnesses whose hooks cannot rewrite, through `[harness.<name>]`.
+- **R-LVL-2.** Command rewrite is the default mode, active where a harness's hooks accept a
+  rewritten command: Claude Code, Codex, Gemini CLI, OpenCode, pi, Grok, Copilot CLI. Kimi ignores `updatedInput` and its shell ignores PATH
   shims (verified 0.43.1); DSH's hook bridge logs and ignores `updatedInput` (verified 0.1.5-rc.2,
   2026-09-18). Both are tool-mode harnesses. DSH keeps its hook bundle — the bridge's deny and its
   `UserPromptSubmit` provisioning are real — while Kimi's is dropped.
 - **R-LVL-3.** Gap closure in tool mode prefers the harness's native shell-tool removal (Claude
   `disallowedTools`, Gemini `excludeTools`, Kimi `tools.disabled`, OpenCode `permission.bash`, Grok
   `--disallowedTools`); the hook deny is the fallback for Codex and pi.
-- **R-LVL-4.** The run tool is named like the shell tools agents already use, `bash` (alias
-  `shell`), with the signature `{command, description?, timeout?, cwd?}`; `boxer_status` remains.
-- **R-LVL-5.** The worktree is mounted in the guest **at its host path** by default
-  (`mount_at = "<root>"`), so every path an agent types or reads is valid on both sides and no
-  translation exists to get wrong. `/workspace` stays available as an opt-in.
+- **R-LVL-4.** The run tool is `boxer_run`, signature `{command, cwd?}`, beside `boxer_status`.
+  Naming it after the shell tools agents already use (`bash`, alias `shell`) was considered and
+  dropped: a tool whose name collides with the harness's own shell tool is ambiguous in exactly
+  the transcripts where the distinction matters.
+- **R-LVL-5.** The worktree is mounted in the guest at `mount_at`, **`/workspace`** by default.
+  boxer maps the caller's working directory into it, so a command run from a subdirectory runs in
+  the matching subdirectory of the mount. Setting `mount_at` to the worktree's own host path makes
+  absolute paths valid on both sides, which is what `integration = "inside"` does unconditionally:
+  there the harness is in the guest and every path it prints has to resolve on the host too.
 - **R-LVL-6.** The bundle is an **Agent Plugins 1.0.0** package (agent-plugins.org, published
   2026-08-06; TSC Amazon, Cursor, Microsoft, OpenAI, Vercel; Google core maintainer): `plugin.json`,
   `skills/boxer/SKILL.md`, `mcp.json` with `mcpServers`. The spec defines exactly two portable
@@ -745,8 +802,12 @@ available there, so DSH is a tool-mode harness. All of this is **verified 2026-0
   tool (`shell_path`, SDK 1.49, live 2026-09-18). PATH shims (§5.2) are the same idea for a
   harness that resolves programs by name instead.
 
-- **R-LVL-7.** Grok's plugin hooks are discovered as zero in `grok -p` even when the plugin loads
-  (`hooks: discovery complete total_hooks=0`); Grok is Level 0 until that is understood.
+- **R-LVL-7.** Grok's plugin hooks were once discovered as zero in `grok -p` even when the plugin
+  loaded (`hooks: discovery complete total_hooks=0`), which held Grok at Level 0. Resolved: Grok
+  sends Claude-compatible field names under its own tool name, `run_terminal_command` (verified
+  2026-09-17), and its dialect row rewrites. Two Grok facts stay in that row rather than becoming
+  code paths: its MCP tools are visible only through a dispatcher, so the brief names the run tool
+  the way Grok shows it, and its session-start context never reaches the model.
 
 ### Two integrations, one kernel (decided 2026-09-17)
 
@@ -866,9 +927,10 @@ correctness, and none is removed from the product.
 ### Inside mode
 
 - **R-IN-1.** `boxer shell <harness> [args]` runs the harness itself inside the guest with the
-  worktree mounted at its host path, credentials mounted read-only (Codex `auth.json`, Gemini
-  `oauth_creds.json`, Kimi config) or passed as a token (`CLAUDE_CODE_OAUTH_TOKEN`), and the model
-  API hosts allowed. No hooks, no rewrite, no denials: the harness's own shell is already in the
+  worktree mounted at its host path, each harness's config directory mounted **read-write** at its
+  host path so sessions and file logins are shared rather than recreated, credentials otherwise
+  passed as a token (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`, an API key), and the model API hosts
+  allowed. No hooks, no rewrite, no denials: the harness's own shell is already in the
   sandbox.
 - **R-IN-2.** `boxer shim install --harness` writes PATH shims named after harness binaries, so an
   orchestrator that spawns `claude` by name lands inside the guest. A harness shim is not subject
@@ -904,8 +966,22 @@ the runtime-only part of a `devcontainer.json` itself, since 1.1.
   value came from. What needs an image build — `features`, `build`/`dockerFile` — and what needs
   multi-container orchestration — `dockerComposeFile` — is refused by name, with what to do
   instead, rather than ignored.
-- **R-ENV-2.** Smolfile passthrough stays as the escape hatch. Dockerfile builds and Compose are out
-  of scope until smolvm or a Docker backend supports them; Compose can run inside the guest via
+- **R-ENV-3.** `initializeCommand` is read into `[prep]` and runs on the host; `updateContentCommand`
+  is appended to `setup` ahead of `postCreateCommand`, in specification order. `postAttachCommand`
+  has no boxer equivalent and is refused by name.
+- **R-ENV-4.** The specification's variables are resolved on the host before anything is
+  interpreted; one boxer cannot resolve is named, and an env value or mount that depends on it is
+  dropped rather than passed literally. `forwardPorts` maps to `auto:` unless
+  `requireLocalPort` says otherwise; `remoteUser` maps to `user`; `hostRequirements` raises
+  `cpus`/`memory`. Settings that change the sandbox's boundary (`runArgs`, `privileged`, `capAdd`,
+  `securityOpt`) are refused by name: a repository file does not get to widen it.
+- **R-NET-URLS.** With `[urls]` on, every forwarded port has a stable hostname through portless for
+  the life of its sandbox, distinct per worktree including detached ones, never taken from another
+  sandbox or from a route boxer did not create, and removed with the sandbox.
+- **R-ENV-2.** Smolfile passthrough stays as the escape hatch, and is refused by name on a backend
+  that cannot read one. Dockerfile builds and Compose remain out of scope — note the premise has
+  changed, since a Docker backend *can* build an image, so this is now a decision rather than a
+  limitation; Compose can run inside the guest via
   smolvm's docker-in-machine.
 
 ### Backends
@@ -913,13 +989,19 @@ the runtime-only part of a `devcontainer.json` itself, since 1.1.
 `vm.Client` is already the seam: list, status, create, start, exec, stop, delete, pack, with
 labels as the only state.
 
-- **R-BE-1.** The seam becomes a `Backend` interface selected by `backend = "smolvm"`. Capabilities
-  a backend may lack (packing, branching) are flags, not assumptions. The `[branch]` table and
+- **R-BE-1.** *Done.* The seam is a `Backend` interface selected by `backend = "smolvm" | "docker"
+  | "podman"`, and capabilities a backend lacks are refused by name rather than assumed. The
+  interface is a nine-method core plus `Packer`/`Brancher`/`EgressReporter`/`DiskReporter` found by
+  type assertion, so a backend that cannot do something cannot accidentally claim it. The `[branch]` table and
   `vm.Branch` were removed in v0.3.0: smolvm branching was measured and works, but nothing in boxer
   used it, and an unused configuration key is a promise we had not kept.
-- **R-BE-2.** Estimates, not commitments: Docker backend one to two days (`docker run -v` at the
-  host path, labels, `exec`; weaker isolation, identical agent experience); Firecracker one to two
-  weeks and Linux-only (OCI to rootfs, jailer, tap networking, no branching).
+- **R-BE-2.** *Docker done, and the estimate held.* Not "identical agent experience", though: a
+  container runtime has no per-host egress allowlist, so `network.mode = "allowlist"` — the
+  default — is refused rather than silently widened. That is the one difference a user has to be
+  told about, and `boxer doctor` leads with it. Firecracker is **out of scope on macOS entirely**,
+  not merely Linux-only: it requires `/dev/kvm` and its maintainers declined a working
+  Virtualization.framework port. The macOS options with a real kernel boundary are smolvm, Apple's
+  `container`, and Docker Sandboxes (`sbx`).
 
 ## 8. Integration: OpenHands
 
@@ -993,9 +1075,10 @@ The release shape is in [release.md](release.md); these are its rules.
 - **R-REL-2.** `internal/` stays internal. `pkg/boxer` is the only importable package; it
   re-exports the few types it needs and contains no logic of its own. It and `boxer acp` are
   experimental before 1.0.
-- **R-REL-3.** JSON is the language-agnostic API: `ls`, `status`, `doctor`, `down`, `gc` take
-  `--json` and print one object or array with snake_case fields, shapes documented in
-  [api.md](api.md); refusals render as the same `box.Error` fields. Human output does not change
+- **R-REL-3.** JSON is the language-agnostic API: `ls`, `status`, `doctor`, `down`, `gc`, `brief`,
+  `tasks`, `fork`, `pack ls`, `capsule inspect` and `logs` take `--json` and print one object or array with snake_case fields; `watch
+  --json` prints one document per line, because a stream has no end. Shapes are documented on the
+  site under `reference/json`; refusals render as the same `box.Error` fields. Human output does not change
   when a JSON form is added.
 - **R-REL-4.** A release is the tag: the release workflow builds darwin/arm64, linux/amd64 and
   linux/arm64 binaries with the version stamped, checksums, and `boxer-plugins-<version>.tar.gz`

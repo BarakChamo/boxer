@@ -1,4 +1,4 @@
-# boxer eval report — tier matrix — 2026-09-21T00:35:16+08:00
+# boxer eval report — tier matrix — 2026-09-25T17:58:24+07:00
 
 The same Next.js development workload across integration levels, harnesses and
 orchestrators: 55 cells, 3 at a time, each in its own git worktree with its own sandbox and
@@ -6,47 +6,47 @@ its own automatic host port. Every cell is scored on each claim it makes separat
 provisioning, reaching the guest, rendering the page, leaving the change behind, and showing
 that the integration level itself carried the work — so a shortfall names which claim failed.
 
-**94.0% overall** (1194 of 1270 weighted checks). 47 of 55 cells scored 100%, 2 skipped, $1.56.
+**99.4% overall** (1262 of 1270 weighted checks). 54 of 55 cells scored 100%, 2 skipped, $1.89.
 
 ## How this run was made
 
 | | |
 | --- | --- |
-| boxer | boxer v1.0.0-44-g4290ecf-dirty, commit `817addb` |
+| boxer | boxer v1.0.0-48-ged8def6-dirty, commit `ed8def6` (with uncommitted changes) |
 | smolvm | smolvm 1.16.1 |
 | model | `zai/glm-5.3-flash` — every cell, so the integration level is the only variable |
 | guest image | `mirror.gcr.io/library/node:24-bookworm-slim` |
 | concurrency | 3 cells at a time |
 | host | darwin/arm64, 10 cpus, 24 GB |
-| started | 2026-09-20T23:53:55+08:00 |
+| started | 2026-09-25T17:35:38+07:00 |
 
 ## By level
 
 | level | score | cells at 100% |
 | --- | --- | --- |
 | bash-shim | 95.7% | 7/8 |
-| inside | 93.0% | 8/10 |
-| orchestrator | 79.7% | 4/6 |
+| inside | 100.0% | 10/10 |
+| orchestrator | 100.0% | 6/6 |
 | rewrite | 100.0% | 12/12 |
 | shell | 100.0% | 1/1 |
-| shims | 91.3% | 6/8 |
-| tool | 96.5% | 9/10 |
+| shims | 100.0% | 8/8 |
+| tool | 100.0% | 10/10 |
 
 ## By harness
 
 | harness | score | cells at 100% |
 | --- | --- | --- |
-| claude | 95.7% | 7/8 |
-| codex | 91.3% | 6/8 |
+| claude | 100.0% | 8/8 |
+| codex | 95.7% | 7/8 |
 | copilot | 100.0% | 6/6 |
-| dsh | 82.6% | 1/2 |
+| dsh | 100.0% | 2/2 |
 | grok | 100.0% | 4/4 |
 | herdr | 100.0% | 2/2 |
-| inside | 93.0% | 8/10 |
+| inside | 100.0% | 10/10 |
 | kimi | 100.0% | 6/6 |
 | opencode | 100.0% | 2/2 |
 | openhands | 100.0% | 1/1 |
-| paperclip | 39.1% | 0/2 |
+| paperclip | 100.0% | 2/2 |
 | pi | 100.0% | 2/2 |
 | t3 | 100.0% | 2/2 |
 
@@ -54,63 +54,63 @@ that the integration level itself carried the work — so a shortfall names whic
 
 | cell | level | score | guest | host port | turns | time | what fell short |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| claude/rewrite/add-a-page | rewrite | 100% | — | 59875 | 8 | 2m34s | — |
-| claude/rewrite/prove-and-install | rewrite | 100% | Linux | 52148 | 14 | 1m44s | — |
-| codex/rewrite/add-a-page | rewrite | 100% | — | 52259 | 0 | 1m31s | — |
-| codex/rewrite/prove-and-install | rewrite | 100% | Linux | 49990 | 0 | 2m14s | — |
-| opencode/plugin/add-a-page | rewrite | 100% | — | 59874 | 0 | 2m54s | — |
-| opencode/plugin/prove-and-install | rewrite | 100% | Linux | 51769 | 0 | 2m1s | — |
-| copilot/user/add-a-page | rewrite | 100% | — | 51852 | 0 | 1m27s | — |
-| copilot/user/prove-and-install | rewrite | 100% | Linux | 51559 | 0 | 1m45s | — |
+| claude/rewrite/add-a-page | rewrite | 100% | — | 62488 | 9 | 58s | — |
+| claude/rewrite/prove-and-install | rewrite | 100% | Linux | 62489 | 12 | 1m11s | — |
+| codex/rewrite/add-a-page | rewrite | 100% | — | 63027 | 0 | 35s | — |
+| codex/rewrite/prove-and-install | rewrite | 100% | Linux | 63074 | 0 | 51s | — |
+| opencode/plugin/add-a-page | rewrite | 100% | — | 63076 | 0 | 57s | — |
+| opencode/plugin/prove-and-install | rewrite | 100% | Linux | 63224 | 0 | 41s | — |
+| copilot/user/add-a-page | rewrite | 100% | — | 63245 | 0 | 50s | — |
+| copilot/user/prove-and-install | rewrite | 100% | Linux | 63001 | 0 | 49s | — |
 | gemini/rewrite/add-a-page | rewrite | skipped | — | — | — | — | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
 | gemini/rewrite/prove-and-install | rewrite | skipped | — | — | — | — | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
-| grok/rewrite/add-a-page | rewrite | 100% | — | 52523 | 0 | 58s | — |
-| grok/rewrite/prove-and-install | rewrite | 100% | Linux | 51263 | 0 | 1m34s | — |
-| pi/rewrite/add-a-page | rewrite | 100% | — | 51338 | 0 | 1m19s | — |
-| pi/rewrite/prove-and-install | rewrite | 100% | Linux | 51151 | 0 | 1m41s | — |
-| claude/tool/add-a-page | tool | 100% | — | 51558 | 11 | 1m37s | — |
-| claude/tool/prove-and-install | tool | 100% | Linux | 51443 | 11 | 1m49s | — |
-| kimi/tool/add-a-page | tool | 100% | — | 51868 | 0 | 1m16s | — |
-| kimi/tool/prove-and-install | tool | 100% | Linux | 59876 | 0 | 2m26s | — |
-| dsh/tool/add-a-page | tool | 100% | — | 64880 | 0 | 1m40s | — |
-| dsh/tool/prove-and-install | tool | 71% | Darwin | 65197 | 0 | 3m9s | reached the guest (the work ran on the host: the guest probe reported "Darwin"); the level carried it (the work ran on the host: the guest probe reported "Darwin") |
-| codex/tool/add-a-page | tool | 100% | — | 65214 | 0 | 3m13s | — |
-| codex/tool/prove-and-install | tool | 100% | Linux | 49440 | 0 | 2m47s | — |
-| grok/tool/add-a-page | tool | 100% | — | 49488 | 0 | 2m15s | — |
-| grok/tool/prove-and-install | tool | 100% | Linux | 49500 | 0 | 2m37s | — |
-| claude/shims/add-a-page | shims | 100% | — | 49858 | 4 | 1m36s | — |
-| claude/shims/prove-and-install | shims | 71% | — | 50869 | 9 | 1m23s | reached the guest (the agent never recorded a platform, so nothing proves the work reached the guest); the level carried it (the agent never recorded a platform, so nothing proves the work reached the guest) |
-| kimi/shims/add-a-page | shims | 100% | — | 50316 | 0 | 1m17s | — |
-| kimi/shims/prove-and-install | shims | 100% | Linux | 50436 | 0 | 1m9s | — |
-| codex/shims/add-a-page | shims | 100% | — | 50544 | 0 | 1m20s | — |
-| codex/shims/prove-and-install | shims | 71% | Darwin | 50548 | 0 | 1m36s | reached the guest (the work ran on the host: the guest probe reported "Darwin"); the level carried it (the work ran on the host: the guest probe reported "Darwin") |
-| copilot/shims/add-a-page | shims | 100% | — | 50220 | 0 | 1m40s | — |
-| copilot/shims/prove-and-install | shims | 100% | Linux | 52419 | 0 | 1m28s | — |
-| claude/bash-shim/add-a-page | bash-shim | 100% | — | 52149 | 4 | 1m6s | — |
-| claude/bash-shim/prove-and-install | bash-shim | 100% | Linux | 50713 | 18 | 1m44s | — |
-| kimi/bash-shim/add-a-page | bash-shim | 100% | — | 50931 | 0 | 1m45s | — |
-| kimi/bash-shim/prove-and-install | bash-shim | 100% | Linux | 51052 | 0 | 1m19s | — |
-| codex/bash-shim/add-a-page | bash-shim | 100% | — | 64742 | 0 | 1m59s | — |
-| codex/bash-shim/prove-and-install | bash-shim | 71% | Darwin | 60459 | 0 | 1m53s | reached the guest (the work ran on the host: the guest probe reported "Darwin"); the level carried it (the work ran on the host: the guest probe reported "Darwin") |
-| copilot/bash-shim/add-a-page | bash-shim | 100% | — | 60619 | 0 | 1m46s | — |
-| copilot/bash-shim/prove-and-install | bash-shim | 100% | Linux | 60856 | 0 | 2m21s | — |
-| openhands/shell/prove-and-install | shell | 100% | Linux | 60876 | 0 | 2m42s | — |
-| inside/claude/add-a-page | inside | 100% | — | 60967 | 14 | 2m40s | — |
-| inside/claude/prove-and-install | inside | 100% | Linux | 61356 | 14 | 2m40s | — |
-| inside/codex/add-a-page | inside | 100% | — | 61472 | 0 | 2m49s | — |
-| inside/codex/prove-and-install | inside | 100% | Linux | 61498 | 0 | 3m3s | — |
-| inside/opencode/add-a-page | inside | 83% | — | 62167 | 0 | 2m40s | the page renders (the dev server stopped answering on 62167 (http://127.0.0.1:62167/ never answered: Get "http://127.0.0.1:62167/": read tcp 127.0.0.1:62783->127.0.0.1:62167: read: connection reset by peer)); the dev server survived (http://127.0.0.1:62167/ never answered: Get "http://127.0.0.1:62167/": read tcp 127.0.0.1:63079->127.0.0.1:62167: read: connection reset by peer) |
-| inside/opencode/prove-and-install | inside | 100% | Linux | 62357 | 0 | 2m14s | — |
-| inside/kimi/add-a-page | inside | 100% | — | 62530 | 0 | 2m15s | — |
-| inside/kimi/prove-and-install | inside | 100% | Linux | 63104 | 0 | 2m9s | — |
-| inside/fx/add-a-page | inside | 100% | — | 63145 | 0 | 2m6s | — |
-| inside/fx/prove-and-install | inside | 54% | — | 63289 | 0 | 3m2s | the page renders (the dev server stopped answering on 63289 (http://127.0.0.1:63289/ never answered: Get "http://127.0.0.1:63289/": read tcp 127.0.0.1:64108->127.0.0.1:63289: read: connection reset by peer)); the dependency is installed (clsx is not in app/package.json); reached the guest (the agent never recorded a platform, so nothing proves the work reached the guest); the level carried it (the agent never recorded a platform, so nothing proves the work reached the guest); the dev server survived (http://127.0.0.1:63289/ never answered: Get "http://127.0.0.1:63289/": read tcp 127.0.0.1:64208->127.0.0.1:63289: read: connection reset by peer) |
-| t3/orchestrator/add-a-page | orchestrator | 100% | — | 64162 | 0 | 3m15s | — |
-| t3/orchestrator/prove-and-install | orchestrator | 100% | Linux | 64189 | 0 | 3m29s | — |
-| paperclip/orchestrator/add-a-page | orchestrator | 72% | — | 64567 | 0 | 2m40s | the agent finished (paperclip run failed); the agent converged (paperclip run failed); the page renders (no "BOXER-ABOUT-OK"; the page showed "# 404") |
-| paperclip/orchestrator/prove-and-install | orchestrator | 18% | — | 65203 | 0 | 5m3s | the agent finished (paperclip run failed); the agent converged (paperclip run failed); the page renders (the orchestrator's own worktree never served a page: http://127.0.0.1:65203/ never answered: Get "http://127.0.0.1:65203/": read tcp 127.0.0.1:49495->127.0.0.1:65203: read: connection reset by peer); the change is in the worktree (not reached); the dependency is installed (not reached); reached the guest (not reached); the level carried it (not reached); no host leak (not reached); the dev server survived (not reached); the sandbox was left clean (not reached) |
-| herdr/orchestrator/add-a-page | orchestrator | 100% | — | 49899 | 0 | 1m47s | — |
-| herdr/orchestrator/prove-and-install | orchestrator | 100% | Linux | 60417 | 0 | 1m47s | — |
+| grok/rewrite/add-a-page | rewrite | 100% | — | 63880 | 0 | 40s | — |
+| grok/rewrite/prove-and-install | rewrite | 100% | Linux | 63776 | 0 | 1m3s | — |
+| pi/rewrite/add-a-page | rewrite | 100% | — | 63826 | 0 | 36s | — |
+| pi/rewrite/prove-and-install | rewrite | 100% | Linux | 63857 | 0 | 37s | — |
+| claude/tool/add-a-page | tool | 100% | — | 63685 | 10 | 51s | — |
+| claude/tool/prove-and-install | tool | 100% | Linux | 62616 | 13 | 1m1s | — |
+| kimi/tool/add-a-page | tool | 100% | — | 62617 | 0 | 44s | — |
+| kimi/tool/prove-and-install | tool | 100% | Linux | 62681 | 0 | 1m3s | — |
+| dsh/tool/add-a-page | tool | 100% | — | 62685 | 0 | 36s | — |
+| dsh/tool/prove-and-install | tool | 100% | Linux | 62722 | 0 | 47s | — |
+| codex/tool/add-a-page | tool | 100% | — | 62757 | 0 | 48s | — |
+| codex/tool/prove-and-install | tool | 100% | Linux | 62790 | 0 | 58s | — |
+| grok/tool/add-a-page | tool | 100% | — | 62811 | 0 | 42s | — |
+| grok/tool/prove-and-install | tool | 100% | Linux | 62846 | 0 | 3m31s | — |
+| claude/shims/add-a-page | shims | 100% | — | 62886 | 10 | 42s | — |
+| claude/shims/prove-and-install | shims | 100% | Linux | 62912 | 8 | 39s | — |
+| kimi/shims/add-a-page | shims | 100% | — | 62944 | 0 | 40s | — |
+| kimi/shims/prove-and-install | shims | 100% | Linux | 62965 | 0 | 48s | — |
+| codex/shims/add-a-page | shims | 100% | — | 62590 | 0 | 53s | — |
+| codex/shims/prove-and-install | shims | 100% | Linux | 63338 | 0 | 1m9s | — |
+| copilot/shims/add-a-page | shims | 100% | — | 63373 | 0 | 51s | — |
+| copilot/shims/prove-and-install | shims | 100% | Linux | 63426 | 0 | 56s | — |
+| claude/bash-shim/add-a-page | bash-shim | 100% | — | 63449 | 6 | 37s | — |
+| claude/bash-shim/prove-and-install | bash-shim | 100% | Linux | 63453 | 14 | 1m5s | — |
+| kimi/bash-shim/add-a-page | bash-shim | 100% | — | 63510 | 0 | 37s | — |
+| kimi/bash-shim/prove-and-install | bash-shim | 100% | Linux | 63535 | 0 | 46s | — |
+| codex/bash-shim/add-a-page | bash-shim | 100% | — | 63560 | 0 | 40s | — |
+| codex/bash-shim/prove-and-install | bash-shim | 71% | Darwin | 63584 | 0 | 56s | reached the guest (the work ran on the host: the guest probe reported "Darwin"); the level carried it (the work ran on the host: the guest probe reported "Darwin") |
+| copilot/bash-shim/add-a-page | bash-shim | 100% | — | 63620 | 0 | 56s | — |
+| copilot/bash-shim/prove-and-install | bash-shim | 100% | Linux | 63649 | 0 | 56s | — |
+| openhands/shell/prove-and-install | shell | 100% | Linux | 63728 | 0 | 1m3s | — |
+| inside/claude/add-a-page | inside | 100% | — | 63751 | 6 | 1m27s | — |
+| inside/claude/prove-and-install | inside | 100% | Linux | 63258 | 18 | 1m48s | — |
+| inside/codex/add-a-page | inside | 100% | — | 63927 | 0 | 1m52s | — |
+| inside/codex/prove-and-install | inside | 100% | Linux | 63961 | 0 | 1m54s | — |
+| inside/opencode/add-a-page | inside | 100% | — | 63881 | 0 | 6m42s | — |
+| inside/opencode/prove-and-install | inside | 100% | Linux | 64747 | 0 | 55s | — |
+| inside/kimi/add-a-page | inside | 100% | — | 64372 | 0 | 1m0s | — |
+| inside/kimi/prove-and-install | inside | 100% | Linux | 64462 | 0 | 48s | — |
+| inside/fx/add-a-page | inside | 100% | — | 64431 | 0 | 1m21s | — |
+| inside/fx/prove-and-install | inside | 100% | Linux | 64546 | 0 | 1m57s | — |
+| t3/orchestrator/add-a-page | orchestrator | 100% | — | 64655 | 0 | 1m24s | — |
+| t3/orchestrator/prove-and-install | orchestrator | 100% | Linux | 64683 | 0 | 1m19s | — |
+| paperclip/orchestrator/add-a-page | orchestrator | 100% | — | 64346 | 0 | 1m43s | — |
+| paperclip/orchestrator/prove-and-install | orchestrator | 100% | Linux | 64217 | 0 | 1m15s | — |
+| herdr/orchestrator/add-a-page | orchestrator | 100% | — | 64263 | 0 | 1m1s | — |
+| herdr/orchestrator/prove-and-install | orchestrator | 100% | Linux | 62494 | 0 | 1m11s | — |
 
 ## The scorecard
 
@@ -121,459 +121,439 @@ Every claim, and how many cells made it good.
 | the sandbox came up | 55 | 55 (100%) |
 | a host port was forwarded | 55 | 55 (100%) |
 | the dev server answered first | 55 | 55 (100%) |
-| the agent finished | 55 | 53 (96%) |
-| the agent converged | 55 | 53 (96%) |
-| the page renders | 55 | 51 (93%) |
-| the change is in the worktree | 55 | 54 (98%) |
-| no host leak | 55 | 54 (98%) |
-| the dev server survived | 55 | 52 (95%) |
+| the agent finished | 55 | 55 (100%) |
+| the agent converged | 55 | 55 (100%) |
+| the page renders | 55 | 55 (100%) |
+| the change is in the worktree | 55 | 55 (100%) |
+| no host leak | 55 | 55 (100%) |
+| the dev server survived | 55 | 55 (100%) |
 | the server was not replaced | 55 | 55 (100%) |
-| the sandbox was left clean | 55 | 54 (98%) |
-| the dependency is installed | 28 | 26 (93%) |
-| reached the guest | 28 | 22 (79%) |
-| the level carried it | 28 | 22 (79%) |
+| the sandbox was left clean | 55 | 55 (100%) |
+| the dependency is installed | 28 | 28 (100%) |
+| reached the guest | 28 | 27 (96%) |
+| the level carried it | 28 | 27 (96%) |
 
 ## What each agent did
 
 ### claude/rewrite — add-a-page — 100%
 
-- level `rewrite`, 2m34s, 8 tool calls
-- tools: Bash×6, Read×1, Write×1
-- changed: boxer.toml, .mcp.json, app/app/about/
+- level `rewrite`, 58s, 9 tool calls
+- tools: Bash×6, Read×2, Write×1
+- changed: boxer.toml, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-add-a-page.trace.log`
 
 ### claude/rewrite — prove-and-install — 100%
 
-- level `rewrite`, 1m44s, 14 tool calls
-- tools: Bash×11, Skill×1, Write×2
+- level `rewrite`, 1m11s, 12 tool calls
+- tools: Bash×9, Write×2, mcp__boxer__boxer_run×1
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-rewrite-prove-and-install.trace.log`
 
 ### codex/rewrite — add-a-page — 100%
 
-- level `rewrite`, 1m31s, 0 tool calls
-- changed: boxer.toml, .agents/, .codex/, app/app/about/
+- level `rewrite`, 35s, 0 tool calls
+- changed: boxer.toml, .agents/, .codex/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-add-a-page.trace.log`
 
 ### codex/rewrite — prove-and-install — 100%
 
-- level `rewrite`, 2m14s, 0 tool calls
+- level `rewrite`, 51s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-rewrite-prove-and-install.trace.log`
 
 ### opencode/plugin — add-a-page — 100%
 
-- level `rewrite`, 2m54s, 0 tool calls
-- changed: boxer.toml, .opencode/, AGENTS.md, app/app/about/, opencode.json
+- level `rewrite`, 57s, 0 tool calls
+- changed: boxer.toml, .opencode/, AGENTS.md, app/app/about/, opencode.json, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-add-a-page.trace.log`
 
 ### opencode/plugin — prove-and-install — 100%
 
-- level `rewrite`, 2m1s, 0 tool calls
+- level `rewrite`, 41s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .opencode/, AGENTS.md, app/app/clsx/, opencode.json, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .opencode/, AGENTS.md, app/app/clsx/, opencode.json, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-opencode-plugin-prove-and-install.trace.log`
 
 ### copilot/user — add-a-page — 100%
 
-- level `rewrite`, 1m27s, 0 tool calls
-- changed: boxer.toml, app/app/about/
+- level `rewrite`, 50s, 0 tool calls
+- changed: boxer.toml, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-add-a-page.trace.log`
 
 ### copilot/user — prove-and-install — 100%
 
-- level `rewrite`, 1m45s, 0 tool calls
+- level `rewrite`, 49s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-user-prove-and-install.trace.log`
 
 ### grok/rewrite — add-a-page — 100%
 
-- level `rewrite`, 58s, 0 tool calls
-- changed: boxer.toml, .agents/, .grok/, .mcp.json, app/app/about/
+- level `rewrite`, 40s, 0 tool calls
+- changed: boxer.toml, .agents/, .grok/, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-add-a-page.trace.log`
 
 ### grok/rewrite — prove-and-install — 100%
 
-- level `rewrite`, 1m34s, 0 tool calls
+- level `rewrite`, 1m3s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .grok/, .mcp.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .grok/, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-rewrite-prove-and-install.trace.log`
 
 ### pi/rewrite — add-a-page — 100%
 
-- level `rewrite`, 1m19s, 0 tool calls
-- changed: boxer.toml, .pi/, AGENTS.md, app/app/about/
+- level `rewrite`, 36s, 0 tool calls
+- changed: boxer.toml, .pi/, AGENTS.md, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-add-a-page.trace.log`
 
 ### pi/rewrite — prove-and-install — 100%
 
-- level `rewrite`, 1m41s, 0 tool calls
+- level `rewrite`, 37s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .pi/, AGENTS.md, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .pi/, AGENTS.md, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-pi-rewrite-prove-and-install.trace.log`
 
 ### claude/tool — add-a-page — 100%
 
-- level `tool`, 1m37s, 11 tool calls
-- tools: Bash×6, Read×2, Write×1, mcp__boxer__boxer_run×2
-- changed: boxer.toml, .mcp.json, app/app/about/
+- level `tool`, 51s, 10 tool calls
+- tools: Bash×8, Read×1, Write×1
+- changed: boxer.toml, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-add-a-page.trace.log`
 
 ### claude/tool — prove-and-install — 100%
 
-- level `tool`, 1m49s, 11 tool calls
-- tools: Bash×1, Read×1, Write×1, mcp__boxer__boxer_run×8
+- level `tool`, 1m1s, 13 tool calls
+- tools: Bash×4, Write×1, mcp__boxer__boxer_run×7, mcp__boxer__boxer_status×1
 - the level carried it: the agent used the `boxer_run` tool
-- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-tool-prove-and-install.trace.log`
 
 ### kimi/tool — add-a-page — 100%
 
-- level `tool`, 1m16s, 0 tool calls
-- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/
+- level `tool`, 44s, 0 tool calls
+- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-add-a-page.trace.log`
 
 ### kimi/tool — prove-and-install — 100%
 
-- level `tool`, 2m26s, 0 tool calls
+- level `tool`, 1m3s, 0 tool calls
 - the level carried it: the agent used the `boxer_run` tool
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-tool-prove-and-install.trace.log`
 
 ### dsh/tool — add-a-page — 100%
 
-- level `tool`, 1m40s, 0 tool calls
-- changed: boxer.toml, .agents/, .dsh/, app/app/about/
+- level `tool`, 36s, 0 tool calls
+- changed: boxer.toml, .agents/, .dsh/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-add-a-page.trace.log`
 
-### dsh/tool — prove-and-install — 71%
+### dsh/tool — prove-and-install — 100%
 
-- level `tool`, 3m9s, 0 tool calls
-- **reached the guest**: the work ran on the host: the guest probe reported "Darwin"
-- **the level carried it**: the work ran on the host: the guest probe reported "Darwin"
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .dsh/, app/app/clsx/, where.txt
+- level `tool`, 47s, 0 tool calls
+- the level carried it: the agent used the `boxer_run` tool
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .dsh/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-dsh-tool-prove-and-install.trace.log`
 
 ### codex/tool — add-a-page — 100%
 
-- level `tool`, 3m13s, 0 tool calls
-- changed: boxer.toml, .agents/, .codex/, app/app/about/
+- level `tool`, 48s, 0 tool calls
+- changed: boxer.toml, .agents/, .codex/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-tool-add-a-page.trace.log`
 
 ### codex/tool — prove-and-install — 100%
 
-- level `tool`, 2m47s, 0 tool calls
+- level `tool`, 58s, 0 tool calls
 - the level carried it: the agent used the `boxer_run` tool
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-tool-prove-and-install.trace.log`
 
 ### grok/tool — add-a-page — 100%
 
-- level `tool`, 2m15s, 0 tool calls
-- changed: boxer.toml, app/app/about/
+- level `tool`, 42s, 0 tool calls
+- changed: boxer.toml, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-tool-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-tool-add-a-page.trace.log`
 
 ### grok/tool — prove-and-install — 100%
 
-- level `tool`, 2m37s, 0 tool calls
+- level `tool`, 3m31s, 0 tool calls
 - the level carried it: the agent used the `boxer_run` tool
-- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .gstack/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-tool-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-grok-tool-prove-and-install.trace.log`
 
 ### claude/shims — add-a-page — 100%
 
-- level `shims`, 1m36s, 4 tool calls
-- tools: Bash×3, Write×1
-- changed: boxer.toml, .mcp.json, app/app/about/
+- level `shims`, 42s, 10 tool calls
+- tools: Bash×9, Write×1
+- changed: boxer.toml, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-add-a-page.trace.log`
 
-### claude/shims — prove-and-install — 71%
+### claude/shims — prove-and-install — 100%
 
-- level `shims`, 1m23s, 9 tool calls
-- tools: Bash×7, Skill×1, Write×1
-- **reached the guest**: the agent never recorded a platform, so nothing proves the work reached the guest
-- **the level carried it**: the agent never recorded a platform, so nothing proves the work reached the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, app/where.txt
+- level `shims`, 39s, 8 tool calls
+- tools: Bash×5, Write×2, mcp__boxer__boxer_run×1
+- the level carried it: a PATH shim carried the bare command into the guest
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-shims-prove-and-install.trace.log`
 
 ### kimi/shims — add-a-page — 100%
 
-- level `shims`, 1m17s, 0 tool calls
-- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/
+- level `shims`, 40s, 0 tool calls
+- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-shims-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-shims-add-a-page.trace.log`
 
 ### kimi/shims — prove-and-install — 100%
 
-- level `shims`, 1m9s, 0 tool calls
+- level `shims`, 48s, 0 tool calls
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-shims-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-shims-prove-and-install.trace.log`
 
 ### codex/shims — add-a-page — 100%
 
-- level `shims`, 1m20s, 0 tool calls
-- changed: boxer.toml, .agents/, .codex/, app/app/about/
+- level `shims`, 53s, 0 tool calls
+- changed: boxer.toml, .agents/, .codex/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-shims-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-shims-add-a-page.trace.log`
 
-### codex/shims — prove-and-install — 71%
+### codex/shims — prove-and-install — 100%
 
-- level `shims`, 1m36s, 0 tool calls
-- **reached the guest**: the work ran on the host: the guest probe reported "Darwin"
-- **the level carried it**: the work ran on the host: the guest probe reported "Darwin"
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, where.txt
+- level `shims`, 1m9s, 0 tool calls
+- the level carried it: a PATH shim carried the bare command into the guest
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-shims-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-shims-prove-and-install.trace.log`
 
 ### copilot/shims — add-a-page — 100%
 
-- level `shims`, 1m40s, 0 tool calls
-- changed: boxer.toml, app/app/about/
+- level `shims`, 51s, 0 tool calls
+- changed: boxer.toml, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-shims-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-shims-add-a-page.trace.log`
 
 ### copilot/shims — prove-and-install — 100%
 
-- level `shims`, 1m28s, 0 tool calls
+- level `shims`, 56s, 0 tool calls
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-shims-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-shims-prove-and-install.trace.log`
 
 ### claude/bash-shim — add-a-page — 100%
 
-- level `bash-shim`, 1m6s, 4 tool calls
-- tools: Bash×3, Write×1
-- changed: boxer.toml, .mcp.json, app/app/about/
+- level `bash-shim`, 37s, 6 tool calls
+- tools: Bash×5, Write×1
+- changed: boxer.toml, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-bash-shim-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-bash-shim-add-a-page.trace.log`
 
 ### claude/bash-shim — prove-and-install — 100%
 
-- level `bash-shim`, 1m44s, 18 tool calls
-- tools: Bash×12, Edit×2, Skill×1, Write×1, mcp__boxer__boxer_run×1, mcp__boxer__boxer_status×1
+- level `bash-shim`, 1m5s, 14 tool calls
+- tools: Bash×11, Read×1, Skill×1, Write×1
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-bash-shim-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-claude-bash-shim-prove-and-install.trace.log`
 
 ### kimi/bash-shim — add-a-page — 100%
 
-- level `bash-shim`, 1m45s, 0 tool calls
-- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/
+- level `bash-shim`, 37s, 0 tool calls
+- changed: boxer.toml, .agents/, .kimi-code/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-bash-shim-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-bash-shim-add-a-page.trace.log`
 
 ### kimi/bash-shim — prove-and-install — 100%
 
-- level `bash-shim`, 1m19s, 0 tool calls
+- level `bash-shim`, 46s, 0 tool calls
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .kimi-code/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-bash-shim-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-kimi-bash-shim-prove-and-install.trace.log`
 
 ### codex/bash-shim — add-a-page — 100%
 
-- level `bash-shim`, 1m59s, 0 tool calls
-- changed: boxer.toml, .agents/, .codex/, app/app/about/
+- level `bash-shim`, 40s, 0 tool calls
+- changed: boxer.toml, .agents/, .codex/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-bash-shim-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-bash-shim-add-a-page.trace.log`
 
 ### codex/bash-shim — prove-and-install — 71%
 
-- level `bash-shim`, 1m53s, 0 tool calls
+- level `bash-shim`, 56s, 0 tool calls
 - **reached the guest**: the work ran on the host: the guest probe reported "Darwin"
 - **the level carried it**: the work ran on the host: the guest probe reported "Darwin"
-- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .agents/, .codex/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-bash-shim-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-codex-bash-shim-prove-and-install.trace.log`
 
 ### copilot/bash-shim — add-a-page — 100%
 
-- level `bash-shim`, 1m46s, 0 tool calls
-- changed: boxer.toml, app/app/about/
+- level `bash-shim`, 56s, 0 tool calls
+- changed: boxer.toml, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-bash-shim-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-bash-shim-add-a-page.trace.log`
 
 ### copilot/bash-shim — prove-and-install — 100%
 
-- level `bash-shim`, 2m21s, 0 tool calls
+- level `bash-shim`, 56s, 0 tool calls
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-bash-shim-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-copilot-bash-shim-prove-and-install.trace.log`
 
 ### openhands/shell — prove-and-install — 100%
 
-- level `shell`, 2m42s, 0 tool calls
+- level `shell`, 1m3s, 0 tool calls
 - the level carried it: a PATH shim carried the bare command into the guest
-- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-openhands-shell-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-openhands-shell-prove-and-install.trace.log`
 
 ### inside/claude — add-a-page — 100%
 
-- level `inside`, 2m40s, 14 tool calls
-- tools: Bash×11, Read×2, Write×1
-- changed: boxer.toml, .boxer-eval/, app/app/about/
+- level `inside`, 1m27s, 6 tool calls
+- tools: Bash×5, Write×1
+- changed: boxer.toml, .boxer-eval/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-add-a-page.trace.log`
 
 ### inside/claude — prove-and-install — 100%
 
-- level `inside`, 2m40s, 14 tool calls
-- tools: Bash×13, Write×1
+- level `inside`, 1m48s, 18 tool calls
+- tools: Bash×12, Read×4, Write×2
 - the level carried it: the harness itself ran in the guest; nothing was intercepted
-- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-claude-prove-and-install.trace.log`
 
 ### inside/codex — add-a-page — 100%
 
-- level `inside`, 2m49s, 0 tool calls
-- changed: boxer.toml, .boxer-eval/, app/app/about/
+- level `inside`, 1m52s, 0 tool calls
+- changed: boxer.toml, .boxer-eval/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-codex-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-codex-add-a-page.trace.log`
 
 ### inside/codex — prove-and-install — 100%
 
-- level `inside`, 3m3s, 0 tool calls
+- level `inside`, 1m54s, 0 tool calls
 - the level carried it: the harness itself ran in the guest; nothing was intercepted
-- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-codex-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-codex-prove-and-install.trace.log`
 
-### inside/opencode — add-a-page — 83%
+### inside/opencode — add-a-page — 100%
 
-- level `inside`, 2m40s, 0 tool calls
-- **the page renders**: the dev server stopped answering on 62167 (http://127.0.0.1:62167/ never answered: Get "http://127.0.0.1:62167/": read tcp 127.0.0.1:62783->127.0.0.1:62167: read: connection reset by peer)
-- **the dev server survived**: http://127.0.0.1:62167/ never answered: Get "http://127.0.0.1:62167/": read tcp 127.0.0.1:63079->127.0.0.1:62167: read: connection reset by peer
-- changed: boxer.toml, opencode.json
+- level `inside`, 6m42s, 0 tool calls
+- changed: boxer.toml, .boxer-eval/, app/app/about/, opencode.json, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-opencode-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-opencode-add-a-page.trace.log`
 
 ### inside/opencode — prove-and-install — 100%
 
-- level `inside`, 2m14s, 0 tool calls
+- level `inside`, 55s, 0 tool calls
 - the level carried it: the harness itself ran in the guest; nothing was intercepted
-- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, opencode.json, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, opencode.json, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-opencode-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-opencode-prove-and-install.trace.log`
 
 ### inside/kimi — add-a-page — 100%
 
-- level `inside`, 2m15s, 0 tool calls
-- changed: boxer.toml, .boxer-eval/, app/app/about/
+- level `inside`, 1m0s, 0 tool calls
+- changed: boxer.toml, .boxer-eval/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-kimi-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-kimi-add-a-page.trace.log`
 
 ### inside/kimi — prove-and-install — 100%
 
-- level `inside`, 2m9s, 0 tool calls
+- level `inside`, 48s, 0 tool calls
 - the level carried it: the harness itself ran in the guest; nothing was intercepted
-- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-kimi-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-kimi-prove-and-install.trace.log`
 
 ### inside/fx — add-a-page — 100%
 
-- level `inside`, 2m6s, 0 tool calls
-- changed: boxer.toml, .boxer-eval/, app/app/about/
+- level `inside`, 1m21s, 0 tool calls
+- changed: boxer.toml, .boxer-eval/, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-fx-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-fx-add-a-page.trace.log`
 
-### inside/fx — prove-and-install — 54%
+### inside/fx — prove-and-install — 100%
 
-- level `inside`, 3m2s, 0 tool calls
-- **the page renders**: the dev server stopped answering on 63289 (http://127.0.0.1:63289/ never answered: Get "http://127.0.0.1:63289/": read tcp 127.0.0.1:64108->127.0.0.1:63289: read: connection reset by peer)
-- **the dependency is installed**: clsx is not in app/package.json
-- **reached the guest**: the agent never recorded a platform, so nothing proves the work reached the guest
-- **the level carried it**: the agent never recorded a platform, so nothing proves the work reached the guest
-- **the dev server survived**: http://127.0.0.1:63289/ never answered: Get "http://127.0.0.1:63289/": read tcp 127.0.0.1:64208->127.0.0.1:63289: read: connection reset by peer
-- changed: boxer.toml, .boxer-eval/
+- level `inside`, 1m57s, 0 tool calls
+- the level carried it: the harness itself ran in the guest; nothing was intercepted
+- changed: app/package-lock.json, app/package.json, boxer.toml, .boxer-eval/, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-fx-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-inside-fx-prove-and-install.trace.log`
 
 ### t3/orchestrator — add-a-page — 100%
 
-- level `orchestrator`, 3m15s, 0 tool calls
-- changed: app/app/about/, .mcp.json, boxer.toml
+- level `orchestrator`, 1m24s, 0 tool calls
+- changed: app/app/about/, .mcp.json, boxer.toml, site/public/.well-known/agent-skills/boxer/SKILL.md, site/public/.well-known/agent-skills/index.json, skills/boxer/SKILL.md, skills/boxer/references/BRIEF.md, skills/boxer/scripts/brief, skills/boxer/scripts/run, skills/boxer/scripts/status, skills/boxer/scripts/task
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-add-a-page.trace.log`
 
 ### t3/orchestrator — prove-and-install — 100%
 
-- level `orchestrator`, 3m29s, 0 tool calls
+- level `orchestrator`, 1m19s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, app/app/clsx/, where.txt, .mcp.json, boxer.toml
+- changed: app/package-lock.json, app/package.json, app/app/clsx/, where.txt, .mcp.json, boxer.toml, site/public/.well-known/agent-skills/boxer/SKILL.md, site/public/.well-known/agent-skills/index.json, skills/boxer/SKILL.md, skills/boxer/references/BRIEF.md, skills/boxer/scripts/brief, skills/boxer/scripts/run, skills/boxer/scripts/status, skills/boxer/scripts/task
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-t3-orchestrator-prove-and-install.trace.log`
 
-### paperclip/orchestrator — add-a-page — 72%
+### paperclip/orchestrator — add-a-page — 100%
 
-- level `orchestrator`, 2m40s, 0 tool calls
-- **the agent finished**: paperclip run failed
-- **the agent converged**: paperclip run failed
-- **the page renders**: no "BOXER-ABOUT-OK"; the page showed "# 404"
-- changed: .mcp.json, boxer.toml
+- level `orchestrator`, 1m43s, 0 tool calls
+- changed: app/app/about/, .mcp.json, boxer.toml, site/public/.well-known/agent-skills/boxer/SKILL.md, site/public/.well-known/agent-skills/index.json, skills/boxer/SKILL.md, skills/boxer/references/BRIEF.md, skills/boxer/scripts/brief, skills/boxer/scripts/run, skills/boxer/scripts/status, skills/boxer/scripts/task
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-paperclip-orchestrator-add-a-page.agent.log`
 
-### paperclip/orchestrator — prove-and-install — 18%
+### paperclip/orchestrator — prove-and-install — 100%
 
-- level `orchestrator`, 5m3s, 0 tool calls
-- **the agent finished**: paperclip run failed
-- **the agent converged**: paperclip run failed
-- **the page renders**: the orchestrator's own worktree never served a page: http://127.0.0.1:65203/ never answered: Get "http://127.0.0.1:65203/": read tcp 127.0.0.1:49495->127.0.0.1:65203: read: connection reset by peer
-- **the change is in the worktree**: not reached
-- **the dependency is installed**: not reached
-- **reached the guest**: not reached
-- **the level carried it**: not reached
-- **no host leak**: not reached
-- **the dev server survived**: not reached
-- **the sandbox was left clean**: not reached
+- level `orchestrator`, 1m15s, 0 tool calls
+- the level carried it: the agent typed `boxer run` itself, from the installed agent contract
+- changed: app/package-lock.json, app/package.json, app/app/clsx/, where.txt, .mcp.json, boxer.toml, site/public/.well-known/agent-skills/boxer/SKILL.md, site/public/.well-known/agent-skills/index.json, skills/boxer/SKILL.md, skills/boxer/references/BRIEF.md, skills/boxer/scripts/brief, skills/boxer/scripts/run, skills/boxer/scripts/status, skills/boxer/scripts/task
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-paperclip-orchestrator-prove-and-install.agent.log`
 
 ### herdr/orchestrator — add-a-page — 100%
 
-- level `orchestrator`, 1m47s, 0 tool calls
-- changed: boxer.toml, .mcp.json, app/app/about/
+- level `orchestrator`, 1m1s, 0 tool calls
+- changed: boxer.toml, .mcp.json, app/app/about/, site/, skills/
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-add-a-page.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-add-a-page.trace.log`
 
 ### herdr/orchestrator — prove-and-install — 100%
 
-- level `orchestrator`, 1m47s, 0 tool calls
+- level `orchestrator`, 1m11s, 0 tool calls
 - the level carried it: the hook rewrote the command into `boxer run`
-- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, where.txt
+- changed: app/package-lock.json, app/package.json, boxer.toml, .mcp.json, app/app/clsx/, site/, skills/, where.txt
 - transcript: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-prove-and-install.agent.log`
 - trace: `/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/matrix-herdr-orchestrator-prove-and-install.trace.log`
 

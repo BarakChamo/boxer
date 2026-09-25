@@ -11,12 +11,15 @@ harness table (`internal/inside`), or a bundle template (`internal/bundle/templa
 `TestCoreNamesNoHarness` parses those packages and fails if a name appears, so adding a harness
 cannot grow the core.
 
-Adding a harness therefore means: one dialect row, one install case, one template namespace, and
-one eval driver. If your change needs more than that, the design is wrong; open an issue first.
+Adding a harness therefore means rows in five tables: a hook dialect, an install case, a package
+view, an inside-mode row, and an eval driver. A harness that cannot support one of them is simply
+absent from it. If your change needs more than rows, the design is wrong; open an issue first.
+[docs/adding-a-harness.md](docs/adding-a-harness.md) walks through each table and the facts you
+have to establish against the real binary first.
 
 ## Published content is static
 
-Anything under `skill/` or `plugin/` is published to users verbatim. It must never be rendered
+Anything under `plugin/` is published to users verbatim, including the skill it carries. It must never be rendered
 from anyone's configuration. Scripts inside the skill call the installed `boxer` binary, which
 resolves `boxer.toml` at run time. `TestPackageIsConfigIndependent` proves it.
 
@@ -30,7 +33,8 @@ make smoke                                             # real smolvm, no model
 ```
 
 Unit tests use a fake smolvm (`internal/vmtest`) and need only `git` and a POSIX shell. Nothing in
-`go test ./...` touches the network or a real VM.
+`go test ./...` touches the network or a real VM. What each layer of testing can and cannot prove:
+[docs/testing.md](docs/testing.md).
 
 ## Evaluations
 
@@ -49,6 +53,9 @@ which cells were run and paste the report line.
 ## Style
 
 - Plain prose in comments, commits and docs. Explain why, not what.
+- User-facing documentation is the site under [`site/`](site), and it is the only copy. `docs/` is
+  the engineering record. [docs/documentation-map.md](docs/documentation-map.md) says which is
+  which, and what belongs where.
 - Errors an agent will read are `boxer: <reason>` with `scope`, `worktree`, `cause` and a runnable
   `fix:` line. Every refusal must tell the reader the next command to type.
 - Smallest diff that is correct. No abstraction with one implementation.

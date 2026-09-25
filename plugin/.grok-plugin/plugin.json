@@ -1,7 +1,7 @@
 {
   "name": "boxer",
   "version": "dev",
-  "description": "Runs shell commands in a smolvm microVM keyed to the git worktree. Hooks provision the sandbox and rewrite commands into it; the boxer_run tool is the explicit path.",
+  "description": "Runs shell commands in a sandbox — a microVM or a container — keyed to the git worktree. Hooks provision the sandbox and rewrite commands into it; the boxer_run tool is the explicit path.",
   "skills": "./skills/",
   "hooks": "./ai.x.grok/hooks/hooks.json",
   "mcpServers": "./mcp.json"

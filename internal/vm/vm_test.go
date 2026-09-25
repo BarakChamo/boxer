@@ -1,10 +1,12 @@
 package vm_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
@@ -30,11 +32,11 @@ func TestLifecycleAgainstFake(t *testing.T) {
 	if !m.Running() {
 		t.Fatal("running expected")
 	}
-	out, code, err := c.Output("sb-x", "/workspace", "sh", "-c", "echo hi; exit 3")
+	out, code, err := vm.Output(c, "sb-x", "/workspace", "sh", "-c", "echo hi; exit 3")
 	if err != nil || code != 3 || strings.TrimSpace(out) != "hi" {
 		t.Fatalf("exec passthrough: %q %d %v", out, code, err)
 	}
-	owned, _ := c.Owned()
+	owned, _ := vm.Owned(c)
 	if len(owned) != 1 || owned[0].Labels["boxer.scope"] != "sb-x" {
 		t.Fatalf("owned: %+v", owned)
 	}
@@ -118,7 +120,7 @@ func TestFakeModelsSeveralMachines(t *testing.T) {
 	if err := c.Start("sb-a"); err != nil {
 		t.Fatal(err)
 	}
-	owned, err := c.Owned()
+	owned, err := vm.Owned(c)
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("owned: %v %v", owned, err)
 	}
@@ -133,7 +135,7 @@ func TestFakeModelsSeveralMachines(t *testing.T) {
 	if err := c.Delete("sb-a"); err != nil {
 		t.Fatal(err)
 	}
-	if owned, _ := c.Owned(); len(owned) != 1 || owned[0].Name != "sb-b" {
+	if owned, _ := vm.Owned(c); len(owned) != 1 || owned[0].Name != "sb-b" {
 		t.Fatalf("after delete: %v", owned)
 	}
 }
@@ -153,5 +155,161 @@ func TestDataDir(t *testing.T) {
 	}
 	if _, err := c.DataDir("sb-nosuchmachine"); err == nil {
 		t.Fatal("a machine that does not exist has no data directory")
+	}
+}
+
+// Branching is the one smolvm verb with real preconditions: the source must have been started
+// --branchable, and the children's names are read back from the machine list rather than parsed
+// out of stdout, whose format is not a contract.
+func TestBranchRequiresABranchableSourceAndNamesItsChildren(t *testing.T) {
+	c, log := vmtest.Install(t)
+	if err := c.Create(vm.CreateSpec{Name: "sb-p", Image: "alpine", Labels: map[string]string{"boxer.scope": "sb-p"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start("sb-p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Branch(vm.BranchSpec{From: "sb-p", NamePrefix: "sb-p-f", Count: 1}); err == nil {
+		t.Fatal("an ordinary start cannot be branched from")
+	}
+	if err := c.StartBranchable("sb-p"); err != nil {
+		t.Fatal(err)
+	}
+	names, err := c.Branch(vm.BranchSpec{From: "sb-p", NamePrefix: "sb-p-f", Count: 2, SecretEnv: []string{"TOK=TOK"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "sb-p-f1" || names[1] != "sb-p-f2" {
+		t.Fatalf("children: %v", names)
+	}
+	for _, n := range names {
+		if m, ok, _ := c.Status(n); !ok || !m.Running() {
+			t.Fatalf("a branch child starts from its parent's running state: %+v", m)
+		}
+	}
+	b, _ := os.ReadFile(log)
+	// One named branch per child, never a --count/--name-prefix batch: a batch waits for the
+	// source workload to run smolvm-branch-ready and gives up after ten minutes when — as in
+	// every ordinary sandbox — nothing ever does.
+	if !strings.Contains(string(b), "machine branch --from sb-p -n sb-p-f1 --secret-env TOK=TOK") {
+		t.Fatalf("branch flags:\n%s", b)
+	}
+	if strings.Contains(string(b), "--count") || strings.Contains(string(b), "--name-prefix") {
+		t.Fatalf("a batch branch would hang against a real source:\n%s", b)
+	}
+	// A stop takes branchability away, because the memfd and the control socket go with it.
+	if err := c.Stop("sb-p"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start("sb-p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Branch(vm.BranchSpec{From: "sb-p", NamePrefix: "sb-p-g", Count: 1}); err == nil {
+		t.Fatal("branchability must not survive a stop")
+	}
+}
+
+// Egress denials are the only record of why an allowlisted guest could not reach a host.
+func TestEgressDenials(t *testing.T) {
+	c, _ := vmtest.Install(t)
+	if err := c.Create(vm.CreateSpec{Name: "sb-u", Image: "alpine", Volumes: []string{"/wt:/workspace"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start("sb-u"); err != nil {
+		t.Fatal(err)
+	}
+	// No denials recorded: an empty list, not an error.
+	evs, err := c.Egress("sb-u", 10)
+	if err != nil || len(evs) != 0 {
+		t.Fatalf("egress: %v %v", evs, err)
+	}
+	// The real schema, from smolvm 1.16.1: every event is a denial, a blocked lookup names the
+	// host and a blocked connection names host:port.
+	vmtest.SetEgress(t, `[{"timestamp":"2026-09-21T11:14:14Z","operation":"resolve","dest":"registry.npmjs.org"},
+	                      {"timestamp":"2026-09-21T11:14:23Z","operation":"connect","dest":"1.1.1.1:80"}]`)
+	evs, err = c.Egress("sb-u", 10)
+	if err != nil || len(evs) != 2 {
+		t.Fatalf("egress: %+v %v", evs, err)
+	}
+	if evs[0].Host() != "registry.npmjs.org" || evs[1].Host() != "1.1.1.1" {
+		t.Fatalf("a host is the destination without its port: %q %q", evs[0].Host(), evs[1].Host())
+	}
+}
+
+// An exec carries a timeout and a secret by name; the value is never in the argv.
+func TestExecPassesTimeoutAndSecretsByName(t *testing.T) {
+	c, log := vmtest.Install(t)
+	if err := c.Create(vm.CreateSpec{Name: "sb-e", Image: "alpine"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start("sb-e"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOK", "hunter2")
+	var buf bytes.Buffer
+	code, err := c.Exec(vm.ExecOpts{
+		Name: "sb-e", SecretEnv: []string{"TOK=TOK"}, Timeout: 90 * time.Second,
+		Stdin: strings.NewReader(""), Stdout: &buf, Stderr: &buf,
+	}, "sh", "-c", "echo $TOK")
+	out := buf.String()
+	if err != nil || code != 0 || strings.TrimSpace(out) != "hunter2" {
+		t.Fatalf("exec: %q %d %v", out, code, err)
+	}
+	b, _ := os.ReadFile(log)
+	if !strings.Contains(string(b), "--timeout 1m30s") {
+		t.Fatalf("timeout flag:\n%s", b)
+	}
+	if strings.Contains(string(b), "hunter2") {
+		t.Fatalf("a secret value must never reach the argv:\n%s", b)
+	}
+}
+
+// The sentinels are the wire between a backend and the rest of boxer, so two things have to hold:
+// the predicates answer through errors.Is rather than through a substring the caller knows, and
+// smolvm's real wording maps onto the condition it actually means. Every string here is one
+// smolvm 1.16.1 produced; if a future version rephrases one, this is what notices, and the fix is
+// in classifySmolvm rather than scattered through internal/box.
+func TestSmolvmWordingMapsOntoTheConditionItMeans(t *testing.T) {
+	c, _ := vmtest.Install(t)
+	for _, tc := range []struct {
+		said string
+		want error
+	}{
+		{"vm not found: sb-7e1852e4a3c3", vm.ErrNotFound},
+		{"create machine: machine 'sb-x' already exists or is being created", vm.ErrAlreadyExists},
+		{"database operation failed: reserve vm 'c2': database is locked", vm.ErrBusy},
+		{"agent operation failed: connect: machine 'sb-x' is not running.", vm.ErrNotRunning},
+	} {
+		vmtest.FailVerb(t, "machine status", tc.said)
+		_, _, err := c.Status("sb-x")
+		// Status swallows a missing machine by design, so ask Create for that one instead.
+		if tc.want == vm.ErrNotFound {
+			vmtest.StopFailing(t, "machine status")
+			vmtest.FailVerb(t, "machine create", tc.said)
+			err = c.Create(vm.CreateSpec{Name: "sb-x", Image: "alpine"})
+			vmtest.StopFailing(t, "machine create")
+		} else {
+			vmtest.StopFailing(t, "machine status")
+		}
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%q\n  is   %v\n  want %v", tc.said, err, tc.want)
+		}
+	}
+}
+
+// A failure that is none of the named conditions must stay unclassified rather than being forced
+// into the nearest one: "disk on fire" is not a missing machine, and a caller that retried it as
+// one would loop.
+func TestAnUnrecognisedFailureIsNotGuessedAt(t *testing.T) {
+	c, _ := vmtest.Install(t)
+	vmtest.FailVerb(t, "machine create", "disk on fire")
+	err := c.Create(vm.CreateSpec{Name: "sb-x", Image: "alpine"})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, s := range []error{vm.ErrNotFound, vm.ErrAlreadyExists, vm.ErrBusy, vm.ErrNotRunning} {
+		if errors.Is(err, s) {
+			t.Errorf("classified %v as %v", err, s)
+		}
 	}
 }

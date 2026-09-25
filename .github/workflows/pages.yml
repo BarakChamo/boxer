@@ -1,0 +1,78 @@
+name: pages
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# The site is public documentation built from a public repository; nothing here needs write
+# access to the contents.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A queued deploy is always more current than the one it is waiting behind, but cancelling a
+# deploy in flight leaves Pages half-updated, so runs queue rather than cancel.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      # The three actions/*-pages pins below were added without network access to check them
+      # against upstream. Confirm each SHA before relying on this workflow.
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - name: Install
+        working-directory: site
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        working-directory: site
+        # A project site is served from /<repo>, so the build needs its prefix. Drop this to ""
+        # when a custom domain puts the site at the root.
+        #
+        # .well-known has to be at the root to mean anything: under /boxer the files are exported
+        # and served, but a discovery client looking at the domain will not find them, and the
+        # absolute URLs in index.json (bundle.SiteOrigin) point at the custom domain. The index is
+        # conformant only once BOXER_BASE_PATH is "".
+        env:
+          BOXER_BASE_PATH: /boxer
+        run: npm run build
+      # Pages runs no server, so nothing is generated on request: the search index is a file, and
+      # every page is prerendered. `output: "export"` in next.config.mjs is what makes that true.
+      - name: The export is complete
+        working-directory: site
+        run: |
+          test -f out/index.html
+          test -f out/docs/index.html
+          test -f out/llms.txt
+          test -f out/.well-known/agent-skills/index.json
+          test -f out/.well-known/agent-skills/boxer/SKILL.md
+          # The search index is a file, not a route: the client fetches and searches it in the
+          # browser because Pages has no server to answer a query.
+          test -s out/api/search
+      # Without it, Pages' Jekyll pass drops every _next/ directory and the site loads unstyled.
+      - run: touch site/out/.nojekyll
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

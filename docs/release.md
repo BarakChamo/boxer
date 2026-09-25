@@ -20,9 +20,9 @@ These are a promise. Breaking one of them requires a major version.
 - **`--json` output shapes.** `status`, `ls`, `doctor`, `down`, `gc --dry-run`, and any other
   command that grows `--json`. Fields may be added. Existing fields keep their name, type and
   meaning, and a field that was always present stays present. Consumers must ignore unknown
-  fields. The shapes are in [api.md](api.md).
+  fields. The shapes are on the site, under `reference/json`.
 - **Exit codes and the error contract.** `boxer: <reason>` with `scope`, `worktree`, `cause` and a
-  runnable `fix:` line, and the exit code table in [api.md](api.md).
+  runnable `fix:` line, and the exit code and cause tables under `reference/json` on the site.
 - **The skill and plugin layout.** The directory names and file names inside the published
   package: `plugin.json`, `mcp.json`, `AGENTS.md`, `skills/boxer/SKILL.md` and its `scripts/` and
   `references/`, and the reverse-domain directory per harness. A harness that installs the package
@@ -43,6 +43,11 @@ These are a promise. Breaking one of them requires a major version.
 - **`boxer acp`'s transport details.** The command is stable; the framing, the subprocess layout
   and which harness binary it launches are not, and they follow the Agent Client Protocol.
 - **Log and trace output**, including `BOXER_TRACE`, and anything printed without `--json`.
+  That includes the columns of `ls`, `backends` and `integrations`, their colours, and the `next:`
+  hints: parse `--json`, never a table.
+- **How boxer decides who is reading.** Which environment variables mean an agent may grow as
+  harnesses are observed. `BOXER_OUTPUT=json|text|human` and `BOXER_AGENT=1` are the stable way
+  to choose.
 - **The guest's contents.** Image defaults, pack layout, mount points and the installed tool set
   are implementation, chosen per image and per harness.
 

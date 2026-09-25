@@ -1,0 +1,12 @@
+{"scenario":"first-ever","contender":"host","seconds":0.0,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"first-ever","contender":"docker","seconds":19.1,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"first-ever","contender":"boxer","seconds":23.9,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"install","contender":"host","seconds":3.5,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"install","contender":"docker","seconds":5.2,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"install","contender":"boxer","seconds":9.2,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"cold-start","contender":"host","seconds":6.8,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"cold-start","contender":"docker","seconds":10.8,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"cold-start","contender":"boxer","seconds":7.6,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"warm-start","contender":"host","seconds":4.7,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"warm-start","contender":"docker","seconds":5.7,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}
+{"scenario":"warm-start","contender":"boxer","seconds":7.8,"image":"mirror.gcr.io/library/node:24-alpine","cpus":10,"mem_gb":8}

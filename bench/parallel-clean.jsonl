@@ -1,0 +1,14 @@
+{"contender":"docker","n":5,"cpus":2,"mem_g":4,"seconds":27.7,"host_mb":1557,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"docker","n":5,"cpus":2,"mem_g":4,"seconds":27.4,"host_mb":2262,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":4,"seconds":27.1,"host_mb":3724,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"docker","n":1,"cpus":2,"mem_g":4,"seconds":10.2,"host_mb":748,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":1,"cpus":2,"mem_g":4,"seconds":7.6,"host_mb":1024,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"docker","n":3,"cpus":2,"mem_g":4,"seconds":18.8,"host_mb":2014,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":3,"cpus":2,"mem_g":4,"seconds":22.3,"host_mb":1571,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"docker","n":5,"cpus":2,"mem_g":4,"seconds":26.5,"host_mb":2193,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":4,"seconds":25.8,"host_mb":3234,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"docker","n":5,"cpus":2,"mem_g":4,"seconds":26.9,"host_mb":2935,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":4,"seconds":26.3,"host_mb":3539,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":2,"seconds":25.7,"host_mb":2442,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":2,"seconds":25.2,"host_mb":4293,"swap_delta_mb":0,"clean":true,"ok":1}
+{"contender":"boxer","n":5,"cpus":2,"mem_g":2,"seconds":26.7,"host_mb":5107,"swap_delta_mb":0,"clean":true,"ok":1}

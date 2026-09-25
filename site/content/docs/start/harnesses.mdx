@@ -6,11 +6,20 @@ description: One command per agent, and what it writes.
 ```sh
 boxer install claude-code     # or: codex, copilot, kimi, opencode, gemini-cli, grok, pi, dsh
 boxer install all             # every harness this repository can see
+boxer install codex --user    # the user layer instead, for harnesses that will not read a project one
 ```
 
 `boxer install` picks the strongest integration the harness supports and writes exactly the files
 that harness reads. Nothing is global: the files land in the repository, so a worktree carries its
 own integration and a clone of it does too.
+
+**Commit what it writes.** A worktree is cut from a branch, so an integration that is not in the
+branch is not inherited — which is how an orchestrator's task ends up unsandboxed.
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m 'boxer'
+```
 
 ## What lands where
 
@@ -23,15 +32,41 @@ own integration and a clone of it does too.
 | Gemini CLI | `.gemini/settings.json` | hooks |
 | Kimi Code | `.kimi-code/mcp.json` | tool |
 | Grok, pi, DSH | per-harness config | varies |
+| fx | nothing; it has no integration point | inside mode only |
 
 Run `boxer doctor` afterwards. It lists the integrations it can see and warns about the ones that
 are present but will not hold.
 
+**fx is the exception.** It has no hooks, its shell cannot be denied headlessly, and it resolves
+commands past a PATH shim, so outside the guest there is nothing for boxer to hold onto and
+`boxer install` has nothing to write. Run it inside instead — with the caveat that only one of its
+two evaluated cells scores 100%; see [Support, measured](/docs/evals/results):
+
+```sh
+boxer shell fx
+```
+
+A harness boxer has never heard of has the same ladder: register `boxer mcp` for the skill and the
+tool, try shims, and fall back to [inside mode](/docs/guides/inside) if the binary can be
+installed in the guest.
+
 <Callout type="warn">
-Codex resolves project configuration to the **main repository**, not the worktree you are in. When
-you install from a linked worktree, boxer writes its hooks to both — otherwise Codex never reads
-them and every command runs on the host. `boxer install` does this for you; it is worth knowing
-because it is invisible otherwise.
+**Codex has two traps, and boxer can only handle one of them for you.**
+
+It resolves project configuration to the **main repository**, not the worktree you are in. When
+you install from a linked worktree, boxer writes its hooks to both; otherwise Codex never reads
+them and every command runs on the host. That one is handled.
+
+The other is trust. A project `.codex/hooks.json` loads only when the project layer is trusted,
+and some launchers pass no trust bypass. Where you cannot rely on the project layer being trusted
+— under an orchestrator, or in `codex exec` without `--dangerously-bypass-hook-trust` — install
+at user scope instead, which needs no trust:
+
+```sh
+boxer install codex --user      # inline [hooks] in ~/.codex/config.toml
+```
+
+`boxer doctor` inside the worktree is how you confirm which one took.
 </Callout>
 
 ## Five ways in, and they stack
@@ -53,20 +88,6 @@ whichever ones your harness supports are active at once.
 
 ## Running someone else's MCP server in the sandbox
 
-Some MCP servers have to sit next to the code — `next-devtools-mcp` talks to a running Next.js dev
-server, so it has to be wherever that server is. `boxer run` is a clean stdio pipe, which is all an
-MCP client needs:
-
-```json
-{
-  "mcpServers": {
-    "next-devtools": {
-      "command": "boxer",
-      "args": ["run", "--", "npx", "-y", "next-devtools-mcp@latest"]
-    }
-  }
-}
-```
-
-The harness stays on the host and talks to a tool inside the guest. Nothing bridges, and the tool
-does not know boxer exists.
+Some MCP servers have to sit next to the code — one that talks to a running dev server has to be
+wherever that server is. `boxer run` is a clean stdio pipe, which is all an MCP client needs. See
+[MCP server](/docs/reference/mcp#running-someone-elses-mcp-server-in-the-sandbox).

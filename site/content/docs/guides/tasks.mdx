@@ -1,0 +1,140 @@
+---
+title: Tasks
+description: Naming the commands you want an agent to run, instead of hoping it composes them.
+---
+
+Interception works on the first word of a command line. `npm test` is caught because `npm` is on
+`intercept`; `NODE_ENV=test ./node_modules/.bin/jest --ci` is not, and it runs on the host. You can
+keep widening the list, or you can stop depending on it.
+
+```toml
+[tasks]
+test    = "npm test"
+build   = "npm run build"
+lint    = "npm run lint"
+migrate = "npm run db:migrate"
+```
+
+```sh
+boxer run --task test
+```
+
+A task is resolved from `boxer.toml` and run in the guest. Nothing is parsed, nothing is matched,
+and nothing depends on how the model chose to phrase it.
+
+## Saying more about one
+
+A task can be a table instead of a string when there is more to say. The string form keeps
+working, and mixing the two in one `[tasks]` table is fine:
+
+```toml
+[tasks]
+lint = "npm run lint"
+
+[tasks.test]
+cmd         = "npm test"
+description = "the unit suite; no services needed"
+junit       = ["reports/junit.xml"]
+timeout     = "10m"
+```
+
+| Key | What it does |
+| --- | --- |
+| `cmd` | the command line, as the string form |
+| `description` | what the task is for. It is what `boxer tasks` prints and what the brief gives the agent, and choosing between tasks is the decision an agent actually has to make |
+| `junit` | where this task's JUnit XML lands, so `boxer run --task test` summarises it without being told |
+| `timeout` | bounds the command in the guest (smolvm's own `--timeout`); a hung task fails instead of holding the session |
+| `env` | extra environment for this task only |
+
+A misspelled key inside a task table is an error, like every other key in `boxer.toml`.
+
+## Why this is the path for an agent
+
+The skill boxer installs calls tasks first, and the brief lists them, so an agent that follows the
+brief runs the repository's real commands rather than its guess at them. Three things follow:
+
+**The command is the one you meant.** A task is a command line the maintainers wrote. The agent
+does not reconstruct your test invocation from the shape of the repository.
+
+**An unknown name is a refusal with an answer in it.** boxer does not fall back to the host and it
+does not guess:
+
+```console
+$ boxer run --task tests
+boxer: no task named "tests" in boxer.toml
+  scope:     sb-7e1852e4a3c3 (worktree)
+  worktree:  /Users/me/src/demo
+  cause:     NO_SUCH_TASK
+  fix:       boxer run --task test | build | lint | migrate
+```
+
+The `fix:` line names every real task, so the agent's next attempt is correct. This is the general
+shape of boxer's errors — a refusal is an instruction.
+
+**Discovery costs one command.**
+
+```sh
+boxer tasks           # name and description, or the command line when there is no description
+boxer tasks --json    # the same, for a tool
+boxer brief           # the mount, the mode, the intercept list, and the tasks with what they are for
+```
+
+`boxer brief --json` keeps `tasks` as a name→command map, so anything written against an older
+boxer still reads it; the descriptions and the rest arrive beside it in `task_details`.
+
+## Writing them
+
+A task is a shell line, run with `sh -c` in the guest at the mapped working directory. Shell
+syntax works — pipes, `&&`, environment prefixes:
+
+```toml
+[tasks]
+test-one = "npm test -- --runTestsByPath"
+ci       = "npm run lint && npm test && npm run build"
+seed     = "DATABASE_URL=postgres://localhost/dev npm run seed"
+```
+
+`--task` names the whole command. Adding `-c` or trailing arguments is refused rather than
+silently ignored, because a task that quietly drops half its invocation is worse than one that
+does not run:
+
+```console
+$ boxer run --task test -- --watch
+boxer run: --task names the whole command; do not add -c or arguments
+```
+
+Declare a separate task for the variant you need.
+
+## What to declare
+
+Anything an agent will reach for, and anything that would be wrong if it guessed. Test, build,
+lint and typecheck are the usual four. Add the ones specific to the repository — a migration, a
+codegen step, a fixture reset — because those are exactly the commands a model invents badly.
+
+Leave out anything destructive that you would rather approve by hand. A declared task is a task an
+agent will run.
+
+## How reliably an agent uses them
+
+Declaring a task puts it in the brief; it does not guarantee the model reads the brief. The
+adherence evaluation measures this directly — a repository declaring one described task, a prompt
+that never mentions boxer, and a check for whether the agent named the task or composed its own
+command line. Across four models on 2026-09-22:
+
+| | |
+| --- | --- |
+| Used the declared task on every model | Codex, Claude Code, DSH, OpenCode, Pi |
+| Never used it, on any model | **Copilot, Grok, Kimi** |
+
+The three that never used it are the harnesses where boxer's brief does not reliably reach the
+model, which is a property of those harnesses rather than of your configuration. Tasks still work
+there when you or the agent name one explicitly; what does not happen is the agent discovering
+the task on its own.
+
+Everywhere else the split was per-model rather than per-harness, so a stronger model is more
+likely to reach for a declared task than a weaker one. Descriptions are worth writing — they are
+how the model chooses between several tasks — but do not treat a declared task as a guarantee
+that an arbitrary command will never be composed. The enforcement, not the brief, is what keeps a
+composed command in the sandbox.
+
+[Method and full results](/docs/evals/results).

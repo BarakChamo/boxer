@@ -4,7 +4,9 @@
     "cli",
     "configuration",
     "json",
+    "mcp",
     "go",
-    "events"
+    "events",
+    "glossary"
   ]
 }

@@ -9,6 +9,22 @@ and goes away with it.
 
 What differs is how the harness gets launched, and therefore which integration level applies.
 
+## Warm the sandbox first
+
+```sh
+boxer install git
+```
+
+This writes a `post-checkout` hook (honouring `core.hooksPath`) that runs `boxer up --detach` in
+every worktree `git worktree add` creates, so the VM is warm before any harness opens it.
+
+Any orchestrator that creates a worktree and launches into it wants this. The failure without it
+is not a slow start but a broken session: T3 Code creates the worktree and starts the harness in
+the same step, and its provider fails with `turn/setPermissionMode failed` while a cold VM boots
+(reproduced three times, 32 to 39 seconds). With the hook, the same cell passes.
+
+`boxer install all` leaves git configuration alone, so this one is opt-in and separate.
+
 ## T3 Code
 
 Cuts a worktree and runs Claude Code in it. The project layer is inherited, so
@@ -17,7 +33,11 @@ Cuts a worktree and runs Claude Code in it. The project layer is inherited, so
 ```sh
 boxer install claude-code
 git add .claude .mcp.json && git commit -m 'boxer'
+boxer install git                                    # warm each new worktree
 ```
+
+The commit matters: an orchestrator cuts its worktree from a branch, so the integration has to be
+in the branch to be inherited.
 
 ## Paperclip
 
@@ -41,8 +61,18 @@ elsewhere:
 
 ## Conductor
 
-Conductor runs each harness's real binary against an ordinary git worktree, so the project layer
-should be inherited like anywhere else.
+Conductor runs each harness's real binary against an ordinary git worktree, so there are two ways
+in and the cheap one probably already works.
+
+**Try the project layer first.** If Conductor inherits it like every other tool that uses real
+worktrees, the ordinary install is the whole integration:
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m 'boxer'
+```
+
+**Otherwise, put the harness in the VM.**
 
 ```sh
 boxer install conductor        # writes .conductor/settings.toml
@@ -56,6 +86,28 @@ in the VM.
 Conductor's local workspaces are GUI-only: it is a native app, not an Electron one, and its CLI
 drives cloud workspaces, which run on Conductor's infrastructure where boxer has nothing to
 sandbox. Verification is a ten-minute manual check rather than an automated one.
+</Callout>
+
+## Multica
+
+Multica runs a daemon that cuts a worktree per issue. The integration is the inside path: point
+its runtime profile at a boxer harness shim.
+
+```sh
+boxer shim install --harness claude ~/.boxer/shims
+multica runtime profile create --command-name claude
+multica runtime profile set-path claude ~/.boxer/shims/claude
+```
+
+Prefer the profile over `MULTICA_CLAUDE_PATH`: it is per-installation configuration rather than
+per-process environment, so it survives a daemon restart and applies to every task the daemon
+runs. Start the daemon from a shell with `boxer` on `PATH`.
+
+<Callout type="warn">
+Multica is the one orchestrator boxer has **not** verified end to end. Its daemon needs a
+configured server, which the evaluation host did not have, so its cell is a checklist that reports
+itself as skipped rather than a run that passed. The steps above follow from what the binary
+reads; treat them as untested until you have run them.
 </Callout>
 
 ## OpenHands

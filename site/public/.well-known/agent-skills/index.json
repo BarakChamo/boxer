@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "0.2.0",
+  "skills": [
+    {
+      "description": "Run build, test, install and script commands inside this repository's boxer sandbox, a microVM or container mounted on the git worktree. Use before running any command that compiles, installs, downloads or executes project code, and whenever a command was refused with a line starting `boxer:`.",
+      "digest": "sha256:4fba402157c687bc9c4287693de5a533955d12db99268d0e872520c94237266b",
+      "name": "boxer",
+      "url": "https://boxer.sh/.well-known/agent-skills/boxer/SKILL.md",
+      "version": "dev"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+---
+title: Test results and capsules
+description: Turning a failed run into an answer, and then into something you can hand to someone else.
+---
+
+A failed command leaves a log. A log is not an answer to "which tests failed?", and it is not
+something another person can run. boxer has two small things for that, and they cost nothing
+when unused.
+
+## Which tests failed
+
+Point a run at its JUnit XML and boxer parses it after the command exits:
+
+```sh
+boxer run --junit junit.xml -- npm test
+```
+
+```console
+boxer: tests 128 passed, 3 failed, 1 error, 2 skipped (1 file)
+boxer:   FAIL cart/CheckoutTest.applies_discount
+boxer:   FAIL cart/CheckoutTest.rejects_expired
+boxer:   ERR  api/AuthTest.refresh
+```
+
+Parsing happens on the host, reading the file the guest just wrote. That works because the
+worktree is mounted rather than copied: there is one set of files, so there is nothing to fetch.
+
+Three ways to say where the reports are, in order of precedence:
+
+```sh
+boxer run --junit junit.xml,reports/*.xml -- npm test   # this run
+```
+
+```toml
+[tasks.test]
+cmd   = "npm test"
+junit = ["reports/junit.xml"]     # whenever this task runs
+
+[results]
+auto = ["junit.xml", "reports/*.xml"]   # every run in this repository
+fail_on_test_failures = true
+```
+
+Patterns are worktree-relative and use `filepath.Glob`, so `*` works and `**` does not.
+
+Two rules worth knowing, because both are ways this feature could lie to you:
+
+**Counts come from the cases, not the attributes.** Frameworks disagree about what `tests=` and
+`failures=` on `<testsuite>` mean, and the attributes are the part that goes stale. boxer counts
+`<testcase>` elements and their `<failure>`, `<error>` and `<skipped>` children.
+
+**A report older than the run is ignored.** Otherwise a command that crashed before writing
+anything would inherit yesterday's green.
+
+### Failing on test failures
+
+By default the command's exit code is the run's exit code, and the summary is narration.
+`--fail-on-test-failures`, or `results.fail_on_test_failures`, turns a green exit into 1 when the
+report has failures or errors. It never replaces a non-zero exit code with a different one: the
+command's own status is the more specific answer.
+
+## Capsules
+
+Every run leaves a record for its sandbox — the command, the directory, the exit code, the image,
+the pack, HEAD, whether the tree was dirty, the tail of both streams, and the test summary if
+there was one. `boxer status --json` shows it as `last_run`, and it is what a capsule is made of.
+
+```console
+$ boxer run -c 'npm test'            # it fails
+$ boxer capsule new
+boxer: wrote capsule.patch (4.1 kB)
+boxer: wrote capsule.toml — exit 1 from "npm test"
+boxer: replay it with `boxer capsule replay capsule.toml`
+```
+
+`capsule.toml` is a manifest: what ran, against which commit, under which image and which parts
+of the configuration, and what outcome counts as having reproduced the failure. When the tree was
+dirty it is written beside a `capsule.patch`, because the failure you want to keep is usually in
+the uncommitted half. Commit it, attach it to an issue, or throw it away.
+
+```sh
+boxer capsule inspect capsule.toml
+boxer capsule replay capsule.toml
+```
+
+A replay overlays the captured configuration onto the current one and runs the command again:
+
+```console
+boxer: reproduced — exit 1, as recorded
+```
+
+Exit 0 means the failure reproduced and exit 1 means it did not, which is the opposite of the
+usual convention and is deliberate. A capsule is a question — *does this still fail?* — not a
+test.
+
+Replay refuses a tree it cannot describe: uncommitted changes (`--allow-dirty`) or a HEAD that is
+not the captured one (`--allow-drift`). A captured patch is never applied unless you ask with
+`--apply-patch`, because silently mutating someone's worktree is not a thing a replay should do.
+
+### What a capsule is not
+
+It does not preserve a machine. A prepared guest is a
+[named pack](/docs/concepts/scopes-and-packs); the environment a capsule needs is described, not
+carried. That is what makes it a file you can commit.

@@ -3,11 +3,15 @@ title: How it works
 description: Scopes, the first command, and the five ways a command reaches the guest.
 ---
 
+This page is the whole mechanism in one read. [Scopes and
+packs](/docs/concepts/scopes-and-packs) goes deeper on the two parts that carry the most weight,
+and the [glossary](/docs/reference/glossary) defines the terms used here as terms of art.
+
 ## Scope: one VM per worktree
 
-A **scope** is what boxer keys a sandbox to. By default it is the git worktree, resolved from the
-current directory. Two worktrees of the same repository get two VMs; two directories inside one
-worktree share one.
+A **scope** is what boxer keys a sandbox to. By default it is the git worktree — a checkout made
+by `git worktree add`, or the main checkout itself — resolved from the current directory. Two
+worktrees of the same repository get two VMs; two directories inside one worktree share one.
 
 This is the design decision everything else follows from. Agents work in worktrees — orchestrators
 like Conductor, T3 and Paperclip cut one per task — so keying to the worktree means each task gets
@@ -25,7 +29,7 @@ not.
 
 1. Resolve the scope from the working directory.
 2. Read `boxer.toml` — from the worktree, then the repository root, then `~/.config/boxer/`.
-3. Create the VM: image, CPUs, memory, and the worktree mounted at its host path.
+3. Create the VM: image, CPUs, memory, and the worktree mounted at `mount_at` (`/workspace`).
 4. Run `image_setup` if this image has not had it, then `setup` if this worktree has not.
 5. Start anything in `start`, and wait for `ready`.
 6. Run the command.

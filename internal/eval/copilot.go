@@ -92,6 +92,11 @@ func (d Copilot) Run(env *Env, c Cell, prompt string) (Transcript, error) {
 	if err := waitFor(cmd, "copilot", env.timeout()); err != nil {
 		return Transcript{Raw: out.String()}, err
 	}
+	// Copilot's hooks run as their own process, and a turn whose only tool call is denied can end
+	// while `boxer hook copilot` is still provisioning. The oracle then looks for the VM and
+	// finds a machine that is created but not yet started, or nothing at all. OpenCode has the
+	// same shape and the same guard; this is not a boxer race, it is the harness exiting first.
+	waitForHook("boxer hook copilot")
 	tr := parseCopilotJSON(out.String())
 	if len(tr.Tools) == 0 {
 		tr.Tools = env.LLMTools()

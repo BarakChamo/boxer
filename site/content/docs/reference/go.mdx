@@ -1,65 +1,92 @@
 ---
-title: Go and MCP
-description: The importable package, and the MCP server harnesses talk to.
+title: Go package
+description: pkg/boxer, the only importable package.
 ---
-
-## `pkg/boxer`
-
-The only importable package. Thin delegation to the internals, with the types aliased
-(`Machine`, `Scope`, `Error`, `RunOpts`).
 
 ```go
 import "github.com/BarakChamo/boxer/pkg/boxer"
-
-b, err := boxer.Open(cwd, boxer.Options{Harness: "claude-code", SessionID: sid})
-if err != nil {
-    var be *boxer.Error
-    if errors.As(err, &be) {
-        log.Fatalf("%s (%s): %s", be.Reason, be.Cause, be.Fix)
-    }
-    log.Fatal(err)
-}
-
-if _, err := b.Ensure(true, false); err != nil { // create if needed, then start
-    log.Fatal(err)
-}
-
-code, err := b.Run(
-    []string{"sh", "-c", "npm test"},
-    boxer.RunOpts{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
-)
-
-m, exists, _ := b.Status()
-_ = b.Down()
-
-machines, _ := boxer.List() // every boxer-owned machine on the host
 ```
+
+Everything else in the module lives under `internal/`. This package is a thin facade with no logic
+of its own, so its behaviour cannot drift from the CLI's.
+
+<Callout>
+Experimental until 1.0. From 1.0 the [stability
+contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md) covers this package's
+exported functions, types and their fields, and breaking one needs a major version. Until that
+tag, it may change.
+</Callout>
+
+For worked examples and the surrounding decisions, see [Building on
+boxer](/docs/guides/building-on-boxer).
+
+## Types
+
+```go
+type Options struct {
+    Harness   string   // selects the [harness.<name>] override layer
+    SessionID string   // for isolation = "session"
+    AgentID   string   // for isolation = "subagent"
+}
+
+type RunOpts = box.RunOpts   // Stdin, Stdout, Stderr, TTY
+type Machine = vm.Machine    // one smolvm machine; Labels carry the boxer.* keys
+type Scope   = scope.Scope   // Key is the machine name, Root the mounted worktree
+type Error   = box.Error     // Reason, Cause, Fix, Scope
+```
+
+## Opening a sandbox
+
+```go
+func Open(cwd string, o Options) (*Box, error)
+```
+
+Resolves the sandbox for `cwd` — the process working directory when empty. The error is a
+`*Error` when boxer refused: no repository, worktree required, scope unresolved.
+
+## Methods on `*Box`
+
+| Method | |
+| --- | --- |
+| `Scope() Scope` | the resolved scope |
+| `Warnings() []string` | non-fatal findings from resolution: main checkout, degraded isolation |
+| `Ensure(allowCreate, recreate bool) (created bool, err error)` | make the machine exist and run |
+| `Run(argv []string, o RunOpts) (int, error)` | execute in the guest; returns the guest exit code |
+| `Status() (Machine, bool, error)` | the machine, and whether it exists |
+| `Down() error` | delete the machine; absence is not an error |
+
+`Ensure` creates only when `allowCreate` is set; `recreate` deletes an existing machine first.
+Both it and `Run` are safe to call on a running sandbox.
 
 `Run` returns `-1` with an error when `on_sandbox_unavailable = "passthrough"` and the sandbox
 could not be provisioned. The caller decides whether to fall back to the host — boxer will not
 make that choice silently.
 
-## MCP
+## Host-wide functions
 
-```sh
-boxer mcp [--harness NAME]
+| Function | |
+| --- | --- |
+| `List() ([]Machine, error)` | every boxer-owned machine on the host |
+| `Stop(name string) error` | halt one; stopping a stopped machine is not an error |
+| `Delete(name string) error` | remove one |
+| `LastUsed(name string) time.Time` | when the scope last ran a command; zero when unknown |
+
+These take a machine name rather than a directory, because a caller that has been watching
+`List` has names and the worktree may be gone.
+
+`Stop` halts a machine without deleting it, which is the state `boxer status` reports as exit code
+3. No CLI command produces it: `boxer down` deletes. If your tool wants to park a sandbox rather
+than destroy it, this is the only way to ask.
+
+## Errors
+
+```go
+var be *boxer.Error
+if errors.As(err, &be) {
+    log.Printf("%s (%s)\n  fix: %s", be.Reason, be.Cause, be.Fix)
+}
 ```
 
-Speaks MCP over stdio, protocol `2025-06-18`. Two tools:
-
-| Tool | Input | Result |
-| --- | --- | --- |
-| `boxer_run` | `{ command, cwd? }` | stdout and stderr, then `[exit N]`. `isError` when the exit is non-zero or boxer refused |
-| `boxer_status` | `{ cwd? }` | one line: scope, isolation, state, image, worktree, mount |
-
-One resource, `boxer://brief` (`text/markdown`) — the same brief `boxer brief` prints, resolved for
-the server's working directory.
-
-`cwd` is forgiving about which side of the mount it names. A host path inside the worktree becomes
-the matching guest directory; a path under the guest mount maps back to the host worktree; anything
-else falls back to the server's own directory, and the result says so with a `note:` line rather
-than pretending.
-
-The server doubles as a session signal for harnesses without hooks: `initialize` provisions its own
-scope in the background when `create_on` includes `mcp`, and stdin EOF records the scope's last use
-so `gc` knows it is idle.
+`Cause` is the stable identifier — match on it rather than on the message. The
+[full list](/docs/reference/json#errors) is on the JSON page, because the same causes appear in
+`--json` output and in failed MCP tool calls.

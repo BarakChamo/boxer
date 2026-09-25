@@ -130,15 +130,21 @@ func Render(harness, version, dir string) ([]string, error) {
 	for dst, src := range v.Alias {
 		rendered[dst] = rendered[src]
 	}
+	return writeAll(dir, rendered)
+}
+
+// writeAll is the only place rendered content reaches the disk, so every projection of the
+// package — a harness view, the published skill, the discovery index — gets the same modes.
+func writeAll(dir string, files map[string][]byte) ([]string, error) {
 	var written []string
-	for rel, body := range rendered {
+	for rel, body := range files {
 		out := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return written, err
 		}
 		// The skill's scripts are the spec's executable layer; they have to be runnable as copied.
 		mode := os.FileMode(0o644)
-		if strings.HasPrefix(rel, "skills/boxer/scripts/") {
+		if strings.Contains(rel, "skills/boxer/scripts/") || strings.HasPrefix(rel, "scripts/") {
 			mode = 0o755
 		}
 		if err := os.WriteFile(out, body, mode); err != nil {
@@ -148,4 +154,30 @@ func Render(harness, version, dir string) ([]string, error) {
 	}
 	sort.Strings(written)
 	return written, nil
+}
+
+// renderPackage is Render without the writing, so a projection can take the files it wants.
+func renderPackage(version string) (map[string][]byte, error) {
+	dir, err := os.MkdirTemp("", "boxer-render")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	files, err := Render(Package, version, dir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for _, f := range files {
+		rel, err := filepath.Rel(dir, f)
+		if err != nil {
+			return nil, err
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		out[filepath.ToSlash(rel)] = b
+	}
+	return out, nil
 }

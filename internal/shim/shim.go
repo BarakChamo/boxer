@@ -43,6 +43,14 @@ func SanitizePath(path string) string {
 }
 
 // Install writes one shim per program into dir and returns the paths written.
+//
+// A few names are never shimmed however the intercept list is written. `boxer` and `smolvm` are
+// how a shim does its work, so shimming either is a loop. `sh` and `bash` are worse than a loop:
+// they are the interpreter behind every `#!/usr/bin/env bash` script on the host, including
+// smolvm's own launcher, so a shim on them puts an unrelated tool inside a sandbox that has no
+// idea what to do with it and hangs. That is not hypothetical — one such invocation was found
+// still running two days later. An interactive guest shell is `boxer-bash` (InstallShell) for
+// exactly this reason; the wildcard `*` is a policy for the hook, not a list of programs.
 func Install(dir string, programs []string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -52,7 +60,7 @@ func Install(dir string, programs []string) ([]string, error) {
 	}
 	var written []string
 	for _, p := range programs {
-		if p == "*" || p == "boxer" || p == "smolvm" || p == "sh" || filepath.Base(p) != p {
+		if p == "*" || p == "boxer" || p == "smolvm" || p == "sh" || p == "bash" || filepath.Base(p) != p {
 			continue
 		}
 		path := filepath.Join(dir, p)

@@ -118,7 +118,7 @@ func judgeIdentity(env *Env, c Cell) []Finding {
 		add("vm", "no VM %s for %s %v (VMs for this repo: %v)", want.Key, c.Isolation, id, mine)
 		return f
 	}
-	if out, code, _ := client.Output(want.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes"); code != 0 || !strings.Contains(out, "yes") {
+	if out, code, _ := vm.Output(client, want.Key, "", "sh", "-c", "test -f "+env.CanaryHost()+" && echo yes"); code != 0 || !strings.Contains(out, "yes") {
 		add("guest-canary", "the canary was not written in the %s VM %s", c.Isolation, want.Key)
 	}
 	switch c.Isolation {

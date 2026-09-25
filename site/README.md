@@ -1,45 +1,39 @@
 # site
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+boxer's documentation site: [Fumadocs](https://fumadocs.dev) on Next.js. It is the single source
+for user-facing documentation — the CLI reference, the configuration keys, the JSON shapes and the
+support matrix exist here and nowhere else, so that no table has a second copy to drift from.
 
-Run development server:
-
-```bash
-npm run dev
-# or
-pnpm dev
-# or
-yarn dev
+```sh
+make docs-dev     # serve with hot reload on :3000
+make docs         # production build
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+## Where things are
 
-## Explore
+| Path | |
+| --- | --- |
+| `content/docs/` | every page, as MDX. `meta.json` in a directory orders its pages |
+| `src/app/docs/` | the docs layout and route |
+| `src/app/(home)/` | the landing page |
+| `src/lib/source.ts` | the content source adapter |
+| `src/app/llms.txt`, `llms-full.txt`, `llms.mdx/` | machine-readable renderings, generated from the same content |
 
-In the project, you can see:
+## Writing a page
 
-- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
-- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
+Pages are organised by what the reader is trying to do: `start/` teaches, `guides/` solves a
+problem, `concepts/` explains, `reference/` states facts, `evals/` publishes measurements. A new
+page goes in the quadrant matching its purpose and is added to that directory's `meta.json`.
 
-| Route                     | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `app/(home)`              | The route group for your landing page and other pages. |
-| `app/docs`                | The documentation layout and pages.                    |
-| `app/api/search/route.ts` | The Route Handler for search.                          |
+Two rules specific to this project:
 
-### Fumadocs MDX
+- **A support claim comes from an evaluation run**, not from the existence of code. If no cell has
+  scored it, it does not go in a support table.
+- **A configuration key documented here exists in `internal/config`.** The defaults in
+  `reference/configuration.mdx` are the ones `boxer doctor` prints.
 
-Collections are defined with the [Macro API](https://fumadocs.dev/docs/mdx/macro) in `lib/source.ts`.
+The plan for what is documented where, and what is still missing, is
+[../docs/documentation-map.md](../docs/documentation-map.md).
 
-Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
-
-## Learn More
-
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs
+CI builds this site and typechecks it on every pull request, because a failed build is a
+documentation outage rather than a cosmetic problem.

@@ -1,0 +1,6 @@
+{"contender":"boxer","n":1,"seconds":8.4,"resident_mb":1127,"ok":1}
+{"contender":"boxer","n":3,"seconds":23.3,"resident_mb":1726,"ok":1}
+{"contender":"boxer","n":5,"seconds":29.5,"resident_mb":4097,"ok":1}
+{"contender":"docker","n":1,"seconds":12.2,"resident_mb":1495,"ok":1}
+{"contender":"docker","n":3,"seconds":24.7,"resident_mb":578,"ok":1}
+{"contender":"docker","n":5,"seconds":28.9,"resident_mb":501,"ok":1}

@@ -164,7 +164,24 @@ func RunSDLC(boxerBin string, tasks []SDLCTask, parallel int, log io.Writer) []S
 		}(i, task)
 	}
 	wg.Wait()
+	passed := true
+	for _, r := range results {
+		passed = passed && r.Status == "pass"
+	}
+	removeBase(boxerBin, base, passed)
 	return results
+}
+
+// removeBase deletes the base repository and its worktree directory once nothing in them is
+// evidence. A failed lifecycle keeps both, because its worktree is cut from the base; PruneScratch
+// removes them after three days.
+func removeBase(boxerBin, base string, passed bool) {
+	if !passed {
+		return
+	}
+	_, _ = runIn(base, boxerBin, "down")
+	_ = os.RemoveAll(base + "-worktrees")
+	_ = os.RemoveAll(base)
 }
 
 // sdlcBase scaffolds the application once, in a sandbox, and commits it. Every lifecycle's worktree
@@ -178,6 +195,7 @@ func sdlcBase(boxerBin string, log io.Writer) (string, error) {
 	if dir, err = filepath.EvalSymlinks(dir); err != nil {
 		return "", err
 	}
+	trackBase(dir)
 	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
@@ -199,7 +217,7 @@ func sdlcBase(boxerBin string, log io.Writer) (string, error) {
 	// A real project hits this once and writes this line; the fixture writes it too, so the tier
 	// measures development rather than that single trap. It is in troubleshooting.md.
 	_ = os.WriteFile(filepath.Join(dir, "app", "next.config.ts"),
-		[]byte("import type { NextConfig } from 'next'\n\nconst nextConfig: NextConfig = {\n  allowedDevOrigins: ['127.0.0.1', 'localhost'],\n}\n\nexport default nextConfig\n"), 0o644)
+		[]byte("import type { NextConfig } from 'next'\n\nconst nextConfig: NextConfig = {\n  allowedDevOrigins: ['127.0.0.1', 'localhost', '*.localhost'],\n}\n\nexport default nextConfig\n"), 0o644)
 
 	brokenDir := filepath.Join(dir, "app", "app", "broken")
 	_ = os.MkdirAll(brokenDir, 0o755)

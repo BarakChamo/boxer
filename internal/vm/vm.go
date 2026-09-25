@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // LabelPrefix marks machines boxer owns.
@@ -28,31 +29,7 @@ const InsideEnv = "BOXER_INSIDE"
 // Inside reports whether this process is already running in a boxer guest.
 func Inside() bool { return os.Getenv(InsideEnv) != "" }
 
-// Error is a failed smolvm invocation. It carries the verb, the exit code and what smolvm said,
-// because callers need to tell "this machine already exists" from "smolvm is not installed" and
-// were reduced to matching substrings of a flattened message to do it. Use the predicates below
-// rather than reading Stderr: the strings smolvm chooses are this package's business.
-type Error struct {
-	Verb   string // the smolvm subcommand: "machine", "pack", "--version"
-	Code   int    // its exit code, -1 when it never ran
-	Stderr string // what it printed, stderr preferred
-}
-
-func (e *Error) Error() string { return fmt.Sprintf("smolvm %s: %s", e.Verb, e.Stderr) }
-
-func said(err error, text string) bool {
-	var e *Error
-	return errors.As(err, &e) && strings.Contains(e.Stderr, text)
-}
-
-// IsNotFound reports a machine smolvm does not have.
-func IsNotFound(err error) bool { return said(err, "not found") }
-
-// IsAlreadyExists reports a create refused because the name is taken or is being taken.
-func IsAlreadyExists(err error) bool { return said(err, "already exists") }
-
-// IsNotRunning reports an operation refused because the machine is stopped.
-func IsNotRunning(err error) bool { return said(err, "not running") }
+// Error, the sentinels and the predicates live in errors.go.
 
 // TransportFailure reports whether output carries smolvm's own failure to reach the guest, rather
 // than something the guest said. An exec that never reached the guest exits non-zero exactly like
@@ -122,19 +99,40 @@ func (c Client) List() ([]Machine, error) {
 	return ms, nil
 }
 
-// Owned returns only machines carrying a boxer label.
-func (c Client) Owned() ([]Machine, error) {
-	all, err := c.List()
+// EgressEvent is one outbound connection the machine's egress policy refused. Every event the
+// command returns is a denial — `machine egress-events` reports nothing else — so there is no
+// allowed flag to check.
+//
+// The field names are smolvm 1.16.1's, confirmed against a real guest: a blocked name lookup is
+// {"operation":"resolve","dest":"registry.npmjs.org"} and a blocked connection is
+// {"operation":"connect","dest":"1.1.1.1:80"}.
+type EgressEvent struct {
+	Timestamp string `json:"timestamp"`
+	Operation string `json:"operation"` // resolve | connect
+	Dest      string `json:"dest"`      // a hostname, or host:port for a connection
+}
+
+// Host is the destination without its port, which is what a person adds to an allowlist.
+func (e EgressEvent) Host() string {
+	if i := strings.LastIndex(e.Dest, ":"); i > 0 && !strings.Contains(e.Dest[i+1:], ":") {
+		return e.Dest[:i]
+	}
+	return e.Dest
+}
+
+// Egress returns the machine's recent egress denials. An allowlist one host short is invisible
+// from inside the guest — the program reports a DNS or connect failure and nothing names the
+// cause — so this is the only place the real reason is written down.
+func (c Client) Egress(name string, limit int) ([]EgressEvent, error) {
+	out, err := c.output("machine", "egress-events", "-n", name, "--limit", strconv.Itoa(limit), "--json")
 	if err != nil {
 		return nil, err
 	}
-	var out []Machine
-	for _, m := range all {
-		if _, ok := m.Labels[LabelPrefix+"scope"]; ok {
-			out = append(out, m)
-		}
+	var evs []EgressEvent
+	if err := json.Unmarshal([]byte(out), &evs); err != nil {
+		return nil, fmt.Errorf("smolvm machine egress-events --json: %w", err)
 	}
-	return out, nil
+	return evs, nil
 }
 
 // Status returns the machine and whether it exists.
@@ -166,6 +164,9 @@ type CreateSpec struct {
 	Network    string // off | allowlist | on
 	AllowHosts []string
 	Ports      []string
+	// DNS is the resolver the guest should use. Empty means boxer picks the host's (see dns.go);
+	// "off" leaves smolvm's public-resolver default alone.
+	DNS string
 }
 
 // Create defines the machine. It does not start it.
@@ -202,8 +203,43 @@ func (c Client) Create(s CreateSpec) error {
 			args = append(args, "--allow-host", h)
 		}
 	}
-	_, err := c.output(args...)
+	// Point a networked guest at the host's caching resolver rather than smolvm's public default:
+	// ~415ms per lookup becomes ~2ms, and 0ms once the host has it cached. See dns.go.
+	if s.Network == "on" || s.Network == "allowlist" {
+		if d := s.DNS; d != "off" {
+			if d == "" {
+				d = HostResolver()
+			}
+			if d != "" {
+				args = append(args, "--dns", d)
+			}
+		}
+	}
+	// Wait out smolvm's store lock rather than failing. A create that lost the race did not
+	// happen at all, so asking again is safe — there is no half-created machine to clean up. The
+	// budget is generous because a real create takes about half a second and several arriving
+	// together is the ordinary case for one-sandbox-per-worktree.
+	_, err := c.retryWhileLocked(func() (string, error) { return c.output(args...) })
 	return err
+}
+
+// retryWhileLocked calls f until it stops reporting smolvm's store as locked, backing off between
+// attempts. Only for operations that are safe to repeat when they failed to take effect.
+func (c Client) retryWhileLocked(f func() (string, error)) (string, error) {
+	const attempts = 40 // with the backoff below, a little over 20 seconds
+	wait := 25 * time.Millisecond
+	var out string
+	var err error
+	for i := 0; i < attempts; i++ {
+		if out, err = f(); !IsLocked(err) {
+			return out, err
+		}
+		time.Sleep(wait)
+		if wait < 750*time.Millisecond {
+			wait *= 2
+		}
+	}
+	return out, err
 }
 
 // Pack pulls image once into a .smolmachine at stub+".smolmachine" and returns that path. Machines
@@ -233,6 +269,63 @@ func (c Client) Start(name string) error {
 	return err
 }
 
+// StartBranchable boots a machine as a branch source: its RAM is backed by a memfd, so it can be
+// copied on write, and it exposes the control socket `machine branch` needs. An ordinary start
+// cannot be branched from, and smolvm reports no way to ask whether the current boot was
+// branchable, so the caller has to remember.
+func (c Client) StartBranchable(name string) error {
+	_, err := c.output("machine", "start", "-n", name, "--branchable")
+	return err
+}
+
+// BranchSpec is one fork of a running branchable machine. A child inherits the source's volumes
+// and cannot override them, which is why the worktree mount has to be decided on the parent.
+type BranchSpec struct {
+	From       string
+	NamePrefix string
+	Count      int
+	Env        []string // KEY=VALUE, per child
+	SecretEnv  []string // GUEST=HOSTVAR
+	Ports      []string
+}
+
+// Branch forks the source and returns the children's names.
+//
+// Each child is taken as its own single `--name` branch, never as a `--count`/`--name-prefix`
+// batch, because a batch waits for the source's workload to declare a branch point by running
+// `smolvm-branch-ready` and gives up after ten minutes when it never does. An ordinary
+// development sandbox has no such workload, so a batch would hang every time; a single named
+// branch checkpoints the source wherever it happens to be, which is what boxer wants.
+func (c Client) Branch(s BranchSpec) ([]string, error) {
+	if s.Count <= 0 {
+		s.Count = 1
+	}
+	var out []string
+	for i := 1; i <= s.Count; i++ {
+		name := fmt.Sprintf("%s%d", s.NamePrefix, i)
+		if _, ok, err := c.Status(name); err == nil && ok {
+			continue // a child of that number is already there
+		}
+		args := []string{"machine", "branch", "--from", s.From, "-n", name}
+		for _, e := range s.Env {
+			args = append(args, "-e", e)
+		}
+		for _, e := range s.SecretEnv {
+			args = append(args, "--secret-env", e)
+		}
+		for _, p := range s.Ports {
+			args = append(args, "-p", p)
+		}
+		if _, err := c.output(args...); err != nil {
+			// Whatever was made before the failure is real and has to be reported, or the caller
+			// cannot reclaim it.
+			return out, err
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
 // Stop halts a machine; stopping a stopped machine is not an error.
 func (c Client) Stop(name string) error {
 	_, err := c.output("machine", "stop", "-n", name)
@@ -253,10 +346,18 @@ type ExecOpts struct {
 	Name    string
 	Workdir string
 	Env     []string // KEY=VALUE
+	// SecretEnv is GUEST=HOSTVAR: smolvm reads the value out of its own environment, so a
+	// forwarded token never appears in the argv that `ps` shows on the host.
+	SecretEnv []string
+	// Timeout bounds the guest command. Zero leaves it unbounded, which is what a shell does.
+	Timeout time.Duration
 	TTY     bool
-	Stdin   io.Reader
-	Stdout  io.Writer
-	Stderr  io.Writer
+	// User runs the command as this guest user (a name or uid[:gid]); empty is the image's own.
+	// Every backend spells it `-u`, which is why it is one field rather than a capability.
+	User   string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // Exec runs argv in the guest and returns its exit status. stdin is always kept open so piped
@@ -267,16 +368,25 @@ func (c Client) Exec(o ExecOpts, argv ...string) (int, error) {
 	if o.TTY {
 		args = append(args, "-t")
 	}
+	if o.User != "" {
+		args = append(args, "-u", o.User)
+	}
 	if o.Workdir != "" {
 		args = append(args, "-w", o.Workdir)
 	}
 	for _, e := range o.Env {
 		args = append(args, "-e", e)
 	}
+	for _, s := range o.SecretEnv {
+		args = append(args, "--secret-env", s)
+	}
+	if o.Timeout > 0 {
+		args = append(args, "--timeout", o.Timeout.String())
+	}
 	args = append(args, "--")
 	args = append(args, argv...)
 	c.log(args)
-	cmd := exec.Command(c.Bin, args...)
+	cmd := c.command(args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.Stdin, o.Stdout, o.Stderr
 	if err := cmd.Start(); err != nil {
 		return 127, c.wrap(err)
@@ -304,16 +414,9 @@ func (c Client) Exec(o ExecOpts, argv ...string) (int, error) {
 	}
 }
 
-// Output runs argv in the guest and returns its combined output and exit status.
-func (c Client) Output(name, workdir string, argv ...string) (string, int, error) {
-	var buf bytes.Buffer
-	code, err := c.Exec(ExecOpts{Name: name, Workdir: workdir, Stdin: strings.NewReader(""), Stdout: &buf, Stderr: &buf}, argv...)
-	return buf.String(), code, err
-}
-
 func (c Client) output(args ...string) (string, error) {
 	c.log(args)
-	cmd := exec.Command(c.Bin, args...)
+	cmd := c.command(args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -332,7 +435,7 @@ func (c Client) output(args ...string) (string, error) {
 			}
 			msg = err.Error()
 		}
-		return "", &Error{Verb: args[0], Code: code, Stderr: msg}
+		return "", &Error{Verb: args[0], Code: code, Stderr: msg, Kind: classifySmolvm(msg)}
 	}
 	return out.String(), nil
 }

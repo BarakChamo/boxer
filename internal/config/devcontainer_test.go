@@ -68,7 +68,8 @@ func TestDevcontainerRuntimePropertiesAreRead(t *testing.T) {
 	if cfg.Env["EDITOR"] != "vi" || cfg.Env["PYTHONUNBUFFERED"] != "1" {
 		t.Errorf("env: %v", cfg.Env)
 	}
-	if len(cfg.Network.Ports) != 2 || cfg.Network.Ports[0] != "8000:8000" || cfg.Network.Ports[1] != "5432:5432" {
+	// forwardPorts wants the port reachable, not a particular host port, so each worktree gets its own.
+	if len(cfg.Network.Ports) != 2 || cfg.Network.Ports[0] != "auto:8000" || cfg.Network.Ports[1] != "auto:5432" {
 		t.Errorf("ports: %v", cfg.Network.Ports)
 	}
 	// A bind mount is a host directory; a volume is Docker's own storage and has no meaning here.
@@ -159,5 +160,176 @@ func TestStripJSONComments(t *testing.T) {
 	}
 	if len(out["b"].([]any)) != 2 {
 		t.Errorf("b: %v", out["b"])
+	}
+}
+
+// initializeCommand is the specification's only host-side hook, and it is what boxer's [prep] is.
+// Reading it is the difference between honouring a devcontainer and honouring the half of it that
+// happens to run in a container. updateContentCommand runs before postCreateCommand and both
+// prepare the workspace, so both land in `setup`, in that order.
+func TestTheHostSideAndContentHooksAreRead(t *testing.T) {
+	dir := t.TempDir()
+	writeDC(t, dir, `{
+	  "image": "node:24-alpine",
+	  "initializeCommand": "npm ci $BOXER_TARGET_FLAGS",
+	  "onCreateCommand": "apk add git",
+	  "updateContentCommand": "npm run codegen",
+	  "postCreateCommand": ["npm", "run", "build"]
+	}`)
+	cfg, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Prep.Commands) != 1 || cfg.Prep.Commands[0] != "npm ci $BOXER_TARGET_FLAGS" {
+		t.Errorf("initializeCommand did not become prep: %v", cfg.Prep.Commands)
+	}
+	if len(cfg.ImageSetup) != 1 || cfg.ImageSetup[0] != "apk add git" {
+		t.Errorf("onCreateCommand did not become image_setup: %v", cfg.ImageSetup)
+	}
+	// Specification order: updateContentCommand runs before postCreateCommand.
+	if len(cfg.Setup) != 2 || cfg.Setup[0] != "npm run codegen" {
+		t.Errorf("setup is not updateContent then postCreate: %v", cfg.Setup)
+	}
+}
+
+// boxer.toml still wins: the devcontainer is the lowest layer, which is the only way to override
+// a value you disagree with.
+func TestBoxerTomlOverridesTheHostSideHook(t *testing.T) {
+	dir := t.TempDir()
+	writeDC(t, dir, `{"image":"node:24-alpine","initializeCommand":"npm ci"}`)
+	write(t, dir, "boxer.toml", "[prep]\ncommands = [\"bun install\"]\n")
+	cfg, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Prep.Commands) != 1 || cfg.Prep.Commands[0] != "bun install" {
+		t.Errorf("boxer.toml did not win: %v", cfg.Prep.Commands)
+	}
+}
+
+// The specification's variables were passed through literally, which made a bind mount of
+// "${localWorkspaceFolder}/data" an empty directory named after the variable and a token of
+// "${localEnv:TOKEN}" the literal text. Both looked configured.
+func TestDevcontainerVariablesAreResolved(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BOXER_DC_TOKEN", "s3cret")
+	writeDC(t, dir, `{
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "mounts": [
+    "source=${localWorkspaceFolder}/data,target=${containerWorkspaceFolder}/data,type=bind",
+    "source=${devcontainerId}-cache,target=/cache,type=bind"
+  ],
+  "containerEnv": { "HOME_DIR": "/home/dev", "ID": "${devcontainerId}" },
+  "remoteEnv": {
+    "TOKEN": "${localEnv:BOXER_DC_TOKEN}",
+    "FALLBACK": "${localEnv:BOXER_DC_UNSET:dflt}",
+    "FROM_CONTAINER": "${containerEnv:HOME_DIR}/bin",
+    "UNKNOWN": "${containerEnv:PATH}:/x"
+  },
+  "postCreateCommand": "echo ${containerWorkspaceFolder}"
+}`)
+	cfg, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Base(dir)
+	if cfg.MountAt != "/workspaces/"+base {
+		t.Errorf("workspaceFolder: %q", cfg.MountAt)
+	}
+	if len(cfg.Mounts) != 1 || cfg.Mounts[0] != dir+"/data:/workspaces/"+base+"/data" {
+		t.Errorf("mounts must resolve, and one that cannot must be dropped rather than mounted wrong: %v", cfg.Mounts)
+	}
+	want := map[string]string{"HOME_DIR": "/home/dev", "TOKEN": "s3cret", "FALLBACK": "dflt", "FROM_CONTAINER": "/home/dev/bin"}
+	for k, v := range want {
+		if cfg.Env[k] != v {
+			t.Errorf("env %s = %q, want %q", k, cfg.Env[k], v)
+		}
+	}
+	for _, k := range []string{"UNKNOWN", "ID"} {
+		if _, ok := cfg.Env[k]; ok {
+			t.Errorf("env %s depends on a variable boxer cannot resolve and must be dropped, not passed literally: %q", k, cfg.Env[k])
+		}
+	}
+	if len(cfg.Setup) != 1 || cfg.Setup[0] != "echo /workspaces/"+base {
+		t.Errorf("setup: %v", cfg.Setup)
+	}
+	joined := strings.Join(cfg.Warnings, "\n")
+	for _, name := range []string{"${containerEnv:PATH}", "${devcontainerId}"} {
+		if !strings.Contains(joined, name) {
+			t.Errorf("an unresolvable variable must be named: %s missing from %v", name, cfg.Warnings)
+		}
+	}
+}
+
+// The rest of the cheap half of the specification: who commands run as, what the host must
+// provide, what a port is called, and which ports must keep their number.
+func TestDevcontainerUserResourcesAndPortAttributes(t *testing.T) {
+	dir := t.TempDir()
+	writeDC(t, dir, `{
+  "remoteUser": "node", "containerUser": "root",
+  "hostRequirements": { "cpus": 8, "memory": "16gb" },
+  "forwardPorts": [3000, 5432],
+  "appPort": [9000],
+  "portsAttributes": { "3000": { "label": "web" }, "5432": { "requireLocalPort": true } }
+}`)
+	cfg, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "node" {
+		t.Errorf("remoteUser wins over containerUser: %q", cfg.User)
+	}
+	if cfg.CPUs != 8 || cfg.Memory != "16384M" {
+		t.Errorf("hostRequirements: cpus %d memory %q", cfg.CPUs, cfg.Memory)
+	}
+	if got := strings.Join(cfg.Network.Ports, " "); got != "auto:3000 5432:5432 9000:9000" {
+		t.Errorf("ports: %s", got)
+	}
+	if cfg.URLs.Names["3000"] != "web" {
+		t.Errorf("a port's label names its URL: %v", cfg.URLs.Names)
+	}
+	// Minimums never lower boxer's defaults.
+	dir2 := t.TempDir()
+	writeDC(t, dir2, `{"hostRequirements": { "cpus": 1, "memory": "512mb" }}`)
+	cfg2, err := Load(dir2, dir2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.CPUs != Defaults().CPUs || cfg2.Memory != Defaults().Memory {
+		t.Errorf("a minimum below the default must not lower it: %d %q", cfg2.CPUs, cfg2.Memory)
+	}
+}
+
+// Settings that would widen the sandbox, or that boxer cannot honour, are named — never silently
+// dropped and never silently obeyed.
+func TestDevcontainerRefusesBoundaryAndAttachSettings(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"runArgs", `{"runArgs":["--network=host"]}`, "runArgs"},
+		{"privileged", `{"privileged":true}`, "privileged"},
+		{"capAdd", `{"capAdd":["SYS_PTRACE"]}`, "capAdd"},
+		{"securityOpt", `{"securityOpt":["seccomp=unconfined"]}`, "securityOpt"},
+		{"init", `{"init":true}`, "init"},
+		{"workspaceMount", `{"workspaceMount":"source=/x,target=/y,type=bind"}`, "workspaceMount"},
+		{"overrideCommand", `{"overrideCommand":false}`, "overrideCommand"},
+		{"postAttachCommand", `{"postAttachCommand":"echo hi"}`, "postAttachCommand"},
+		{"gpu", `{"hostRequirements":{"gpu":true}}`, "gpu"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDC(t, dir, tc.body)
+			cfg, err := Load(dir, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(cfg.Warnings, "\n"), tc.want) {
+				t.Errorf("%s must be named: %v", tc.name, cfg.Warnings)
+			}
+		})
+	}
+	dir := t.TempDir()
+	writeDC(t, dir, `{"hostRequirements":{"gpu":"optional"},"overrideCommand":true}`)
+	cfg, _ := Load(dir, dir)
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("an optional GPU and overrideCommand: true ask for nothing boxer lacks: %v", cfg.Warnings)
 	}
 }

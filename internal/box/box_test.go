@@ -31,7 +31,7 @@ func TestRunProvisionsLazilyAndPropagatesExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Stderr = &bytes.Buffer{}
-	if img, why := e.Image(); img != "oven/bun:1-debian" || !strings.Contains(why, "bun.lock") {
+	if img, why := e.Image(); img != "oven/bun:1-slim" || !strings.Contains(why, "bun.lock") {
 		t.Fatalf("image detection: %s %s", img, why)
 	}
 	if e.GuestWorkdir() != "/workspace/apps/api" {
@@ -44,7 +44,7 @@ func TestRunProvisionsLazilyAndPropagatesExit(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	s := string(b)
-	if !strings.Contains(s, "machine create -n "+e.Scope.Key) || !strings.Contains(s, "pack create -I oven/bun:1-debian") || !strings.Contains(s, "--from ") || !strings.Contains(s, "--allow-host registry-1.docker.io") {
+	if !strings.Contains(s, "machine create -n "+e.Scope.Key) || !strings.Contains(s, "pack create -I oven/bun:1-slim") || !strings.Contains(s, "--from ") || !strings.Contains(s, "--allow-host registry-1.docker.io") {
 		t.Fatalf("create flags:\n%s", s)
 	}
 	if strings.Count(s, "echo installing") != 1 {
@@ -80,7 +80,9 @@ func TestRunRefusesWhenCreateNotAllowed(t *testing.T) {
 	if !ok || code != 1 || be.Cause != "NO_SANDBOX" || !strings.Contains(be.Error(), "fix:       boxer up") {
 		t.Fatalf("want NO_SANDBOX error, got %d %v", code, err)
 	}
-	if !strings.HasPrefix(be.Error(), "boxer: ") || !strings.Contains(be.Error(), "scope:     sb-") {
+	// The refusal names the sandbox both ways: the slug is what a person matches on, the key is
+	// what is unique and what --scope takes.
+	if !strings.HasPrefix(be.Error(), "boxer: ") || !strings.Contains(be.Error(), "("+e.Scope.Key+", worktree)") || !strings.Contains(be.Error(), "scope:     "+e.Scope.Slug()) {
 		t.Fatalf("error contract: %q", be.Error())
 	}
 }
@@ -127,6 +129,19 @@ func TestRequireWorktree(t *testing.T) {
 	e, err := Resolve(dir, "", scope.Identity{})
 	if err != nil || len(e.Warnings) != 1 {
 		t.Fatalf("warn default: %v %v", err, e.Warnings)
+	}
+	// A subdirectory of the main checkout is still the main checkout. It did not used to be:
+	// `git rev-parse --git-common-dir` answers relative to the current directory, boxer resolved
+	// it against the toplevel instead, and the mismatch it produced read as "this is a linked
+	// worktree" — so `require` passed from `src/` and refused from the repository root.
+	dir = vmtest.Repo(t, "require_worktree = \"require\"\n")
+	sub := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Resolve(sub, "", scope.Identity{})
+	if be, ok := err.(*Error); !ok || be.Cause != "WORKTREE_REQUIRED" {
+		t.Fatalf("from a subdirectory: want WORKTREE_REQUIRED, got %v", err)
 	}
 }
 
@@ -332,17 +347,17 @@ func TestCreateWaitsForAConcurrentCreator(t *testing.T) {
 func TestImageDetectorTable(t *testing.T) {
 	vmtest.Install(t)
 	for _, tc := range []struct{ file, image string }{
-		{"bun.lock", "oven/bun:1-debian"},
-		{"bun.lockb", "oven/bun:1-debian"},
-		{"pnpm-lock.yaml", "node:24-bookworm"},
-		{"package-lock.json", "node:24-bookworm"},
-		{"yarn.lock", "node:24-bookworm"},
-		{"uv.lock", "python:3.12-bookworm"},
-		{"requirements.txt", "python:3.12-bookworm"},
-		{"pyproject.toml", "python:3.12-bookworm"},
-		{"Cargo.lock", "rust:1-bookworm"},
-		{"go.sum", "golang:1-bookworm"},
-		{"go.mod", "golang:1-bookworm"},
+		{"bun.lock", "oven/bun:1-slim"},
+		{"bun.lockb", "oven/bun:1-slim"},
+		{"pnpm-lock.yaml", "node:24-bookworm-slim"},
+		{"package-lock.json", "node:24-bookworm-slim"},
+		{"yarn.lock", "node:24-bookworm-slim"},
+		{"uv.lock", "python:3.12-slim-bookworm"},
+		{"requirements.txt", "python:3.12-slim-bookworm"},
+		{"pyproject.toml", "python:3.12-slim-bookworm"},
+		{"Cargo.lock", "rust:1-slim-bookworm"},
+		{"go.sum", "golang:1-alpine"},
+		{"go.mod", "golang:1-alpine"},
 	} {
 		dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
 		if err := os.WriteFile(filepath.Join(dir, tc.file), nil, 0o644); err != nil {
@@ -1017,5 +1032,144 @@ func TestAutomaticPortsDoNotCollide(t *testing.T) {
 	}
 	if PortsOf(vm.Machine{Labels: map[string]string{vm.LabelPrefix + "scope": "sb-x"}}) != nil {
 		t.Fatal("a machine with no forwarded ports reports none")
+	}
+}
+
+// A forwarded secret must reach the guest without ever appearing in an argument vector: `-e
+// KEY=value` would put every token boxer forwards into the command line that `ps` shows to every
+// other process on the host. smolvm's --secret-env passes the name and reads the value itself.
+func TestForwardedSecretsNeverReachTheArgv(t *testing.T) {
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, "secrets = [\"NPM_TOKEN\"]\nenv_passthrough = [\"CI\"]\n"+vmtest.NoWorktreeCheck)
+	t.Setenv("NPM_TOKEN", "s3cr3t-value")
+	t.Setenv("CI", "1")
+
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = &bytes.Buffer{}
+	var out bytes.Buffer
+	if code, err := e.Run([]string{"sh", "-c", "echo $NPM_TOKEN"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}); err != nil || code != 0 {
+		t.Fatalf("run: %d %v", code, err)
+	}
+	if !strings.Contains(out.String(), "s3cr3t-value") {
+		t.Fatalf("the guest must see the value: %q", out.String())
+	}
+	b, _ := os.ReadFile(log)
+	if !strings.Contains(string(b), "--secret-env NPM_TOKEN=NPM_TOKEN") || !strings.Contains(string(b), "--secret-env CI=CI") {
+		t.Fatalf("secrets must be passed by name:\n%s", b)
+	}
+	if strings.Contains(string(b), "s3cr3t-value") {
+		t.Fatalf("a secret value must never reach the argv:\n%s", b)
+	}
+}
+
+// A command that fails under an allowlist usually failed because of the allowlist, and the guest
+// cannot say so: it saw a connect error with no policy in it. The machine remembers denials from
+// every earlier command too, so the message has to mean "during this command".
+func TestFailedRunNamesTheDeniedHost(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	e.Stderr = &errOut
+	// Provision first: the window boxer asks about starts when the *command* starts, so an event
+	// stamped before a slow first create would be correctly excluded and prove nothing.
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(at time.Time, dest string) string {
+		return `[{"timestamp":"` + at.UTC().Format(time.RFC3339) + `","operation":"resolve","dest":"` + dest + `"}]`
+	}
+	vmtest.SetEgress(t, stamp(time.Now(), "registry.npmjs.org"))
+	var out bytes.Buffer
+	if code, _ := e.Run([]string{"false"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut}); code != 1 {
+		t.Fatalf("exit: %d", code)
+	}
+	if !strings.Contains(errOut.String(), "registry.npmjs.org") || !strings.Contains(errOut.String(), "network.allow_hosts") {
+		t.Fatalf("the denied host and its fix must be named:\n%s", errOut.String())
+	}
+	// A denial from an hour ago belongs to some earlier command, not this one.
+	errOut.Reset()
+	vmtest.SetEgress(t, stamp(time.Now().Add(-time.Hour), "ancient.example.com"))
+	if code, _ := e.Run([]string{"false"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut}); code != 1 {
+		t.Fatal("expected failure")
+	}
+	if strings.Contains(errOut.String(), "ancient.example.com") {
+		t.Fatalf("an older denial must not be blamed on this command:\n%s", errOut.String())
+	}
+	// doctor asks what is wrong here, not what went wrong in one command, so it takes the lot.
+	if hosts := DeniedHosts(e.VM, e.Scope.Key, e.Cfg, time.Time{}); len(hosts) != 1 || hosts[0] != "ancient.example.com" {
+		t.Fatalf("the whole history: %v", hosts)
+	}
+	// A run that succeeded says nothing: a denied side-channel on a passing command is noise.
+	errOut.Reset()
+	vmtest.SetEgress(t, stamp(time.Now(), "registry.npmjs.org"))
+	if code, _ := e.Run([]string{"true"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut}); code != 0 {
+		t.Fatal("expected success")
+	}
+	if strings.Contains(errOut.String(), "registry.npmjs.org") {
+		t.Fatalf("a passing command must stay quiet:\n%s", errOut.String())
+	}
+}
+
+// smolvm keeps its machine records in SQLite, so several `boxer up` calls arriving together — the
+// ordinary case for one sandbox per worktree — lose a race with "database is locked". That error
+// says nothing about the request, and boxer used to read it as a corrupt environment pack: it
+// deleted the pack every parallel provision was about to boot from and pulled the image from the
+// registry instead. Four parallel provisions measured 27s each rather than 2.7s, and the pack had
+// to be rebuilt afterwards. Two things are asserted here because either alone lets it back in:
+// the create is retried, and the pack survives.
+func TestAStoreLockNeitherFailsTheCreateNorCondemnsThePack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	e.Stderr = &out
+
+	// Let boxer build and name its own pack rather than deriving the path here: the key is an
+	// implementation detail, and a test that recomputes it tests the recomputation.
+	if _, err = e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	packs, _ := filepath.Glob(filepath.Join(PackDir(), "*.smolmachine"))
+	if len(packs) != 1 {
+		t.Fatalf("want one pack after the first provision, got %v", packs)
+	}
+	pack := packs[0]
+	if err := e.deleteVM(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now provision again with the store refusing the first three creates.
+	if err := os.Truncate(log, 0); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	vmtest.LockVerb(t, "machine create", 3)
+	if _, err = e.Ensure(true, false); err != nil {
+		t.Fatalf("a locked store must be waited out, not reported: %v", err)
+	}
+	if _, err := os.Stat(pack); err != nil {
+		t.Fatalf("the pack must survive a lock error: %v", err)
+	}
+	if strings.Contains(out.String(), "cached image unusable") {
+		t.Fatalf("a lock error must not be blamed on the pack: %q", out.String())
+	}
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "machine create"); n < 4 {
+		t.Fatalf("want the create retried past the lock, saw %d attempts:\n%s", n, b)
+	}
+	// And every attempt must still have booted from the pack rather than pulling the image.
+	if !strings.Contains(string(b), "--from "+pack) {
+		t.Fatalf("the retried create must still boot from the pack\nwant --from %s\ngot:\n%s", pack, b)
 	}
 }

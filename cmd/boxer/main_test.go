@@ -77,7 +77,7 @@ func TestStatusStoppedExitCodeAndHumanDoctor(t *testing.T) {
 		t.Fatalf("stopped: %d %v", code, st)
 	}
 	code, out := call(t, nil, "doctor")
-	if code != 0 || !strings.Contains(out, "sandbox:   stopped, image alpine") || !strings.Contains(out, "smolvm:    smolvm 0.0.0-fake") {
+	if code != 0 || !strings.Contains(out, "sandbox:   stopped, image alpine") || !strings.Contains(out, "runtime:   smolvm 0.0.0-fake") {
 		t.Fatalf("doctor human output: %d\n%s", code, out)
 	}
 	if !strings.Contains(out, "signals:") || !strings.Contains(out, "claude-code  yes      yes      -      yes") || !strings.Contains(out, "boxer install git") {
@@ -168,14 +168,19 @@ func TestTasksAndBrief(t *testing.T) {
 	if !strings.Contains(b["brief"].(string), "boxer sandbox") {
 		t.Fatalf("brief text: %v", b["brief"])
 	}
-	if code, out := call(t, nil, "brief"); code != 0 || !strings.Contains(out, "Tasks (boxer run --task <name>): build, test") {
+	// The brief names every task once, with its command line when it declares no description.
+	code, out := call(t, nil, "brief")
+	if code != 0 || !strings.Contains(out, "`boxer run --task build`") || !strings.Contains(out, "`boxer run --task test`") {
 		t.Fatalf("prose brief: %d %s", code, out)
+	}
+	if strings.Count(out, "--task test") != 1 {
+		t.Fatalf("a task is named once, not twice:\n%s", out)
 	}
 	if code, out := call(t, nil, "run", "--task", "test"); code != 0 || !strings.Contains(out, "ran-the-task") {
 		t.Fatalf("run --task: %d %s", code, out)
 	}
 	// An unknown name is a refusal an agent can act on: the fix line lists what does exist.
-	code, out := call(t, nil, "run", "--task", "tset")
+	code, out = call(t, nil, "run", "--task", "tset")
 	if code != 1 || !strings.Contains(out, "NO_SUCH_TASK") || !strings.Contains(out, "fix:       boxer run --task build | test") {
 		t.Fatalf("unknown task: %d %s", code, out)
 	}
@@ -432,5 +437,94 @@ func TestTheReleaseStampSurvivesTheLinker(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "boxer v9.9.9-test" {
 		t.Fatalf("the stamp did not reach the binary: %q", out)
+	}
+}
+
+// A described task is what an agent chooses between, so the description has to reach both the
+// listing and the brief. The JSON keeps `tasks` a name→command map, so a reader written against
+// an older boxer still works, and puts the rest in task_details.
+func TestTaskTableReachesTheListingAndTheBrief(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+
+		"[tasks]\nbuild = \"make build\"\n\n[tasks.test]\ncmd = \"echo ran\"\ndescription = \"the unit suite\"\njunit = [\"junit.xml\"]\n")
+
+	if code, out := call(t, nil, "tasks"); code != 0 || !strings.Contains(out, "the unit suite") || !strings.Contains(out, "make build") {
+		t.Fatalf("tasks listing: %d %s", code, out)
+	}
+	var b map[string]any
+	if code, _ := call(t, &b, "brief", "--json"); code != 0 {
+		t.Fatalf("brief: %d", code)
+	}
+	if tasks, _ := b["tasks"].(map[string]any); tasks["test"] != "echo ran" {
+		t.Fatalf("tasks stays a name→command map: %v", b["tasks"])
+	}
+	details, _ := b["task_details"].(map[string]any)
+	row, _ := details["test"].(map[string]any)
+	if row["description"] != "the unit suite" {
+		t.Fatalf("task_details: %v", b["task_details"])
+	}
+	if _, ok := details["build"]; ok {
+		t.Fatalf("a bare string task declares no details: %v", details)
+	}
+	if code, out := call(t, nil, "brief"); code != 0 || !strings.Contains(out, "the unit suite") {
+		t.Fatalf("the brief must name what a task is for: %d %s", code, out)
+	}
+}
+
+// A test report answers "which tests failed" without scraping the log. It must never turn a
+// non-zero exit into a different one, and a report older than the run is not this run's.
+func TestJUnitSummaryAndFailOnTestFailures(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	red := `<testsuite name="cart"><testcase name="ok"/><testcase name="bad"><failure message="no"/></testcase></testsuite>`
+	write := "printf '%s' '" + red + "' > junit.xml"
+
+	code, out := call(t, nil, "run", "--junit", "junit.xml", "-c", write)
+	if code != 0 || !strings.Contains(out, "1 passed, 1 failed") || !strings.Contains(out, "FAIL cart/bad") {
+		t.Fatalf("summary: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "run", "--junit", "junit.xml", "--fail-on-test-failures", "-c", write); code != 1 {
+		t.Fatalf("a green command with a red report must exit 1: %d %s", code, out)
+	}
+	if code, _ := call(t, nil, "run", "--junit", "junit.xml", "--fail-on-test-failures", "-c", write+"; exit 3"); code != 3 {
+		t.Fatalf("the command's own exit code must survive: %d", code)
+	}
+	// The report is now stale: a later run that writes nothing must not inherit its verdict.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "junit.xml"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, nil, "run", "--junit", "junit.xml", "--fail-on-test-failures", "-c", "true"); code != 0 || strings.Contains(out, "FAIL") {
+		t.Fatalf("a stale report must be ignored: %d %s", code, out)
+	}
+}
+
+// A sandbox is addressed by a hash because the hash is what is unique, and read by a person who
+// cannot hold one in their head. The slug is derived from the key, so it appears everywhere
+// without being stored anywhere, and --scope takes either.
+func TestSandboxesAreNamedAsWellAsHashed(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, _ := call(t, nil, "up"); code != 0 {
+		t.Fatal("up")
+	}
+	var st map[string]any
+	if code, _ := call(t, &st, "status", "--json"); code != 0 {
+		t.Fatalf("status: %d", code)
+	}
+	name, _ := st["name"].(string)
+	key, _ := st["scope"].(string)
+	if name == "" || name == key || !strings.HasPrefix(key, "sb-") {
+		t.Fatalf("status must carry both: %v", st)
+	}
+	if code, out := call(t, nil, "ls"); code != 0 || !strings.Contains(out, name) || !strings.Contains(out, key) {
+		t.Fatalf("ls: %d %s", code, out)
+	}
+	// The readable name is accepted wherever the key is.
+	if code, out := call(t, nil, "run", "--scope", name, "-c", "echo by-name"); code != 0 || !strings.Contains(out, "by-name") {
+		t.Fatalf("run --scope <name>: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "down", "--scope", name); code != 0 || !strings.Contains(out, "removed") {
+		t.Fatalf("down --scope <name>: %d %s", code, out)
 	}
 }

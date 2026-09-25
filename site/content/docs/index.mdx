@@ -8,10 +8,11 @@ decided would help. Those commands run as you, on your machine, with your creden
 filesystem.
 
 boxer puts them in a [smolvm](https://smolmachines.com) microVM instead — one VM per git worktree,
-started on the first command, with the worktree mounted at the same path it has on the host.
+started on the first command, with the worktree mounted in the guest at `/workspace`.
 
 The agent is not told. It types `npm test`, the command runs in the VM, and the output comes back
-looking exactly as it would have. Same paths, same exit codes, same stdout.
+looking exactly as it would have — same exit code, same stdout, same stderr, the working directory
+mapped to the matching place under the mount.
 
 ```console
 $ boxer run -c 'uname -a'
@@ -22,6 +23,9 @@ That ran on Linux. The host is a Mac.
 
 ## What it is not
 
+The worktree is mounted read-write, because the agent is there to change it. boxer keeps commands
+away from everything else on your machine, not away from the code you asked the agent to work on.
+
 boxer is not a container runtime, and it does not replace your dev environment. It is a shim
 between a coding agent and the commands it wants to run, with a VM behind it. The VMs, their
 images and their snapshots all belong to smolvm; boxer keeps no state of its own beyond a few
@@ -29,7 +33,9 @@ markers.
 
 It is also not a security boundary against an adversary who knows they are in it. A microVM is a
 real isolation boundary and a good one, but boxer's threat model is *an agent doing something
-destructive or careless*, not *an attacker deliberately breaking out*.
+destructive or careless*, not *an attacker deliberately breaking out*. The
+[security model](/docs/concepts/security) says exactly where that line falls, and what to do if
+your threat model is the other one.
 
 ## Where to start
 
@@ -38,4 +44,6 @@ destructive or careless*, not *an attacker deliberately breaking out*.
   <Card title="Connect your harness" href="/docs/start/harnesses" description="Claude Code, Codex, Copilot, Kimi, OpenCode and the rest." />
   <Card title="How it works" href="/docs/guides/how-it-works" description="Scopes, integration levels, and what happens on the first command." />
   <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
+  <Card title="Build on boxer" href="/docs/guides/building-on-boxer" description="The Go package, the JSON output, and the CLI as an interface." />
+  <Card title="Security model" href="/docs/concepts/security" description="What the boundary holds against, and the three ways out that are deliberate." />
 </Cards>

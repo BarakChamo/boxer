@@ -16,10 +16,12 @@ import (
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/bundle"
+	"github.com/BarakChamo/boxer/internal/cli"
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/hook"
 	"github.com/BarakChamo/boxer/internal/inside"
 	"github.com/BarakChamo/boxer/internal/install"
+	"github.com/BarakChamo/boxer/internal/junit"
 	"github.com/BarakChamo/boxer/internal/mcp"
 	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
@@ -47,8 +49,19 @@ func versionOrBuildInfo(stamped string) string {
 	return "dev"
 }
 
-const usage = `boxer — run agent commands in a microVM per worktree
+const usage = `boxer — run agent commands in a sandbox per worktree
 
+See what is here
+  boxer ls [-A] [--pr] [--resources]   sandboxes, their backend, branch, git state and URLs (-A: every backend)
+  boxer backends [NAME] [--probe]      which backends are installed and answering; --probe runs a real sandbox
+  boxer integrations [add NAME]        harnesses, orchestrators and tools, and whether boxer is wired into each
+                                       add: <harness>, skill (npx skills), plugin (npx plugins), git, conductor
+  boxer url [PORT] | boxer open [PORT] where this worktree's server is, by name when [urls] gives it one
+
+Manage sandboxes
+  boxer stop|rm [NAME...] [--all|--gone|--stopped] [-i] [-y]   stop or remove; -i to choose
+
+Run and configure
   boxer up [--recreate|--detach]   create and start the sandbox for this scope (--detach: in the background)
   boxer run -c '<shell>'           run a shell line in the sandbox
   boxer run -- <prog> [args]       run a program in the sandbox
@@ -60,12 +73,20 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer brief [--json]             the agent brief for this checkout: mount, mode, intercept, tasks
   boxer tasks [--json]             the command lines this repository declares in [tasks]
   boxer run --task <name>          run one of them in the sandbox
+  boxer run --junit a.xml[,b.xml]  summarise the JUnit reports the command wrote
+  boxer fork [--prepare] [--count N]  branch this sandbox into copy-on-write children that
+                                   share this worktree, warm, without booting
+  boxer fork ls|rm <name>|--all    list them, reclaim them
+  boxer pack save|ls|use|rm <name>  keep a prepared sandbox as a named artifact and start from it
+  boxer capsule new [-o PATH]      write a replayable manifest of the last run in this scope
+  boxer capsule inspect|replay <path>  read one, or run it again and say whether it reproduced
   boxer logs [--scope NAME] [-n N] [--json]  read the event log ([telemetry] sink = "file")
   boxer watch [--json]             stream sandbox state changes as they happen
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
-  boxer package plugin|<harness>|all  render the Agent Plugins package (dist/boxer), one client's view, or both
+  boxer package plugin|skills|<harness>|all  render the Agent Plugins package (dist/boxer), the
+                                   published skill and its .well-known index, one client's view, or all
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
                                    (the layer orchestrators like T3 Code and Paperclip also load)
   boxer install git                post-checkout hook: boxer up --detach in every new worktree (not in all)
@@ -82,7 +103,10 @@ const usage = `boxer — run agent commands in a microVM per worktree
   boxer version
 
 Identity flags accepted by up/run/down/status/doctor: --harness NAME --session ID --agent ID
---json on ls, status, down, gc, doctor prints one JSON object or array (see the JSON reference in the docs site)
+--json on ls, status, down, gc, doctor, backends, integrations, stop, rm prints JSON (see the JSON reference)
+Output adapts to who is reading: colour and prompts at a terminal, plain text for an agent or a pipe.
+BOXER_OUTPUT=json|text|human overrides it; NO_COLOR turns colour off; BOXER_AGENT=1 marks an agent.
+  boxer completion bash|zsh|fish      shell completion
 Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
 `
 
@@ -139,10 +163,31 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return packageCmd(rest, stdout, stderr)
 	case "install":
 		return installCmd(rest, stdout, stderr)
+	case "stop", "rm":
+		return stopRmCmd(args[0], args[1:], stdin, stdout, stderr)
+	case "backends":
+		return backendsCmd(args[1:], stdout, stderr)
+	case "integrations", "harnesses":
+		return integrationsCmd(args[1:], stdin, stdout, stderr)
+	case "completion":
+		return completionCmd(args[1:], stdout, stderr)
+	case "url", "open":
+		e, err := box.Resolve("", "", scope.Identity{})
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return urlCmd(args[0] == "open", e, args[1:], stdout, stderr)
 	case "ls":
 		return lsCmd(rest, stdout, stderr)
 	case "gc":
 		return gcCmd(rest, stdout, stderr)
+	case "fork":
+		return forkCmd(rest, stdout, stderr)
+	case "pack":
+		return packCmd(rest, stdout, stderr)
+	case "capsule":
+		return capsuleCmd(rest, stdin, stdout, stderr)
 	case "logs":
 		return logsCmd(rest, stdout, stderr)
 	case "watch":
@@ -180,7 +225,9 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	// prints no prompt, and a harness that delimits command output by the prompt (OpenHands does)
 	// sees nothing and waits forever. Such a caller asks for a terminal explicitly.
 	forceTTY := fs.Bool("tty", false, "allocate a terminal in the guest even when stdin is not one (run)")
-	task := fs.String("task", "", "name of a [tasks] entry in boxer.toml to run (run)")
+	taskName := fs.String("task", "", "name of a [tasks] entry in boxer.toml to run (run)")
+	junitPaths := fs.String("junit", "", "comma-separated JUnit XML paths, relative to the worktree, to summarise after the command (run)")
+	failOnTests := fs.Bool("fail-on-test-failures", false, "exit 1 when the command passed but a test in the JUnit report did not (run)")
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
@@ -189,7 +236,9 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	// A sandbox can be taken down by name, from anywhere: a dashboard built on `ls --json` has
 	// machine names, not worktrees, and the worktree may be gone.
 	if cmd == "down" && *scopeName != "" {
-		if err := vm.New().Delete(*scopeName); err != nil {
+		hostVM := vm.Host(hostBackend())
+		*scopeName = box.ResolveName(hostVM, *scopeName)
+		if err := hostVM.Delete(*scopeName); err != nil {
 			emit(stdout, errorRow(err), *asJSON)
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -200,6 +249,20 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return 0
 	}
 	e, err := box.Resolve("", *harness, *id)
+	// A fork child has no worktree of its own to resolve from — it is a branch of this one — so
+	// `run` and `status` take it by name, the way `down` already did.
+	if *scopeName != "" && (cmd == "run" || cmd == "status") {
+		if err != nil {
+			emit(stdout, errorRow(err), *asJSON)
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if e, err = e.At(*scopeName); err != nil {
+			emit(stdout, errorRow(err), *asJSON)
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
 	if cmd == "doctor" {
 		r := collectDoctor(e, err)
 		if emit(stdout, r, *asJSON) {
@@ -229,7 +292,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
-			fmt.Fprintf(stdout, "boxer: %s starting in the background\n", e.Scope.Key)
+			fmt.Fprintf(stdout, "boxer: %s starting in the background\n", e.Scope.Names())
 			return 0
 		}
 		if *rebuild {
@@ -253,7 +316,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if created {
 			state = "created and running"
 		}
-		fmt.Fprintf(stdout, "boxer: %s %s (%s) image %s [%s] mounted %s -> %s\n", e.Scope.Key, state, e.Scope.Isolation, img, why, e.Scope.Root, e.MountAt())
+		fmt.Fprintf(stdout, "boxer: %s %s (%s) image %s [%s] mounted %s -> %s\n", e.Scope.Names(), state, e.Scope.Isolation, img, why, e.Scope.Root, e.MountAt())
 		return 0
 	case "down":
 		if *all {
@@ -268,15 +331,16 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			return 0
 		}
 		if !existed {
-			fmt.Fprintf(stdout, "boxer: %s had no sandbox\n", e.Scope.Key)
+			fmt.Fprintf(stdout, "boxer: %s had no sandbox\n", e.Scope.Names())
 			return 0
 		}
-		fmt.Fprintf(stdout, "boxer: %s removed\n", e.Scope.Key)
+		fmt.Fprintf(stdout, "boxer: %s removed\n", e.Scope.Names())
 		return 0
 	case "run":
 		argv := fs.Args()
-		if *task != "" {
-			line, err := taskLine(e, *task)
+		var chosen config.Task
+		if *taskName != "" {
+			t, err := task(e, *taskName)
 			if err != nil {
 				emit(stdout, errorRow(err), *asJSON)
 				fmt.Fprintln(stderr, err)
@@ -286,7 +350,8 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 				fmt.Fprintln(stderr, "boxer run: --task names the whole command; do not add -c or arguments")
 				return 2
 			}
-			argv = []string{"sh", "-c", line}
+			chosen = t
+			argv = []string{"sh", "-c", t.Cmd}
 		}
 		if *shellLine != "" {
 			if len(argv) > 0 {
@@ -302,14 +367,19 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if vm.Inside() {
 			return hostRun(argv, stdin, stdout, stderr) // already in the guest; run directly
 		}
-		tty := *forceTTY || (isTerminal(os.Stdin) && isTerminal(os.Stdout))
+		tty := *forceTTY || (cli.IsTerminal(os.Stdin) && cli.IsTerminal(os.Stdout))
 		if *forceTTY {
 			// A caller that asked for a terminal explicitly is driving this shell, and it may write
 			// to it before the guest exists. Capture that input rather than let the guest terminal
 			// discard it when it opens.
 			stdin = readEarly(stdin)
 		}
-		code, err := e.Run(argv, box.RunOpts{Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty})
+		timeout := time.Duration(0)
+		if chosen.Timeout != "" {
+			timeout, _ = time.ParseDuration(chosen.Timeout) // validated at load
+		}
+		started := time.Now()
+		code, err := e.Run(argv, box.RunOpts{Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty, Timeout: timeout, Task: *taskName})
 		if err != nil {
 			if code == -1 { // passthrough policy: run on the host
 				fmt.Fprintln(stderr, err)
@@ -318,7 +388,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			fmt.Fprintln(stderr, err)
 			return code
 		}
-		return code
+		return withTestResults(e, chosen, *junitPaths, *failOnTests, started, code, stderr)
 	}
 	return 2
 }
@@ -336,15 +406,12 @@ func hostRun(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
 // emit writes v as one indented JSON document when asJSON is set and reports whether it did;
 // callers print the human form otherwise. Every --json command goes through here.
 func emit(w io.Writer, v any, asJSON bool) bool {
-	if !asJSON {
+	// BOXER_OUTPUT=json makes every command that has a JSON form use it, for a caller that cannot
+	// add --json to each invocation — an agent's shell, a wrapper script.
+	if !asJSON && !strings.EqualFold(os.Getenv("BOXER_OUTPUT"), "json") {
 		return false
 	}
 	enc := json.NewEncoder(w)
@@ -357,7 +424,10 @@ func emit(w io.Writer, v any, asJSON bool) bool {
 
 // machineJSON is one boxer sandbox as `ls`, `gc`, `status` and `doctor` report it.
 type machineJSON struct {
-	Scope       string  `json:"scope"`
+	Scope string `json:"scope"`
+	// Name is the same sandbox said out loud — "swift-crab" for sb-7e1852e4a3c3. It is derived
+	// from the key, so it costs nothing to carry and nothing has to agree on it.
+	Name        string  `json:"name"`
 	State       string  `json:"state"`
 	Isolation   string  `json:"isolation"`
 	Worktree    string  `json:"worktree"`
@@ -373,6 +443,8 @@ type machineJSON struct {
 	// What it costs, when asked for: allocation, real use, and disk. Measuring means running `ps`
 	// and walking a directory per machine, so a plain listing does not pay for it.
 	Resources *box.Resources `json:"resources,omitempty"`
+	// URLs are the stable names its ports are reachable at, when [urls] is on.
+	URLs map[string]string `json:"urls,omitempty"`
 }
 
 // withResources measures one machine. Failure to measure is reported in the row rather than as an
@@ -394,8 +466,34 @@ func attachment(m machineJSON) string {
 	return m.Harness + "/" + id
 }
 
-func withResources(client vm.Client, m vm.Machine, row machineJSON) machineJSON {
-	dir, err := client.DataDir(m.Name)
+// dataDir locates a machine's disk, or reports that it cannot be located. A backend with no
+// notion of a per-machine directory is indistinguishable here from one whose lookup failed, and
+// both mean the same thing to every caller: the size is unmeasured, which is not the same as zero.
+// hostBackend is the backend this repository selects, for commands that sweep the whole host and
+// so have no Env of their own. Outside a repository it returns "", and vm.Host falls back to the
+// environment — which is the case `boxer gc` most often runs in.
+func hostBackend() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	e, err := box.Resolve(cwd, "", scope.Identity{})
+	if e == nil || err != nil && e.Cfg.Backend == "" {
+		return ""
+	}
+	return e.Cfg.Backend
+}
+
+func dataDir(client vm.Backend, name string) (string, error) {
+	r, ok := client.(vm.DiskReporter)
+	if !ok {
+		return "", vm.Unsupported(client, "measure a machine's disk", "sizes are reported as unmeasured")
+	}
+	return r.DataDir(name)
+}
+
+func withResources(client vm.Backend, m vm.Machine, row machineJSON) machineJSON {
+	dir, err := dataDir(client, m.Name)
 	if err != nil {
 		dir = ""
 	}
@@ -409,10 +507,10 @@ func withResources(client vm.Client, m vm.Machine, row machineJSON) machineJSON 
 
 func machineRow(m vm.Machine) machineJSON {
 	return machineJSON{
-		Scope: m.Name, State: m.State, Image: m.Image, CreatedAt: m.CreatedAt,
+		Scope: m.Name, Name: scope.Slug(m.Name), State: m.State, Image: m.Image, CreatedAt: m.CreatedAt,
 		Isolation: m.Labels["boxer.isolation"], Worktree: m.Labels["boxer.root"], Integration: m.Labels["boxer.integration"],
 		Harness: m.Labels["boxer.harness"], Session: m.Labels["boxer.session"], Agent: m.Labels["boxer.agent"],
-		LastUsed: lastUsedJSON(m.Name),
+		LastUsed: lastUsedJSON(m.Name), URLs: box.MachineURLs(m),
 	}
 }
 
@@ -431,7 +529,9 @@ type downJSON struct {
 }
 
 type statusJSON struct {
-	Scope       string            `json:"scope"`
+	Scope string `json:"scope"`
+	// Name is the scope key said out loud, the same one `ls` prints.
+	Name        string            `json:"name"`
 	Isolation   string            `json:"isolation"`
 	Worktree    string            `json:"worktree"`
 	MountAt     string            `json:"mount_at"`
@@ -450,6 +550,12 @@ type statusJSON struct {
 	// Ports maps a guest port to the host port it was given, which is the only way to find an
 	// automatically allocated one.
 	Ports map[string]string `json:"ports,omitempty"`
+	// URLs maps a guest port to its stable name, when [urls] is enabled: use this, not the host
+	// port, which differs in every worktree.
+	URLs map[string]string `json:"urls,omitempty"`
+	// LastRun is what the last command in this scope did, when one has been recorded. It is what
+	// `boxer capsule new` would capture.
+	LastRun *box.RunRecord `json:"last_run,omitempty"`
 }
 
 // Exit codes of `boxer status`.
@@ -476,17 +582,19 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 	}
 	img, why := e.Image()
 	s := statusJSON{
-		Scope: e.Scope.Key, Isolation: e.Scope.Isolation, Worktree: e.Scope.Root, MountAt: e.MountAt(),
+		Scope: e.Scope.Key, Name: e.Scope.Slug(), Isolation: e.Scope.Isolation, Worktree: e.Scope.Root, MountAt: e.MountAt(),
 		Exists: ok, State: "absent", Image: img, ImageReason: why, Labels: map[string]string{}, LastUsed: lastUsedJSON(e.Scope.Key),
 	}
 	s.Events, _ = obs.Read(obs.Current().Path, e.Scope.Key, 5)
+	if rec, found := box.ReadRunRecord(e.Scope.Key); found {
+		s.LastRun = &rec
+	}
 	code := exitAbsent
 	if ok {
 		s.State, s.Image, s.ImageReason, s.Labels = m.State, m.Image, "machine", m.Labels
 		// One sandbox, so measuring is cheap enough to do unasked: this is the command someone
 		// runs when they want to know about *this* worktree, and its cost is part of that.
-		client := vm.New()
-		dir, derr := client.DataDir(m.Name)
+		dir, derr := dataDir(vm.Host(hostBackend()), m.Name)
 		if derr != nil {
 			dir = ""
 		}
@@ -496,6 +604,7 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 		}
 		s.Resources = &r
 		s.Ports = box.PortsOf(m)
+		s.URLs = e.URLs(m)
 		if s.Labels == nil {
 			s.Labels = map[string]string{}
 		}
@@ -508,12 +617,15 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 		return code
 	}
 	if !ok {
-		fmt.Fprintf(stdout, "boxer: %s absent (image would be %s: %s)\n", s.Scope, img, why)
+		fmt.Fprintf(stdout, "boxer: %s (%s) absent (image would be %s: %s)\n", s.Name, s.Scope, img, why)
 	} else {
-		fmt.Fprintf(stdout, "boxer: %s %s, image %s, mounted %s -> %s\n", s.Scope, s.State, s.Image, s.Worktree, s.MountAt)
+		fmt.Fprintf(stdout, "boxer: %s (%s) %s, image %s, mounted %s -> %s\n", s.Name, s.Scope, s.State, s.Image, s.Worktree, s.MountAt)
 		// Where the forwarded ports actually landed: with `auto` this is the only way to know.
 		for _, guest := range sortedMapKeys(s.Ports) {
 			fmt.Fprintf(stdout, "  port:      guest %s -> http://127.0.0.1:%s\n", guest, s.Ports[guest])
+		}
+		for _, guest := range sortedMapKeys(s.URLs) {
+			fmt.Fprintf(stdout, "  url:       guest %s -> %s\n", guest, s.URLs[guest])
 		}
 	}
 	return code
@@ -522,55 +634,6 @@ func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 func isShim(path string) bool {
 	b, err := os.ReadFile(path)
 	return err == nil && strings.Contains(string(b), "boxer shim")
-}
-
-func lsCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	asJSON := fs.Bool("json", false, "print a JSON array")
-	resources := fs.Bool("resources", false, "measure what each sandbox is using: memory, CPU and disk")
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	client := vm.New()
-	ms, err := client.Owned()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
-	rows := make([]machineJSON, 0, len(ms))
-	for _, m := range ms {
-		row := machineRow(m)
-		if *resources {
-			row = withResources(client, m, row)
-		}
-		rows = append(rows, row)
-	}
-	if emit(stdout, rows, *asJSON) {
-		return 0
-	}
-	if *resources {
-		fmt.Fprintf(stdout, "%-16s %-9s %-14s %-9s %-8s %s\n", "SCOPE", "STATE", "ATTACHED", "MEMORY", "DISK", "WORKTREE")
-		for _, m := range rows {
-			mem, disk := "-", "-"
-			if m.Resources != nil {
-				if m.Resources.RSSMiB > 0 {
-					mem = fmt.Sprintf("%d MiB", m.Resources.RSSMiB)
-				}
-				if m.Resources.DiskBytes > 0 {
-					disk = box.HumanBytes(m.Resources.DiskBytes)
-				}
-			}
-			fmt.Fprintf(stdout, "%-16s %-9s %-14s %-9s %-8s %s\n", m.Scope, m.State, attachment(m), mem, disk, m.Worktree)
-		}
-		return 0
-	}
-	fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", "SCOPE", "STATE", "ISOLATION", "WORKTREE")
-	for _, m := range rows {
-		fmt.Fprintf(stdout, "%-16s %-9s %-10s %s\n", m.Scope, m.State, m.Isolation, m.Worktree)
-	}
-	return 0
 }
 
 // gcJSON is one `gc` decision: Deleted is false under --dry-run or when Error is set.
@@ -592,8 +655,11 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	client := vm.New()
-	ms, err := client.Owned()
+	client := vm.Host(hostBackend())
+	// Drop marks for machines that are gone before deciding what to reclaim, so a backend that
+	// keeps its ownership record on the host does not accumulate one entry per deleted sandbox.
+	vm.PruneOwned(client)
+	ms, err := vm.Owned(client)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -617,10 +683,18 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	code := 0
 	rows := []gcJSON{}
+	live := map[string]bool{}
+	for _, m := range ms {
+		live[m.Name] = true
+	}
 	for _, m := range ms {
 		root := m.Labels["boxer.root"]
 		reason := ""
-		if _, err := os.Stat(root); err != nil {
+		if parent := box.ParentOf(m.Name); parent != "" && !live[parent] {
+			// A fork child outlives its parent only by accident: nothing addresses it, and it
+			// costs what a sandbox costs.
+			reason = "fork of " + parent + ", which is gone"
+		} else if _, err := os.Stat(root); err != nil {
 			reason = fmt.Sprintf("worktree %s is gone", root)
 		} else if last := box.LastUsed(m.Name); idle > 0 && !last.IsZero() && time.Since(last) > idle {
 			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", last.Format(time.RFC3339), cfg.IdleTimeout)
@@ -645,11 +719,25 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			code = 1
 			continue
 		}
+		// Everything boxer kept about the sandbox goes with it: its run record, its last-used
+		// stamp, its lock, and any URL that pointed at it.
+		box.ForgetScope(m.Name)
 		row.Deleted = true
 		rows = append(rows, row)
 		if !*asJSON {
 			fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
 		}
+	}
+	// State for sandboxes that went away without boxer deleting them — `docker rm`, a wiped
+	// store — which no row above could see.
+	if !*dry {
+		for _, r := range rows {
+			if r.Deleted {
+				delete(live, r.Scope)
+			}
+		}
+		box.PruneURLs(live)
+		box.SweepState(live, time.Now())
 	}
 	reason := fmt.Sprintf("pack unused for %s", cfg.IdleTimeout)
 	if *all {
@@ -745,8 +833,8 @@ func logsCmd(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func downAll(client vm.Client, asJSON bool, stdout, stderr io.Writer) int {
-	ms, err := client.Owned()
+func downAll(client vm.Backend, asJSON bool, stdout, stderr io.Writer) int {
+	ms, err := vm.Owned(client)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -757,11 +845,16 @@ func downAll(client vm.Client, asJSON bool, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		vm.ForgetOwned(client, m.Name)
+		box.ForgetScope(m.Name)
 		rows = append(rows, downJSON{Scope: m.Name, Removed: true})
 		if !asJSON {
 			fmt.Fprintf(stdout, "boxer: %s removed\n", m.Name)
 		}
 	}
+	// "Everything" includes routes whose sandbox went away by another path: a `down` run with a
+	// different state directory removes the route but cannot see this directory's record of it.
+	box.PruneURLs(map[string]bool{})
 	emit(stdout, rows, asJSON)
 	return 0
 }
@@ -792,7 +885,7 @@ func insideCmd(kind string, args []string, stdin io.Reader, stdout, stderr io.Wr
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	tty := kind == "shell" && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	tty := kind == "shell" && cli.IsTerminal(os.Stdin) && cli.IsTerminal(os.Stdout)
 	code, err := inside.Run(e, name, fs.Args(), kind == "acp", inside.Options{TTY: tty, Env: extra, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -874,10 +967,24 @@ func packageCmd(args []string, stdout, stderr io.Writer) int {
 		pos = append(pos, args[i])
 	}
 	if err := fs.Parse(flags); err != nil || len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: boxer package plugin|<harness>|all [--out dir]")
+		fmt.Fprintln(stderr, "usage: boxer package plugin|skills|<harness>|all [--out dir]")
 		return 2
 	}
 	target := pos[0]
+	// The skill is published twice more: at the non-hidden installer path a skill manager reads,
+	// and in the site's .well-known index a domain-discovery client reads. Both come from the
+	// same template as the plugin, so there is one document and two projections of it.
+	if target == "skills" || target == "all" {
+		files, err := bundle.RenderSkills(Version, "skills", filepath.Join("site", "public", ".well-known"))
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "skills: %d files in skills/ and site/public/.well-known/\n", len(files))
+		if target == "skills" {
+			return 0
+		}
+	}
 	names := []string{target}
 	if target == "all" {
 		names = append([]string{bundle.Package}, bundle.Harnesses()...)
@@ -1004,6 +1111,13 @@ type briefJSON struct {
 	Intercept   []string          `json:"intercept"`
 	Passthrough []string          `json:"passthrough"`
 	Tasks       map[string]string `json:"tasks"`
+	// TaskDetails carries what a table-form task declares beside its command line. Tasks stays a
+	// name→command map so a reader written against an older boxer keeps working.
+	TaskDetails map[string]taskJSON `json:"task_details,omitempty"`
+	// Ports is the forwarding the configuration asks for; URLs says whether they get stable names.
+	// Where they actually landed is `status`, because that depends on the running sandbox.
+	Ports []string `json:"ports"`
+	URLs  bool     `json:"urls"`
 }
 
 // briefCmd is the run-time half of static published content: the skill and the hooks say to run
@@ -1012,26 +1126,50 @@ func briefCmd(e *box.Env, asJSON bool, stdout io.Writer) int {
 	if emit(stdout, briefJSON{
 		Brief: e.Instructions(), Scope: scopeRow(e.Scope), Isolation: e.Cfg.Isolation, MountAt: e.MountAt(),
 		Mode: e.Cfg.Mode, Enforcement: e.Cfg.Enforcement, Intercept: e.Cfg.Intercept,
-		Passthrough: e.Cfg.Passthrough, Tasks: tasksOrEmpty(e.Cfg.Tasks),
+		Passthrough: e.Cfg.Passthrough, Tasks: tasksOrEmpty(e.Cfg.Tasks), TaskDetails: taskDetails(e.Cfg),
+		Ports: append([]string{}, e.Cfg.Network.Ports...), URLs: e.Cfg.URLs.Enabled,
 	}, asJSON) {
 		return 0
 	}
+	// No task footer: the brief itself now lists each task with what it is for, and printing the
+	// names twice made the useful line the one nobody read.
 	fmt.Fprintln(stdout, e.Instructions())
-	if names := e.Cfg.TaskNames(); len(names) > 0 {
-		fmt.Fprintf(stdout, "\nTasks (boxer run --task <name>): %s\n", strings.Join(names, ", "))
-	}
 	return 0
 }
 
 type taskJSON struct {
-	Name    string `json:"name"`
-	Command string `json:"command"`
+	Name        string   `json:"name"`
+	Command     string   `json:"command"`
+	Description string   `json:"description,omitempty"`
+	JUnit       []string `json:"junit,omitempty"`
+	Timeout     string   `json:"timeout,omitempty"`
+}
+
+func taskRow(name string, t config.Task) taskJSON {
+	return taskJSON{Name: name, Command: t.Cmd, Description: t.Description, JUnit: t.JUnit, Timeout: t.Timeout}
+}
+
+// taskDetails is the table-form half of a task, keyed by name, and nil when no task declares any:
+// a repository that only writes `test = "make test"` sees no new JSON at all.
+func taskDetails(cfg config.Config) map[string]taskJSON {
+	out := map[string]taskJSON{}
+	for _, n := range cfg.TaskNames() {
+		t := cfg.Tasks[n]
+		if t.Description == "" && len(t.JUnit) == 0 && t.Timeout == "" && len(t.Env) == 0 {
+			continue
+		}
+		out[n] = taskRow(n, t)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func emitTasks(e *box.Env, asJSON bool, stdout io.Writer) {
 	rows := []taskJSON{}
 	for _, n := range e.Cfg.TaskNames() {
-		rows = append(rows, taskJSON{n, e.Cfg.Tasks[n]})
+		rows = append(rows, taskRow(n, e.Cfg.Tasks[n]))
 	}
 	if emit(stdout, rows, asJSON) {
 		return
@@ -1041,30 +1179,35 @@ func emitTasks(e *box.Env, asJSON bool, stdout io.Writer) {
 		return
 	}
 	for _, t := range rows {
-		fmt.Fprintf(stdout, "%-16s %s\n", t.Name, t.Command)
+		what := t.Command
+		if t.Description != "" {
+			what = t.Description
+		}
+		fmt.Fprintf(stdout, "%-16s %s\n", t.Name, what)
 	}
 }
 
-// taskLine resolves a task name, refusing an unknown one in the shape an agent can act on.
-func taskLine(e *box.Env, name string) (string, error) {
-	if line, ok := e.Cfg.Tasks[name]; ok {
-		return line, nil
+// task resolves a task name, refusing an unknown one in the shape an agent can act on.
+func task(e *box.Env, name string) (config.Task, error) {
+	if t, ok := e.Cfg.Tasks[name]; ok {
+		return t, nil
 	}
 	known := "none declared; add a [tasks] table to boxer.toml"
 	if names := e.Cfg.TaskNames(); len(names) > 0 {
 		known = "boxer run --task " + strings.Join(names, " | ")
 	}
-	return "", &box.Error{
+	return config.Task{}, &box.Error{
 		Reason: fmt.Sprintf("no task named %q in boxer.toml", name),
 		Cause:  "NO_SUCH_TASK", Scope: e.Scope, Fix: known,
 	}
 }
 
-func tasksOrEmpty(m map[string]string) map[string]string {
-	if m == nil {
-		return map[string]string{}
+func tasksOrEmpty(m map[string]config.Task) map[string]string {
+	out := map[string]string{}
+	for n, t := range m {
+		out[n] = t.Cmd
 	}
-	return m
+	return out
 }
 
 // watchCmd streams what is happening, so an interface tails one process instead of polling. Two
@@ -1079,7 +1222,7 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	client := vm.New()
+	client := vm.Host(hostBackend())
 	seen := map[string]string{}
 	first := true
 	enc := json.NewEncoder(stdout)
@@ -1096,7 +1239,7 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 		sentEvents = len(seenNow) // only what happens from now on
 	}
 	for {
-		ms, err := client.Owned()
+		ms, err := vm.Owned(client)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -1162,4 +1305,52 @@ func emitWatch(enc *json.Encoder, w io.Writer, asJSON bool, change string, row m
 	}
 	who := attachment(row)
 	fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", time.Now().Format("15:04:05"), change, row.Scope, who, row.Worktree)
+}
+
+// junitPatterns is where a run should look for reports: the flag, then the task's own list, then
+// the repository's [results] table. The first that names anything wins, because a caller that
+// passed --junit means that one.
+func junitPatterns(cfg config.Config, t config.Task, flagValue string) []string {
+	if flagValue != "" {
+		return strings.Split(flagValue, ",")
+	}
+	if len(t.JUnit) > 0 {
+		return t.JUnit
+	}
+	return cfg.Results.Auto
+}
+
+// withTestResults summarises the run's JUnit reports, attaches them to the run record, and decides
+// the exit code. Parsing happens on the host: the worktree is mounted, so a report the guest wrote
+// under it is already a file here.
+func withTestResults(e *box.Env, t config.Task, flagValue string, failFlag bool, started time.Time, code int, stderr io.Writer) int {
+	pats := junitPatterns(e.Cfg, t, flagValue)
+	if len(pats) == 0 {
+		return code
+	}
+	s, err := junit.Collect(e.Scope.Root, pats, started)
+	if err != nil {
+		fmt.Fprintf(stderr, "boxer: %v\n", err)
+		return code
+	}
+	if len(s.Files) == 0 {
+		return code
+	}
+	fmt.Fprintf(stderr, "boxer: %s\n", s.Line())
+	for i, name := range s.Failed {
+		if i == 10 {
+			fmt.Fprintf(stderr, "boxer:   … %d more\n", len(s.Failed)-10)
+			break
+		}
+		fmt.Fprintf(stderr, "boxer:   FAIL %s\n", name)
+	}
+	box.AmendRunTests(e.Scope.Key, &box.TestSummary{
+		Tests: s.Tests, Failures: s.Failures, Errors: s.Errors, Skipped: s.Skipped, Failed: s.Failed,
+	})
+	// Never replace a non-zero code with a different one: the command's own exit status is the
+	// more specific answer, and a caller keying off it would be misled.
+	if code == 0 && s.Bad() && (failFlag || e.Cfg.Results.FailOnTestFailures) {
+		return 1
+	}
+	return code
 }

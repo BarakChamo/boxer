@@ -28,6 +28,22 @@ forces it.
 `exit 137` during setup is the kernel's out-of-memory killer. Raise `memory` in `boxer.toml` or run
 fewer sandboxes at once.
 
+## A download or install fails inside the sandbox
+
+The default `network.mode` is `allowlist`, and inside the guest a refused connection looks like an
+ordinary DNS or connect error with no policy in it. boxer asks smolvm what it refused and names it:
+
+```console
+$ boxer run -c 'npm ci'
+npm error network request to https://registry.npmjs.org/... failed
+boxer: the egress allowlist refused registry.npmjs.org during this command
+boxer: fix: add it to network.allow_hosts in boxer.toml, or set network.mode = "on"
+```
+
+A failed run names only what was refused while it ran. `boxer doctor` prints everything the
+machine still remembers, under `denied:`, which is the list to read when you are not sure which
+command was responsible.
+
 ## Setup ran but my dependencies are missing
 
 `image_setup` is captured in the image snapshot; `setup` lands in the worktree. Dependency installs
@@ -37,12 +53,31 @@ nothing in it.
 ## The dev server does not answer
 
 - `ready` may be passing before the server really is. Its own output is in `/tmp/boxer-start.log`
-  in the guest, and boxer quotes the tail in the error.
+  in the guest, and boxer quotes the tail in the error. A service that dies is not restarted: boxer launches
+  the `start` list once per running VM and does not supervise it, so the next command fails and
+  says so.
+- The server may be bound to `127.0.0.1` inside the guest. A forwarded port arrives on the guest's
+  interface, so a loopback-only listener never sees it, while a `ready` probe run inside the guest
+  still passes. Bind `0.0.0.0`.
 - A second dev server takes down the first. If an agent cannot reach the one you gave it, it will
   often start its own — check what address you told it about: a host-forwarded port is meaningless
   from *inside* the guest, where the server is simply on `127.0.0.1:<guest port>`.
+- A URL from `[urls]` refuses the connection. The portless proxy is not running. boxer starts it
+  whenever it runs a command and finds it down, so any `boxer run` brings it back; by hand,
+  `portless proxy start --port 1355`.
+- A URL answers 404. The name is not registered — the sandbox was created before `[urls]` was on,
+  or its route was removed by hand. `boxer down && boxer up` registers it again; `boxer status`
+  prints the name it has.
+- `boxer: warning: urls.enabled is set but portless is not installed`. `npm install -g portless`.
+  Nothing else changes: ports are still forwarded and `status` still prints them.
+
 - Next.js refuses its own dev chunks when reached through a forwarded port. Add
-  `allowedDevOrigins: ['127.0.0.1', 'localhost']`.
+  `allowedDevOrigins: ['127.0.0.1', 'localhost']`. Through a `[urls]` name it is
+  `allowedDevOrigins: ['*.localhost']`: Next.js 15.5 serves the page, the chunks and hot reload
+  through portless, but logs "Cross origin request detected" for any hostname below `localhost`
+  and says a future major version will refuse it. That one entry covers every worktree's name,
+  including two-label ones like `fix-ui.myapp.localhost`; checked against 15.5.4 with the warning
+  present without it and absent with it.
 
 ## An interactive harness hangs
 

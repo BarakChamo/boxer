@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -215,5 +216,26 @@ func TestRunLaunchesTheHarnessInTheGuest(t *testing.T) {
 	}
 	if now := strings.Count(string(b), "harness-claude"); now <= before {
 		t.Fatalf("the second launch still checks the marker: %d then %d", before, now)
+	}
+}
+
+// A harness inside the sandbox has no `boxer` to ask where its server is reachable from the host,
+// so the launch carries it: BOXER_PORTS always, BOXER_URLS when names exist.
+func TestRunTellsTheHarnessWhereItsServersAre(t *testing.T) {
+	_, log := vmtest.Install(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\nnetwork = { mode = \"on\", ports = [\"auto:3000\"] }\n")
+	e, err := box.Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := Run(e, "claude", []string{"--version"}, false, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if !regexp.MustCompile(`-e BOXER_PORTS=3000=\d+ .*claude --version`).Match(b) {
+		t.Fatalf("the harness launch must carry BOXER_PORTS:\n%s", b)
 	}
 }

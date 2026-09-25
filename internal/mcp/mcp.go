@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,7 +66,7 @@ var resources = []map[string]any{{
 var tools = []map[string]any{
 	{
 		"name":        "boxer_run",
-		"description": "Run a shell command inside this repository's boxer sandbox (a microVM with the worktree mounted). Use this instead of the shell tool for build, test, install, and script commands. Returns stdout, stderr, and the exit code.",
+		"description": "Run a shell command inside this repository's boxer sandbox (a microVM or container with the worktree mounted). Use this instead of the shell tool for build, test, install, and script commands. Returns stdout, stderr, and the exit code.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -239,7 +240,24 @@ func (s *Server) call(name string, args map[string]any) (text string, isErr bool
 		if !ok {
 			return note + fmt.Sprintf("scope %s (%s): no sandbox yet; image would be %s (%s); mount %s", e.Scope.Key, e.Scope.Isolation, img, why, e.Cfg.MountAt), false
 		}
-		return note + fmt.Sprintf("scope %s (%s): %s, image %s, worktree %s mounted at %s", e.Scope.Key, e.Scope.Isolation, m.State, m.Image, e.Scope.Root, e.Cfg.MountAt), false
+		out := note + fmt.Sprintf("scope %s (%s): %s, image %s, worktree %s mounted at %s", e.Scope.Key, e.Scope.Isolation, m.State, m.Image, e.Scope.Root, e.Cfg.MountAt)
+		// Where a server is reachable is the question an agent asks status most, and the answer
+		// differs in every worktree: say it here rather than send the agent to the CLI.
+		urls := e.URLs(m)
+		ports := box.PortsOf(m)
+		for _, g := range sortedKeys(ports) {
+			if u, ok := urls[g]; ok {
+				out += fmt.Sprintf("\nguest port %s: %s", g, u)
+			} else {
+				out += fmt.Sprintf("\nguest port %s: http://127.0.0.1:%s", g, ports[g])
+			}
+		}
+		for _, g := range sortedKeys(urls) {
+			if _, ok := ports[g]; !ok {
+				out += fmt.Sprintf("\nguest port %s: %s", g, urls[g])
+			}
+		}
+		return out, false
 	case "boxer_run":
 		if strings.TrimSpace(cmd) == "" {
 			return "command is required", true
@@ -254,4 +272,13 @@ func (s *Server) call(name string, args map[string]any) (text string, isErr bool
 	default:
 		return "unknown tool " + name, true
 	}
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

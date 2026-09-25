@@ -3,8 +3,9 @@ title: Enforcement and its limits
 description: Which mechanisms actually hold, which only ask, and where each one breaks.
 ---
 
-boxer has five ways into the sandbox. Two of them enforce, one asks, and two hold only under
-conditions worth knowing before you rely on them.
+boxer has five ways into the sandbox, and they are not equally strong. Hooks, the OpenCode plugin
+and inside mode enforce. PATH shims enforce where `PATH` holds, which is a condition to check
+rather than assume. The skill only asks.
 
 ## Hooks — the strong one
 
@@ -20,6 +21,16 @@ happens above the shell entirely. Claude Code, Codex, Grok, Gemini CLI and OpenC
 Some harnesses can block a command but not rewrite one. `mode = "tool"` denies the shell and
 leaves `boxer_run` as the way through. A compliant agent simply uses the tool and is never denied
 anything; an agent that reaches for the shell gets a refusal explaining what to do instead.
+
+## The OpenCode plugin — a hook, in-process
+
+OpenCode loads a TypeScript plugin rather than exposing a hook API, and the plugin does the same
+job from inside the harness: it sees the shell call and replaces the command before it runs. It
+enforces exactly as a hook does, and `boxer install opencode` writes it.
+
+One consequence matters if you are reading traces. The rewrite happens in-process, so it writes no
+rewrite line, and the evaluation matrix reads OpenCode's evidence differently from every other
+level for that reason.
 
 ## PATH shims — no harness cooperation at all
 
@@ -47,13 +58,26 @@ doctor` detects this and says so. Use hooks or tool mode for those harnesses.
 
 ## Shimming the shell instead
 
+Two forms, and they are not the same thing.
+
+**A `bash` entry on `intercept`** writes a `bash` shim like any other, so a harness that resolves
+`bash` on `PATH` gets the sandbox for every command it composes. One file instead of a list,
+nothing to maintain, nothing that can shadow an interpreter. A harness that spawns `/bin/bash` by
+absolute path bypasses it completely.
+
 ```toml
 intercept = ["bash"]
 ```
 
-One file instead of a list. Nothing to maintain and nothing that can shadow an interpreter — but
-it only catches commands run through a shell the harness resolves on `PATH`. A harness that spawns
-`/bin/bash` by absolute path bypasses it completely.
+**`boxer shim install --shell`** writes a separate binary, `boxer-bash`, which is a bash whose
+every command runs in the guest. It is not resolved by `PATH` at all: you point a harness's shell
+setting at it directly. OpenHands calls that setting `shell_path`; herdr calls it
+`terminal.default_shell`. This is shell substitution, the level `evals/results` scores at 100%,
+and it needs a harness whose shell is configurable.
+
+```sh
+boxer shim install --shell ~/.boxer/shims
+```
 
 Which of the two fits depends on the harness, and the [evaluation matrix](/docs/evals/matrix)
 measures both rather than guessing.
@@ -76,6 +100,20 @@ Every level ships a skill telling the agent that commands here go through boxer.
 is persuasion, not containment: an agent that ignores it is not sandboxed. It is the floor for a
 harness nobody has integrated, and the `adherence` evaluation tier measures how often agents
 actually follow it.
+
+## Harnesses that sandbox themselves
+
+Codex has its own seatbelt/landlock sandbox, and a hypervisor cannot start inside one. boxer
+replaces it rather than nesting, so run Codex with `--sandbox danger-full-access` (or
+`--dangerously-bypass-approvals-and-sandbox` under `codex exec`) when boxer is the sandbox.
+
+The same applies to any harness that confines its own process. boxer's isolation is the VM, and
+the host-side `boxer` process needs `/dev/hypervisor` access to start one. Inside mode handles
+this for you: boxer turns each harness's nested sandbox off in the guest, because there the VM is
+already the boundary.
+
+A boxer running inside a guest knows not to sandbox again: `BOXER_INSIDE=1` is set in every guest
+process boxer starts, so a harness launched inside a VM does not wrap its commands a second time.
 
 ## Checking what holds
 

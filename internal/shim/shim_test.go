@@ -105,3 +105,23 @@ func TestBoxerRefusesToResolveItsOwnShims(t *testing.T) {
 		t.Errorf("an unrelated PATH was rewritten: %q", got)
 	}
 }
+
+// A shim on a shell interpreter sandboxes every `#!/usr/bin/env bash` script on the host,
+// smolvm's own launcher among them, and the sandboxed copy hangs. One such invocation was found
+// still running two days after the eval that started it, so the exclusion is a test, not a
+// comment.
+func TestNeverShimsShellsOrItsOwnTools(t *testing.T) {
+	dir := t.TempDir()
+	written, err := Install(dir, []string{"sh", "bash", "boxer", "smolvm", "*", "npm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) != 1 || filepath.Base(written[0]) != "npm" {
+		t.Fatalf("wrote %v, want only npm", written)
+	}
+	for _, p := range []string{"sh", "bash", "boxer", "smolvm", "*"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); !os.IsNotExist(err) {
+			t.Errorf("%s was shimmed", p)
+		}
+	}
+}

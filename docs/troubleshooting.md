@@ -1,11 +1,6 @@
 # Troubleshooting
 
-This page now lives in the documentation site, under [`site/content/docs/guides/troubleshooting.mdx`](../site/content/docs/guides/troubleshooting.mdx).
+Moved to the documentation site: [`site/content/docs/guides/troubleshooting.mdx`](../site/content/docs/guides/troubleshooting.mdx).
 
-`make docs-dev` serves the site locally; `make docs` builds it. The site is the single source
-for user-facing documentation, so that the CLI reference and the configuration keys cannot drift
-between two copies of the same table.
-
-The engineering record stays here in `docs/`: [architecture](architecture.md),
-[requirements](requirements.md), [status](status.md), [release](release.md), the
-[orchestrator notes](orchestrators.md), the evaluation write-ups and the ADRs.
+The site is the single source for user-facing documentation. What stays in `docs/` is the
+engineering record — see [README.md](README.md) for the index.
