@@ -83,6 +83,29 @@ A wrapping adapter would add only Codex hook trust and `boxer up`/`down` around 
 execution targets sync the worktree to another machine; install `boxer` and smolvm there, or leave
 those targets to their own isolation.
 
+## What an orchestrator needs from boxer, beyond the integration (2026-09-25)
+
+Three properties matter more under an orchestrator than under one person, because an orchestrator
+cuts worktrees in bulk, reuses names, and runs several agents at once. Each was found by running
+the shape rather than by reading about it.
+
+- **A dev server per worktree, at a name.** Every worktree forwards its guest port to its own
+  `auto:` host port, so no two collide — and so no agent knows where its server is. `[urls]` names
+  each one through portless: `<branch>.<repo>.localhost` for a worktree on a branch, and the
+  sandbox's two-word name for a **detached** worktree, which is what most orchestrators create and
+  which portless alone gives no name at all (it would collide with the main checkout). The brief
+  tells the agent to run `boxer url`. Smoke starts three worktrees together — main, branch,
+  detached — and checks three names, each serving its own tree.
+- **A reused worktree path is a new worktree.** An orchestrator that removes `task-a` and later
+  adds a new `task-a` gets the same path, so the same scope key. The setup marker used to live in
+  boxer's state keyed by that path, and the new worktree inherited "set up" with no dependencies.
+  It lives in the worktree's git directory now and goes with it. On docker the new container could
+  also see a stale mount; boxer proves the mount by writing through it and recreates the sandbox
+  once if it never passes.
+- **Nothing left behind.** `boxer ls -A` lists every sandbox on every backend with whether its
+  worktree still exists; `boxer rm --gone -A` removes the ones whose worktree is gone, with their
+  URLs and host state. `gc` does the same in the background.
+
 ## Drivers and checklists (2026-09-18)
 
 `boxer-eval` drives OpenHands (`internal/eval/orch_openhands.go`), Paperclip

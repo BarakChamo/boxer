@@ -99,6 +99,6 @@ attached for the record and gates nothing.
 
 ## What this release deliberately does not do
 
-No second backend, no coordinator, no fleet. A `Backend` interface arrives when a second
-implementation does, and [adding-a-backend.md](adding-a-backend.md) is the contract it will have
-to satisfy.
+No coordinator, no fleet. (This plan also said "no second backend"; three more arrived in 1.1 —
+Apple's `container`, docker and podman — behind the interface
+[adding-a-backend.md](adding-a-backend.md) describes, and the smoke suite runs on all four.)

@@ -17,9 +17,10 @@ rather than usage.
   the Conductor checklist that has to be run by hand
 - [testing.md](testing.md) — the layers: fake hypervisor, scripted model, smoke, the tiers
 - [adding-a-harness.md](adding-a-harness.md) — the five tables a tenth harness is rows in
-- [adding-a-backend.md](adding-a-backend.md) — the contract a second backend has to satisfy,
-  written before the interface exists and grounded in smol cloud, which has no host mounts
+- [adding-a-backend.md](adding-a-backend.md) — the contract every backend satisfies, and what the
+  four that exist had to get right
 - [documentation-map.md](documentation-map.md) — what is documented where, and what is missing
+- [../examples](../examples) — working configurations for common projects, each parsed by the tests
 
 ## Plans and evaluations
 

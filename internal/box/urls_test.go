@@ -422,3 +422,24 @@ func TestUnresolvableAllowlistHostsAreDropped(t *testing.T) {
 		t.Fatalf("outside allowlist mode nothing is filtered: %v", got)
 	}
 }
+
+// A login shell rewrites PATH — Alpine's /etc/profile assigns it outright, macOS's runs
+// path_helper — so a directory the image added (golang's /usr/local/go/bin) vanished from `setup`
+// and `start` while `boxer run` still saw it. guestShell must keep the caller's PATH first, and
+// must not re-split the command.
+func TestGuestShellKeepsTheImagePath(t *testing.T) {
+	argv := guestShell(`printf '%s|%s' "$PATH" "a  b"`)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = append(os.Environ(), "PATH=/boxer-test-image/bin:/usr/bin:/bin")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	path, arg, _ := strings.Cut(string(out), "|")
+	if !strings.HasPrefix(path, "/boxer-test-image/bin:") {
+		t.Fatalf("the image's PATH was lost: %q", path)
+	}
+	if arg != "a  b" {
+		t.Fatalf("the command was re-split: %q", arg)
+	}
+}

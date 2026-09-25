@@ -1,4 +1,4 @@
-# Status: 1.1 in progress (2026-09-22)
+# Status: 1.1 in progress (2026-09-25)
 
 The stopping point for this slice: comprehensive evals run against real harnesses and real
 orchestrators on this machine, every skip explained. Reports: [eval-t1.md](eval-t1.md) (scripted
@@ -8,8 +8,9 @@ model, real harness CLIs, real smolvm) and [eval-t2.md](eval-t2.md) (live models
 ## Proven
 
 Unit tests green with the race detector and a per-package coverage floor; lint and the
-vulnerability scan clean; smoke **65/65** (which also prints and bounds cold start, warm run and
-hook latency); T1 **68 pass, 0 fail, 1 skip**; flow **2/2**, including the agent cell. T2 live on
+vulnerability scan clean; smoke **85/85 on smolvm and 76 passed, 9 skipped by capability on
+docker, podman and Apple `container`** (which also prints and bounds cold start, warm run and
+hook latency); T1 **68 pass, 0 fail, 1 skip**, on three separate runs; flow **2/2**, including the agent cell. T2 live on
 `zai/glm-5.3-flash` is **40 pass, 3 fail, 14 skip** — see below, because the failures are not what
 they look like. Performance against every other sandbox on this host is in
 [bench/RESULTS.md](../bench/RESULTS.md). Every cell is a fresh repository and a fresh VM.
@@ -32,8 +33,8 @@ images. `docker` and `podman` give a container — faster to start, available wi
 and **one kernel shared by every sandbox**. They are not interchangeable for
 containment: a container runtime has no per-host egress policy, so `network.mode = "allowlist"`,
 boxer's default, is refused by name rather than silently widened. `boxer doctor` prints the
-capability table with the boundary first. The same 78-cell smoke suite runs on each — 78/78 on
-smolvm, and 69 passed with 9 capability-gated cells skipped by name on docker and podman — and running it on a
+capability table with the boundary first. The same smoke suite runs on each — 85/85 on smolvm,
+and 76 passed with 9 capability-gated cells skipped by name on docker, podman and Apple `container` — and running it on a
 second backend immediately found that `ls`, `gc`, `down --all` and `watch` had always talked to
 smolvm regardless of configuration, so `gc` reclaimed nothing while containers accumulated.
 

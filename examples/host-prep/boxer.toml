@@ -1,0 +1,24 @@
+# Installing dependencies on the host, before the sandbox exists, for packages with prebuilt
+# binaries. It runs alongside the sandbox's boot, so on a fresh worktree the install and the boot
+# overlap instead of one waiting for the other.
+
+image = "mirror.gcr.io/library/node:24-alpine"
+
+# $BOXER_TARGET_FLAGS is the guest's platform, derived from the image: on an alpine image on Apple
+# Silicon it is --os=linux --cpu=arm64 --libc=musl, so npm fetches the Linux binaries (next's
+# @next/swc-linux-arm64-musl, esbuild's, sharp's) instead of the macOS ones.
+[prep]
+commands = ["npm ci --no-audit --no-fund $BOXER_TARGET_FLAGS"]
+target = "auto"        # or "none", or explicit: "linux/arm64/musl"
+
+# Only safe for packages that ship prebuilt binaries. A package that compiles at install time —
+# better-sqlite3, node-pty, anything with node-gyp — builds for the host whatever the flags say and
+# fails in the guest with "invalid ELF header". `boxer doctor` names any such package in your
+# lockfile. For a project that has one, install in the guest instead:
+#
+#   setup = ["npm ci"]
+
+# The host's npm cache, read-only, is offered to the guest by default either way:
+[cache]
+enabled = true
+managers = ["auto"]

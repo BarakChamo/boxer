@@ -1,14 +1,16 @@
 # boxer
 
-Coding agents run shell commands. boxer makes those commands run in a
-[smolvm](https://smolmachines.com) microVM instead of on your machine — one VM per git worktree,
-started automatically, with your worktree mounted in the guest at `/workspace`.
+Coding agents run shell commands. boxer makes those commands run in a sandbox instead of on your
+machine — one per git worktree, started automatically, with your worktree mounted in the guest at
+`/workspace`. The default is a [smolvm](https://smolmachines.com) microVM, a kernel per sandbox;
+Apple's `container`, docker and podman are the alternatives, each saying plainly what it cannot
+enforce.
 
 The agent does not have to know. It types `npm test`, the command runs in the sandbox, the output
 comes back looking exactly as it would have. Nothing on your machine is at risk, and nothing about
 the agent's experience changes.
 
-One Go binary. smolvm holds the only state.
+One Go binary. The backend holds the machines; boxer keeps only small records it can lose.
 
 Full documentation: the site under [`site/`](site). `make docs-dev` serves it locally.
 

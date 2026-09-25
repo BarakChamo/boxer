@@ -55,6 +55,47 @@ image_setup = ["npm i -g typescript"]   # once per image, captured in the pack
 setup = ["npm ci"]                       # once per worktree, lands in your files
 ```
 
+Installing through the guest's mount is the slow part of a first start. Two things take work out
+of it.
+
+**The host's package caches are mounted read-only by default**, detected from the lockfile — `~/.npm`
+for `package-lock.json`, the uv and cargo caches for theirs. The install still runs in the guest, so
+every native binary is still chosen for the guest's platform; only the download is saved.
+
+```toml
+[cache]
+enabled  = true          # the default
+managers = ["auto"]      # or an explicit list: npm, pnpm, yarn, bun, uv, cargo, go
+```
+
+**`[prep]` runs on the host before the sandbox exists**, alongside its boot. It is devcontainer's
+`initializeCommand`, and it is opt-in because it is only correct for packages that ship prebuilt
+platform binaries. `$BOXER_TARGET_FLAGS` carries the guest's platform so npm and bun fetch the
+right ones:
+
+```toml
+[prep]
+commands = ["npm ci $BOXER_TARGET_FLAGS"]   # --os=linux --cpu=arm64 --libc=musl on an alpine image
+```
+
+A package that compiles at install time (`better-sqlite3`, `node-pty`) builds for the host no
+matter what the flags say, and fails inside the guest with `invalid ELF header`. `boxer doctor`
+names any such package in your lockfile; keep those in `setup`.
+
+### From a devcontainer
+
+A repository with `.devcontainer/devcontainer.json` keeps it: boxer reads the image, the lifecycle
+commands, ports, environment, mounts and the user from it, resolves its `${localWorkspaceFolder}`-
+style variables, and names — rather than ignores — anything it will not do, such as `features` or
+`runArgs`. The full mapping is in the
+[configuration reference](/docs/reference/configuration#devcontainerjson).
+
+Usually a short `boxer.toml` still sits beside it, for what devcontainer has no key for. The one
+that matters first is the **allowlist**: boxer's default network reaches the image registry and
+nothing else, so a devcontainer whose `postCreateCommand` installs packages needs the package
+registry named in `network.allow_hosts`. When it is missing, the failed install says which host was
+refused.
+
 ## Services
 
 `start` launches long-running processes; `ready` is how boxer knows they are up.
@@ -111,9 +152,13 @@ sb-7f2a91 running · node:24-bookworm-slim · 3000 → 61234
 
 <Callout type="warn">
 A dev server reached through a forwarded port sees a different origin than it expects. Next.js
-refuses its own dev chunks in that case; add `allowedDevOrigins: ['127.0.0.1', 'localhost']` to
-`next.config.ts`. Other frameworks have the same knob under different names.
+refuses its own dev chunks in that case; add `allowedDevOrigins: ['127.0.0.1', 'localhost', '*.localhost']`
+to `next.config.ts` (the last one covers [`[urls]`](/docs/guides/urls) names). Other frameworks
+have the same knob under different names.
 </Callout>
+
+Give each worktree's server a stable name instead of a port with [`[urls]`](/docs/guides/urls),
+and agents find it with `boxer url`.
 
 ## Environment variables and secrets
 

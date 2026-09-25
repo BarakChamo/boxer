@@ -1,7 +1,7 @@
 # Contributing to boxer
 
-boxer runs a coding agent's shell commands in a smolvm microVM keyed to the git worktree. The rule
-that shapes every change: **the core knows nothing about any harness.**
+boxer runs a coding agent's shell commands in a sandbox — a smolvm microVM by default, or a
+container runtime — keyed to the git worktree. The rule that shapes every change: **the core knows nothing about any harness.**
 
 ## The one architectural rule
 

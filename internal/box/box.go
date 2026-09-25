@@ -1106,7 +1106,7 @@ func (e *Env) startServices() error {
 	for _, cmd := range e.Cfg.Start {
 		fmt.Fprintf(e.Stderr, "boxer: start: %s\n", cmd)
 		// Detached and disowned: the command that launches a server must not wait for it.
-		line := "cd " + e.MountAt() + " && nohup sh -lc " + sh.Quote(cmd) + " >>" + startLog + " 2>&1 &"
+		line := "cd " + e.MountAt() + " && nohup " + shellWords(guestShell(cmd)) + " >>" + startLog + " 2>&1 &"
 		var out strings.Builder
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), User: e.Cfg.User,
 			Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", line)
@@ -1146,7 +1146,7 @@ func (e *Env) waitReady() error {
 	// interval, so a service that takes a minute is polled no harder than before.
 	wait := 25 * time.Millisecond
 	for {
-		if _, code, err := vm.Output(e.VM, e.Scope.Key, e.MountAt(), "sh", "-lc", e.Cfg.Ready); err == nil && code == 0 {
+		if _, code, err := vm.Output(e.VM, e.Scope.Key, e.MountAt(), guestShell(e.Cfg.Ready)...); err == nil && code == 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -1184,13 +1184,14 @@ func (e *Env) setup() error {
 	}
 	for _, cmd := range e.Cfg.Setup {
 		fmt.Fprintf(e.Stderr, "boxer: setup: %s\n", cmd)
+		stepStart := time.Now()
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
 			SecretEnv: e.HostSecrets(), User: e.Cfg.User,
-			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
+			Stdin: strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, guestShell(cmd)...)
 		if err != nil || code != 0 {
 			// The VM stays: the guest is fine and the next attempt should not pay for a new one.
 			// An image-setup failure is the opposite — a half-built guest is worth throwing away.
-			return e.fail(e.setupError("setup", "`setup`", code, cmd))
+			return e.fail(e.setupError("setup", "`setup`", code, cmd, stepStart))
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
@@ -1269,14 +1270,54 @@ mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker)
 	return nil
 }
 
+// guestShell is the argv that runs a configured command line — setup, image_setup, start, ready —
+// in the guest: a login shell, so profile scripts a toolchain relies on are read, with the image's
+// own PATH put back in front.
+//
+// A plain `sh -lc` lost it. Alpine's /etc/profile assigns PATH outright, so every directory the
+// image added with ENV PATH vanished: `go run .` in `start` on golang:alpine failed with "go: not
+// found", while `boxer run -- go version` in the same sandbox worked, because `run` does not use a
+// login shell. Node images keep node in /usr/local/bin, which the profile does set, so nothing
+// built on them ever noticed.
+func guestShell(cmd string) []string {
+	return []string{"sh", "-c", `exec sh -lc 'PATH="$1:$PATH"; export PATH; eval "$2"' boxer "$PATH" "$0"`, cmd}
+}
+
+// shellWords quotes argv for a shell line.
+func shellWords(argv []string) string {
+	q := make([]string, len(argv))
+	for i, a := range argv {
+		q[i] = sh.Quote(a)
+	}
+	return strings.Join(q, " ")
+}
+
+// quoteList renders hosts as a TOML array body: "a", "b".
+func quoteList(hosts []string) string {
+	q := make([]string, len(hosts))
+	for i, h := range hosts {
+		q[i] = strconv.Quote(h)
+	}
+	return strings.Join(q, ", ")
+}
+
 // setupError explains a failed setup step, and in particular explains exit 137, which is the
 // guest's out-of-memory killer rather than anything the command did wrong. A person reading
 // "exit 137" learns nothing; a person reading "the guest ran out of memory" knows to raise
 // `memory` or run fewer sandboxes at once, which is the actual fix. `npm install` in several
 // sandboxes at the same time is the way most people will meet it.
-func (e *Env) setupError(what, key string, code int, cmd string) *Error {
+func (e *Env) setupError(what, key string, code int, cmd string, since time.Time) *Error {
 	reason := fmt.Sprintf("%s step failed (exit %d): %s", what, code, cmd)
 	fix := "fix the " + key + " list in boxer.toml, then: boxer up"
+	// An install that failed under the allowlist almost always failed because of it, and the
+	// command cannot say so — npm reports ENOTFOUND for a host it was never allowed to resolve.
+	// `boxer run` already names the refused host; setup did not, and sent people to rewrite a
+	// setup list that was fine. Checked before the out-of-memory case, which it is not.
+	if denied := DeniedHosts(e.VM, e.Scope.Key, e.Cfg, since); len(denied) > 0 && code != 137 {
+		return &Error{Reason: fmt.Sprintf("%s step failed (exit %d) because the egress allowlist refused %s: %s", what, code, strings.Join(denied, ", "), cmd),
+			Cause: "SETUP_FAILED", Scope: e.Scope,
+			Fix: fmt.Sprintf("add %s to network.allow_hosts in boxer.toml, then: boxer up", quoteList(denied))}
+	}
 	if code == 137 {
 		reason = fmt.Sprintf("%s step was killed, out of memory (exit 137): %s", what, cmd)
 		fix = fmt.Sprintf("raise `memory` in boxer.toml (this sandbox has %s), or run fewer sandboxes at once", firstNonEmpty(e.Cfg.Memory, "the default"))
@@ -1341,14 +1382,15 @@ func (e *Env) imageSetup() (ran bool, err error) {
 	}
 	for _, cmd := range e.Cfg.ImageSetup {
 		fmt.Fprintf(e.Stderr, "boxer: image setup: %s\n", cmd)
+		stepStart := time.Now()
 		// Setup sees the same environment as every later command: a build that needs a registry
 		// token or a proxy setting needs it while installing, not only when running.
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
 			SecretEnv: e.HostSecrets(),
-			Stdin:     strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, "sh", "-lc", cmd)
+			Stdin:     strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, guestShell(cmd)...)
 		if err != nil || code != 0 {
 			_ = e.deleteVM()
-			return false, e.fail(e.setupError("image setup", "`image_setup`", code, cmd))
+			return false, e.fail(e.setupError("image setup", "`image_setup`", code, cmd, stepStart))
 		}
 	}
 	_, code, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+imageSetupMarker)

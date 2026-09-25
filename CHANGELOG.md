@@ -7,6 +7,23 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`setup`, `start` and `ready` lost the image's `PATH`.** They ran through a login shell, and
+  Alpine's `/etc/profile` assigns `PATH` outright, so every directory an image added — golang's
+  `/usr/local/go/bin`, a Rust toolchain, a venv — vanished: `go run .` in `start` failed with
+  "go: not found" while `boxer run -- go version` in the same sandbox worked. Node images keep
+  node in `/usr/local/bin`, so nothing built on them noticed. Found by running the Go example.
+- **A setup step that failed under the allowlist sent people to the wrong fix.** npm reports
+  `ENOTFOUND` for a host it was never allowed to resolve, and boxer said "fix the `setup` list".
+  It now names the refused host and the `allow_hosts` line to add, as `boxer run` already did.
+- **The `[prep]` tripwire flagged sharp,** which since 0.33 ships per-platform prebuilt binaries
+  that the platform flags select correctly — proven by rendering an image in an Alpine guest from
+  a sharp installed on a Mac. A package whose lock entry carries platform optional dependencies is
+  no longer flagged; one that really compiles (better-sqlite3, node-pty) still is.
+- **`boxer rm --all` reached every backend.** A unit test's `rm --all` deleted another test's
+  container on the real docker daemon. `--all` is the configured backend; `-A` is every backend.
+- **`boxer backends --probe` threw away the reason a probe failed**, and tested a network mode
+  nobody runs. It now quotes what the sandbox printed and uses boxer's default mode where the
+  backend supports it.
 - **A freshly started docker sandbox could see a stale worktree mount.** On OrbStack, a container
   created moments after the same path was removed and re-added — an orchestrator reusing a task
   name — failed its first command with `chdir to cwd ("/workspace") … no such file or directory`
@@ -68,6 +85,10 @@ All notable changes to this project are documented here. The format follows
   stronger boundary than the agent has.
 
 ### Added
+- **`examples/`**: Next.js (from `boxer.toml` and from a devcontainer), Vite, FastAPI with uv, Go,
+  a two-service monorepo, host-side `[prep]`, and the docker backend. The test suite parses every
+  one; every one but the monorepo pattern was brought up on a real sandbox and served through its
+  URL.
 - **A command line for seeing and managing what boxer has on a machine.**
   - `boxer ls` now says what a person needs in order to act: the backend, the branch and its
     distance from upstream, whether the worktree is clean, dirty or gone, and where it serves.

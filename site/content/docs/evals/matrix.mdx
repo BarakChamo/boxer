@@ -48,7 +48,15 @@ the interception worked — for those the worktree the orchestrator cut is the e
 ```sh
 make eval-matrix
 bin/boxer-eval --tier matrix --cell claude/rewrite --parallel 1
+bin/boxer-eval --tier matrix --list                        # what would run; runs nothing
+BOXER_EVAL_URLS=1 bin/boxer-eval --tier matrix             # every sandbox named, no address in the prompt
 ```
+
+`BOXER_EVAL_URLS=1` gives every sandbox a portless name and stops telling the agent where its dev
+server is, at every outside level, so each agent — several at once in sibling worktrees — has to
+find its own from the brief. The oracle still reads the page through the host port boxer allocated,
+so an agent that found another worktree's server fails the render check. An interrupted run brings
+down its own sandboxes and removes its scratch.
 
 Every run is archived under `docs/evals/matrix/`: the full scorecard, an index rebuilt from the
 data, and a JSON line per run. Each report opens with the conditions it was made under — boxer and

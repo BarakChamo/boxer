@@ -1,0 +1,41 @@
+# A Next.js app in a sandbox per worktree, with a stable URL for each worktree's dev server.
+# Drop this beside package.json in an existing Next.js project (npx create-next-app works).
+
+image = "mirror.gcr.io/library/node:24-alpine"   # slim images start faster; see "Choosing an image"
+require_worktree = "warn"                         # a linked worktree per agent is the point
+
+# Installed into the worktree once, on the first command. `npm ci` wants a lockfile; use
+# `npm install` if there is none.
+setup = ["npm ci --no-audit --no-fund"]
+
+# Started detached every time the sandbox starts, after setup. -H 0.0.0.0 matters: a forwarded
+# port arrives on the guest's interface, so a server bound to 127.0.0.1 never sees it.
+start = ["npx next dev -p 3000 -H 0.0.0.0"]
+
+# `boxer up` returns when this passes, not when the process merely exists.
+ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+ready_timeout = "240s"
+
+cpus = 2
+memory = "4G"
+
+[network]
+# The default mode: nothing but the image registry, plus what is named here.
+mode = "allowlist"
+allow_hosts = ["registry.npmjs.org"]
+# A free host port per worktree, forwarded to 3000 in the guest. Never "3000:3000" in a committed
+# file: the second worktree would fail to start.
+ports = ["auto:3000"]
+
+# A name per worktree: https://<branch>.<repo>.localhost:1355. Needs `npm i -g portless`; without
+# it everything still works, the port just has no name. Agents find it with `boxer url`.
+[urls]
+enabled = true
+
+[tasks.test]
+cmd = "npm test"
+description = "the unit tests"
+
+[tasks.build]
+cmd = "npx next build"
+description = "a production build; stops being a dev server's job, so do not run it while one is serving the same .next"

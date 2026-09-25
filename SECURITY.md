@@ -8,9 +8,22 @@ Expect an acknowledgement within three working days and a fix or a plan within f
 
 ## What boxer is, and is not
 
-boxer runs an agent's shell commands inside a smolvm microVM whose only mount is the git worktree.
-That is a real boundary: a command in the guest cannot read your home directory, your keys, or any
-path outside the worktree, and the network is an allowlist by default.
+boxer runs an agent's shell commands inside a sandbox whose only mount is the git worktree. That is
+a real boundary: a command in the guest cannot read your home directory, your keys, or any path
+outside the worktree.
+
+How strong the boundary is depends on the backend, and `boxer doctor` prints which one you have:
+
+| backend | boundary | egress |
+| --- | --- | --- |
+| `smolvm` (default) | a kernel per sandbox | allowlist by default |
+| Apple `container` | a kernel per sandbox | on or off — no allowlist |
+| `docker`, `podman` | **one kernel shared by every sandbox** on the machine | on or off — no allowlist |
+
+A backend that cannot enforce the allowlist **refuses** `network.mode = "allowlist"` rather than
+running with a network boxer said it would deny. A container escape on a shared-kernel backend
+reaches every other sandbox on that machine; on a kernel-per-sandbox backend it reaches one guest.
+If containment is the reason you use boxer, keep the default backend.
 
 It is **not** a defence against a malicious agent that can choose what to run on the host. Three
 paths deliberately stay on the host:

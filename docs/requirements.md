@@ -97,11 +97,16 @@ boundary against a hostile agent.
 the VM, which is what `integration = "inside"` does (R-INT). Outside mode remains the default and
 remains execution isolation only.
 
-### 2.3 One backend, no abstraction
+### 2.3 Backends behind a small interface
 
-smolvm is the stated backend. No VMM interface, no driver registry, no plugin surface for
-alternative backends. An interface with one implementation is cost without benefit; add it when a
-second backend actually exists.
+smolvm is the default backend. A second one arrived, so the interface followed: `vm.Backend` is
+nine methods every backend must have, and `Packer`, `Brancher`, `EgressReporter` and
+`DiskReporter` are optional interfaces found by type assertion, so "this backend cannot fork" is a
+fact the type system holds rather than a stub that returns an error. Four backends implement it —
+smolvm, Apple's `container`, docker and podman (one driver, two binaries). There is still no
+driver registry and no plugin surface: a backend is a file in `internal/vm`, and the contract it
+must meet is [adding-a-backend.md](adding-a-backend.md). The rule that shaped this still holds — the
+interface was written after the second implementation, not before it.
 
 ### 2.4 The host keeps the repository
 
@@ -658,9 +663,11 @@ How each harness's bundle format carries those four:
   Adding a harness means writing a bundle manifest and, where the harness's hook dialect differs, a
   translation table for the shared binary. It never means new decision logic.
 - **R-PKG-2.** The instruction component is one source document in each harness's instruction
-  format (skill, context file, `AGENTS.md` section). It states that execution runs in a microVM
+  format (skill, context file, `AGENTS.md` section). It states that execution runs in a sandbox
   keyed to the worktree and tells the agent how to ask for the rest, because the rest — mount path,
-  intercept list, mode — is a property of the checkout and is resolved at run time (R-PKG-9).
+  intercept list, mode, the backend and its boundary, where a dev server is — is a property of the
+  checkout and is resolved at run time (R-PKG-9). The run-time brief names the boundary truthfully:
+  "a microVM" on a kernel-per-sandbox backend, "a container" on a shared-kernel one.
 - **R-PKG-3.** The run tool is one MCP server exposing `boxer_run`, `boxer_status`, and nothing else
   in v1. Every bundle registers the same server.
 - **R-PKG-4.** The gap closer is chosen per harness from what it supports, in this order: remove the

@@ -1,0 +1,114 @@
+---
+title: Examples
+description: Working boxer.toml files for Next.js, Vite, Python, Go, monorepos, devcontainers and other backends.
+---
+
+The repository's [`examples/`](https://github.com/BarakChamo/boxer/tree/main/examples) directory
+has a configuration for each common setup. Each is either a **complete project** you can run as it
+is, or a **config** to drop into an existing one. The test suite parses every one. Each runnable
+one, and each Next.js config applied to a real Next.js app, has been brought up on a real sandbox
+and answered HTTP 200 through its URL, twice; `host-prep` was checked by the binary it installed
+resolving in the guest. `monorepo` is a pattern for a two-service repository and has not been run.
+
+| example | kind | shows |
+| --- | --- | --- |
+| `nextjs` | config | a Next.js dev server per worktree, `[urls]`, `allowedDevOrigins`, tasks |
+| `nextjs-devcontainer` | config | the same from `devcontainer.json`: users, port labels, variables |
+| `vite` | runnable | Vite with `--strictPort`, a name per worktree |
+| `python-fastapi` | runnable | uv: a tool in `image_setup`, the project in `setup` |
+| `go-api` | runnable | a Go service, tasks for test and vet |
+| `monorepo` | config | two services in one sandbox, named ports, JUnit-reporting tasks |
+| `host-prep` | config | installing on the host with `[prep]`, and when not to |
+| `docker-backend` | config | the same project on docker or podman, and what that gives up |
+
+## Next.js
+
+```toml
+image = "mirror.gcr.io/library/node:24-alpine"
+setup = ["npm ci --no-audit --no-fund"]
+start = ["npx next dev -p 3000 -H 0.0.0.0"]
+ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+ready_timeout = "240s"
+
+[network]
+allow_hosts = ["registry.npmjs.org"]
+ports = ["auto:3000"]
+
+[urls]
+enabled = true
+
+[tasks.test]
+cmd = "npm test"
+description = "the unit tests"
+```
+
+```ts
+// next.config.ts
+const nextConfig = { allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"] };
+export default nextConfig;
+```
+
+`boxer up`, then `boxer url`. In a second worktree the same file gives a second server at
+`https://<branch>.<repo>.localhost:1355`, with its own `node_modules` and `.next`.
+
+## Python with uv
+
+```toml
+image = "mirror.gcr.io/library/python:3.12-slim"
+image_setup = ["pip install --no-cache-dir uv"]   # a tool: once, kept in the pack
+setup = ["uv sync"]                               # the project: once per worktree, into .venv
+start = ["uv run uvicorn main:app --host 0.0.0.0 --port 8000"]
+ready = "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/').status == 200 else 1)\""
+
+[network]
+allow_hosts = ["pypi.org", "files.pythonhosted.org"]
+ports = ["auto:8000"]
+```
+
+The split is the one worth copying. Installing uv changes the image, so it is `image_setup`: run
+once and cached, so the next worktree does not repeat it. Installing the project's dependencies
+lands in this worktree's `.venv`, which no cached image can carry, so it is `setup`.
+
+## Go
+
+```toml
+image = "mirror.gcr.io/library/golang:1.24-alpine"
+start = ["go run ."]
+ready = "wget -q -O /dev/null http://127.0.0.1:8080/"
+
+[network]
+ports = ["auto:8080"]
+
+[tasks.test]
+cmd = "go test ./..."
+description = "the Go tests"
+```
+
+With module dependencies, add `go mod download` to `setup` and `"proxy.golang.org",
+"sum.golang.org"` to `allow_hosts`.
+
+## From a devcontainer
+
+A repository with `.devcontainer/devcontainer.json` keeps it as the source of truth, and a short
+`boxer.toml` beside it holds what devcontainer has no key for — above all the allowlist, since
+boxer's default network reaches the image registry and nothing else:
+
+```toml
+[network]
+allow_hosts = ["registry.npmjs.org"]
+
+[urls]
+enabled = true
+```
+
+## What every example has in common
+
+Every one of these tripped someone, which is why each example does it:
+
+- **The server binds `0.0.0.0`**, never `127.0.0.1`: a forwarded port arrives on the guest's
+  interface.
+- **Ports are `auto:`** in anything committed: a fixed host port makes the second worktree fail.
+- **`ready` probes the server itself**, so `boxer up` means "answering", not "launched".
+- **The allowlist names the package registry**, and nothing else; the image registry is allowed
+  automatically. If an install fails because a host is missing, boxer's error names it and gives
+  the line to add.

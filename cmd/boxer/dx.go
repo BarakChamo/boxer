@@ -659,7 +659,13 @@ func runProbe(backend string) *probe {
 			return fail(fmt.Errorf("git: %v: %s", err, b))
 		}
 	}
-	toml := fmt.Sprintf("backend = %q\nimage = \"mirror.gcr.io/library/alpine:3.20\"\nrequire_worktree = \"off\"\nmemory = \"512M\"\ncpus = 1\nnetwork = { mode = \"off\" }\n", backend)
+	// boxer's own default network where the backend has it, so the probe tests what people run;
+	// "off" where it does not, because the allowlist is refused there.
+	mode := "off"
+	if vm.CapsOf(vm.Host(backend)).Allowlist {
+		mode = "allowlist"
+	}
+	toml := fmt.Sprintf("backend = %q\nimage = \"mirror.gcr.io/library/alpine:3.20\"\nrequire_worktree = \"off\"\nmemory = \"512M\"\ncpus = 1\nnetwork = { mode = %q }\n", backend, mode)
 	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644); err != nil {
 		return fail(err)
 	}
@@ -667,9 +673,15 @@ func runProbe(backend string) *probe {
 	if err != nil {
 		return fail(err)
 	}
-	e.Stderr = io.Discard
+	// Kept rather than discarded: a probe that fails has to say why, and the reason is usually in
+	// what boxer printed on the way — an image that could not be cached, a pull that fell back.
+	var said strings.Builder
+	e.Stderr = &said
 	defer func() { _ = e.Down() }()
 	if _, err := e.Ensure(true, false); err != nil {
+		if tail := strings.TrimSpace(said.String()); tail != "" {
+			return fail(fmt.Errorf("%v (after: %s)", err, lastLines(tail, 2)))
+		}
 		return fail(err)
 	}
 	code, err := e.Run([]string{"sh", "-c", "echo ok > probe.txt"}, box.RunOpts{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
@@ -680,6 +692,15 @@ func runProbe(backend string) *probe {
 		return fail(errors.New("the guest wrote to the worktree and the host did not see it"))
 	}
 	return &probe{OK: true, Seconds: time.Since(start).Seconds()}
+}
+
+// lastLines is the final n lines of s, joined with " / ".
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " / ")
 }
 
 func firstErr(a, b error) error {

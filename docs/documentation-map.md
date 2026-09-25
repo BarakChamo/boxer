@@ -11,6 +11,7 @@ copies can disagree.
 | `site/` (Fumadocs) | people using boxer | install, concepts, how-to, CLI/config/API reference, measured support | why a package is shaped the way it is |
 | `docs/` | people working on boxer | architecture, requirements, release contract, evaluation design and results | anything a user needs to run boxer |
 | `README.md` and folder `README`s | someone landing in a directory | what this directory is, what to run, where to go next | anything longer than a screen |
+| `examples/` | someone setting up a project | a working `boxer.toml` per common setup, each parsed by the tests | explaining the keys — the configuration reference does |
 | Go doc comments | someone reading the code | why the code is shaped this way, which requirement it satisfies | usage a reader should get from the site |
 
 The rule between them: **the site is the single source for user-facing tables.** The CLI reference,
@@ -25,9 +26,9 @@ The site is organised by what the reader is trying to do, not by feature.
 | Quadrant | Where | Pages |
 | --- | --- | --- |
 | Tutorial (learning) | `start/` | install, first-run, harnesses |
-| How-to (a problem) | `guides/` | environment, tasks, results, worktrees, forking, enforcement, inside, orchestrators, building on boxer, troubleshooting |
+| How-to (a problem) | `guides/` | examples, environment, tasks, results, worktrees, dev-server URLs, managing sandboxes, forking, enforcement, inside, orchestrators, building on boxer, troubleshooting |
 | Reference (facts) | `reference/` | cli, configuration, json, mcp, go, events, glossary |
-| Explanation (understanding) | `concepts/`, `evals/` | how it works, scopes and packs, security model, why evaluations |
+| Explanation (understanding) | `concepts/`, `evals/` | how it works, backends, scopes and packs, security model, why evaluations, evaluation strategy, benchmarks |
 
 There is deliberately **no CI guide**. Running boxer on a hosted CI runner needs nested
 virtualisation that nothing in this repository has verified, and an unverified how-to is worse
@@ -42,12 +43,14 @@ Written out so that a page can be checked against it rather than against memory.
 
 ### What boxer is
 
-One Go binary. It puts the shell commands a coding agent runs into a
-[smolvm](https://smolmachines.com) microVM instead of on the host, one VM per git worktree, with
-the worktree mounted in the guest at `/workspace`. The agent is not told.
+One Go binary. It puts the shell commands a coding agent runs into a sandbox instead of on the
+host, one per git worktree, with the worktree mounted in the guest at `/workspace`. The agent is not
+told. The sandbox is a [smolvm](https://smolmachines.com) microVM by default; Apple's `container`
+(also a kernel per sandbox), docker and podman (one shared kernel) are the alternatives.
 
-boxer keeps no state of its own beyond a few markers. smolvm holds the machines, the images and the
-packs; git holds the code.
+boxer keeps no state of its own beyond small records it can lose. The backend holds the machines
+and images, smolvm also the packs; git holds the code; setup markers live in each worktree's git
+directory.
 
 ### The load-bearing decisions
 
@@ -70,8 +73,16 @@ Every one of these is a question a reader will eventually ask. Each needs a docu
   next VM builds a fresh one instead of inheriting a stale one.
 - **Why the core contains no harness name.** A harness is a table row. `TestCoreNamesNoHarness`
   enforces it, so a tenth harness cannot grow the core.
-- **Why there is no backend interface.** One implementation. An interface with one implementation
-  is a liability, recorded as out of scope until a second exists.
+- **Why the backend interface is small, and came late.** It was written after the second
+  implementation, not before: nine required methods, the rest optional interfaces found by type
+  assertion, so "cannot fork" is a fact of the type system. A backend refuses what it cannot
+  enforce by name — the allowlist, on every container runtime.
+- **Why dev servers get names.** `auto:` ports stop worktrees colliding and leave nobody knowing
+  where a server is. `[urls]` names them through portless, per worktree, and the brief tells the
+  agent to ask `boxer url` rather than guess.
+- **Why the CLI reads who is on the other end.** A person wants colour and a confirmation; an agent
+  wants neither, and a prompt hangs it. Presentation lives in `internal/cli`, which the core may
+  not import.
 - **Why telemetry is off by default.** With no `[telemetry]` table boxer writes nothing anywhere.
 - **Why claims are evaluated, not asserted.** The claims are behavioural, so unit tests cannot
   establish them. Six tiers do, and their results are published with the conditions that produced
@@ -89,6 +100,8 @@ Every one of these is a question a reader will eventually ask. Each needs a docu
   `.devcontainer/devcontainer.json`.
 - Machine surfaces: `--json` on the read commands, `boxer watch --json`, the MCP server, and
   `pkg/boxer`.
+- Backends: smolvm, Apple `container`, docker, podman.
+- Dev-server URLs through portless; a management CLI (`ls -A`, `rm`, `backends`, `integrations`).
 
 ### What boxer does not support, and why
 
@@ -104,7 +117,10 @@ surprise.
 - **fx outside the guest.** No hooks, no headless shell denial, resolves past a PATH shim.
 - **Conductor automated verification.** Native app, no debugging port; its CLI drives cloud
   workspaces where there is nothing local to sandbox.
-- **A second VM backend.** Out of scope for 1.0.
+- **An egress allowlist on a container backend.** docker, podman and Apple's `container` offer no
+  per-host egress policy, so `network.mode = "allowlist"` is refused there.
+- **Firecracker, and remote backends.** Firecracker needs `/dev/kvm`, which macOS does not have;
+  Vercel Sandbox and other remote backends need a copy-based workspace that no backend has yet.
 
 ## What each review closed
 
@@ -126,7 +142,7 @@ docs and forbidden the code.
 | `guides/forking.mdx` | how-to | forking changes what the parent sandbox sees, which needed a page rather than a sentence |
 | `docs/testing.md` | explanation | the layers below the eval tiers were undocumented |
 | `bench/README.md` | explanation | the performance claims had a number and no method |
-| `docs/adding-a-backend.md` | how-to | the contract a second backend must satisfy, written before the interface exists |
+| `docs/adding-a-backend.md` | how-to | the contract every backend satisfies; written before the interface, updated once four existed |
 | `docs/adding-a-harness.md` | how-to | "four steps" with no detail |
 | `cmd/`, `internal/`, `pkg/boxer/`, `scripts/`, `npm/`, `adapters/` READMEs | orientation | a contributor opened a directory and found nothing |
 | `site/README.md` | orientation | was Create-Fumadocs boilerplate describing someone else's project |
@@ -182,6 +198,28 @@ a reader trusts most.
 - **`boxer watch` is documented but not covered by the stability contract**, while every page that
   mentions dashboards points at it. Either the contract grows to include it or the pages say so.
   They currently say so.
+
+## What the 2026-09-25 pass closed
+
+After four backends, portless URLs and the management CLI landed, every internal doc and every site
+page was checked against them, and every example was run.
+
+- **The boundary is no longer one thing.** `SECURITY.md`, the site's security model, the README,
+  the index, the install page and this map all said "a smolvm microVM". Each now says the boundary
+  depends on the backend and shows the table; two of the four share a kernel.
+- **"No backend interface" was stated in four places** — here, `requirements.md` §2.3,
+  `architecture.md` and the production plan — after the interface shipped. Rewritten to say what it
+  is and why it came late.
+- **Added:** `concepts/backends`, `guides/urls`, `guides/managing`, `guides/examples`,
+  `evals/strategy`, `evals/benchmarks`, and `examples/` with a test that parses it.
+- **Running the examples found four defects**, each fixed in the code, not the docs: `setup` and
+  `start` losing the image's `PATH` under a login shell; a setup failure under the allowlist naming
+  the wrong fix; the `[prep]` tripwire flagging sharp, which is prebuilt; and the devcontainer
+  example claiming no `boxer.toml` was needed, when boxer's default allowlist makes one necessary
+  for any install.
+- **Still open:** `docs/status.md` restates numbers from the generated reports by hand; the three
+  support matrices are now four (`evals/results` gained a per-backend table); Linux hosts are still
+  under-served by the examples, every one of which was run on a Mac.
 
 ## Deployment
 

@@ -2,6 +2,7 @@ package box
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -748,7 +749,7 @@ func TestStartAndReady(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	s := string(b)
-	if !strings.Contains(s, "nohup sh -lc 'echo serving'") {
+	if !strings.Contains(s, "nohup 'sh' '-c'") || !strings.Contains(s, "'echo serving'") {
 		t.Fatalf("a start command must be launched detached:\n%s", s)
 	}
 	if !strings.Contains(s, startMarker) {
@@ -822,7 +823,7 @@ func TestServicesRestartAfterAStopButSetupDoesNot(t *testing.T) {
 	if n := strings.Count(s, "echo installing"); n != 1 {
 		t.Fatalf("setup survives a restart, ran %d times:\n%s", n, s)
 	}
-	if n := strings.Count(s, "nohup sh -lc 'echo serving'"); n != 2 {
+	if n := strings.Count(s, "boxer \"$PATH\" \"$0\"' 'echo serving'"); n != 2 {
 		t.Fatalf("services must start again after a restart, started %d times:\n%s", n, s)
 	}
 }
@@ -988,14 +989,14 @@ func TestTheSameWorktreePreparesItselfOnce(t *testing.T) {
 // sandboxes, so the error says that.
 func TestSetupOutOfMemoryExplainsItself(t *testing.T) {
 	e := &Env{Cfg: config.Config{Memory: "4G"}}
-	oom := e.setupError("setup", "`setup`", 137, "npm install")
+	oom := e.setupError("setup", "`setup`", 137, "npm install", time.Now())
 	if !strings.Contains(oom.Reason, "out of memory") {
 		t.Fatalf("reason: %q", oom.Reason)
 	}
 	if !strings.Contains(oom.Fix, "memory") || !strings.Contains(oom.Fix, "4G") {
 		t.Fatalf("the fix must name the current allocation: %q", oom.Fix)
 	}
-	other := e.setupError("setup", "`setup`", 1, "npm install")
+	other := e.setupError("setup", "`setup`", 1, "npm install", time.Now())
 	if strings.Contains(other.Reason, "out of memory") {
 		t.Fatalf("an ordinary failure is not an OOM: %q", other.Reason)
 	}
@@ -1171,5 +1172,28 @@ func TestAStoreLockNeitherFailsTheCreateNorCondemnsThePack(t *testing.T) {
 	// And every attempt must still have booted from the pack rather than pulling the image.
 	if !strings.Contains(string(b), "--from "+pack) {
 		t.Fatalf("the retried create must still boot from the pack\nwant --from %s\ngot:\n%s", pack, b)
+	}
+}
+
+// An install that fails under the allowlist fails because of it, and npm cannot say so: it reports
+// ENOTFOUND for a host it was never allowed to resolve. A setup failure used to send the person to
+// rewrite a setup list that was fine; it now names the refused host and the line that fixes it.
+func TestSetupFailureNamesTheRefusedHost(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"setup = [\"false\"]\n")
+	stamp := `[{"timestamp":"` + time.Now().Add(time.Second).UTC().Format(time.RFC3339) + `","operation":"resolve","dest":"registry.npmjs.org"}]`
+	vmtest.SetEgress(t, stamp)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	_, err = e.Ensure(true, false)
+	var be *Error
+	if !errors.As(err, &be) || be.Cause != "SETUP_FAILED" {
+		t.Fatalf("want SETUP_FAILED, got %v", err)
+	}
+	if !strings.Contains(be.Reason, "allowlist refused registry.npmjs.org") || !strings.Contains(be.Fix, `add "registry.npmjs.org" to network.allow_hosts`) {
+		t.Fatalf("reason %q fix %q", be.Reason, be.Fix)
 	}
 }

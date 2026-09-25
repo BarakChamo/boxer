@@ -1,0 +1,29 @@
+{
+  // boxer reads this file as its first layer; the boxer.toml beside it adds only the allowlist and
+  // [urls], which devcontainer has no keys for. Anything here boxer will not do, it names.
+  "name": "next-app",
+  "image": "mirror.gcr.io/library/node:24-alpine",
+
+  // Runs on the host before the sandbox exists (boxer's [prep]). Kept empty here: installing on a
+  // Mac would fetch macOS binaries. See ../host-prep for doing it safely.
+  // "initializeCommand": "",
+
+  // Once per worktree, in the guest (boxer's setup), as the image's own `node` user.
+  "postCreateCommand": "npm ci --no-audit --no-fund",
+  "remoteUser": "node",
+
+  // Every start (boxer's start). Bind 0.0.0.0 or the forwarded port reaches nothing.
+  "postStartCommand": "npx next dev -p 3000 -H 0.0.0.0",
+
+  // Each worktree gets its own free host port for 3000 (requireLocalPort defaults to false), and
+  // the label names its URL when [urls] is on: web.<repo>.localhost.
+  "forwardPorts": [3000],
+  "portsAttributes": { "3000": { "label": "web" } },
+
+  "containerEnv": { "NEXT_TELEMETRY_DISABLED": "1" },
+
+  // Variables are resolved on the host. This one is the worktree boxer mounted.
+  "remoteEnv": { "PROJECT_ROOT": "${containerWorkspaceFolder}" },
+
+  "hostRequirements": { "cpus": 2, "memory": "4gb" }
+}

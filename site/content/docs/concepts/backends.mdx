@@ -1,0 +1,119 @@
+---
+title: Backends
+description: smolvm, Apple container, docker and podman — what each boundary is, what each can enforce, and what each costs.
+---
+
+A backend is what actually runs the sandbox. boxer drives four, and they are not interchangeable:
+they differ in the boundary they give you, in what boxer can enforce through them, and in how long
+a sandbox takes to start.
+
+```toml
+backend = "smolvm"     # smolvm | container | docker | podman
+```
+
+`BOXER_BACKEND` overrides it for one command. `boxer doctor` prints the backend you have with its
+boundary first, and `boxer backends` compares every installed one.
+
+## The boundary
+
+| backend | what a sandbox is | boundary |
+| --- | --- | --- |
+| `smolvm` (default) | a microVM | **a kernel per sandbox** |
+| `container` (Apple, macOS 26 on Apple Silicon) | a lightweight VM per container | **a kernel per sandbox** |
+| `docker` | a container | one kernel shared by every sandbox on the machine |
+| `podman` | a container | one kernel shared by every sandbox on the machine |
+
+On a Mac, docker and podman run their containers inside one Linux VM, so "shared kernel" means
+shared between sandboxes, not with macOS. On Linux they share the host's kernel.
+
+The difference matters when something goes wrong inside a sandbox. An escape from a microVM lands
+in one guest. An escape from a container lands in the kernel every other sandbox on that machine
+is using. boxer's threat model is a careless agent rather than a hostile one — see the
+[security model](/docs/concepts/security) — but if containment is why you use boxer, keep a
+kernel-per-sandbox backend.
+
+## What each can do
+
+Generated from the backends themselves (`go test ./internal/vm -run CapabilityMatrix`), not
+written by hand:
+
+| backend | egress allowlist | environment cache (packs) | fork | egress log | secrets off argv | ownership by label |
+| --- | --- | --- | --- | --- | --- | --- |
+| `smolvm` | yes | yes | yes | yes | yes | yes |
+| `container` | — | — | — | — | yes | yes |
+| `docker` | — | — | — | — | yes | yes |
+| `podman` | — | — | — | — | yes | yes |
+
+What a backend cannot do, boxer **refuses by name** rather than approximating:
+
+- **The egress allowlist.** `network.mode = "allowlist"` is boxer's default, and no container
+  runtime offers a per-host egress policy — only "no network" or "all of it". On those backends the
+  default is refused with the fix in the message; choose `"off"` or `"on"` deliberately.
+- **Packs.** Without them, `image_setup` runs once per sandbox rather than once per host.
+- **Forking.** `boxer fork` needs copy-on-write VM branching, which only smolvm has.
+
+Everything above the backend — hooks, shims, the MCP server, tasks, URLs, devcontainer support,
+`[prep]`, cache mounts — works the same on all four. The smoke suite runs the same cells on each
+and skips, by name, only the ones a backend's capabilities rule out.
+
+## What each costs
+
+Time for a Next.js dev server to answer HTTP 200, measured one backend at a time on a wiped host,
+three samples each, 2 vCPU and 4 GB per sandbox, on a 10-core Apple Silicon Mac:
+
+| backend | one worktree | three worktrees at once |
+| --- | ---: | ---: |
+| `podman` | **3.6 s** | 25.9 s |
+| `docker` (OrbStack) | 4.5 s | **21.5 s** |
+| `container` | 8.2 s | 25.6 s |
+| `smolvm` | 8.5 s | 27.3 s |
+
+The two kernel-per-sandbox backends land within 0.3 s of each other, which is the useful reading:
+**the ~4.6 s is the cost of the boundary, not of smolvm.** At three worktrees the spread falls to
+27%, because three Next.js compiles saturate the cores and the sandbox stops being the bottleneck —
+the boundary is a start-up toll, not a running tax. A warm command in an existing sandbox takes 30–50 ms
+on all of them (31 ms measured on smolvm, 36–51 ms on docker). Method and caveats: [Benchmarks](/docs/evals/benchmarks).
+
+There is no memory column on purpose: the whole-host measurement varied twofold within a single
+configuration, so any ratio drawn from it would be noise.
+
+## Choosing
+
+- **You want the boundary boxer is designed around** — keep `smolvm`. It is the only backend that
+  enforces the egress allowlist, caches environments as packs, and forks.
+- **You want a kernel per sandbox from ordinary OCI images, on macOS 26** — `container`.
+- **You already run docker or podman, or you are on Linux without KVM** —
+  `docker` or `podman`, with `network.mode` set deliberately, knowing the sandboxes share a kernel.
+- **You start many short-lived sandboxes and care about the first second** — a container backend
+  starts one about 4 s sooner.
+
+## Problems found on real machines
+
+Each of these looked fine and was not. `boxer backends` checks for the ones it can detect.
+
+- **podman on the `libkrun` provider cannot bind-mount host paths**, so no worktree can be mounted.
+  Use the `applehv` provider on a Mac (`CONTAINERS_MACHINE_PROVIDER=applehv podman machine init`).
+  A machine created under one provider is also invisible to `podman machine` commands run under
+  another.
+- **Apple `container` needs its service and a kernel.** `container system start`, then
+  `container system kernel set --recommended`. A missing kernel shows up as every create failing.
+- **OrbStack can give a new container a stale mount** when the same worktree path was removed and
+  added again moments earlier — what an orchestrator does when it reuses a task name. boxer proves
+  the mount by writing through it before running anything, and recreates the sandbox once if it
+  never passes.
+- **A runtime's own errors look like exit codes.** "No such container" exits 1, "OCI runtime exec
+  failed" 127. boxer reads the runtime's message and reports an error, so a command that never ran
+  is not recorded as having failed.
+
+```sh
+boxer backends            # installed, answering, how many sandboxes, what each can enforce
+boxer backends --probe    # create, use and delete a real sandbox on each: the proof
+```
+
+## Not supported
+
+**Firecracker** needs `/dev/kvm`, which macOS does not have, and its maintainers declined a
+Virtualization.framework port. **Docker Sandboxes (`sbx`)** has a per-host allowlist, which makes
+it attractive, but no labels on any object and no way to inspect a sandbox, so boxer could not
+prove which sandboxes it owns; that is waiting on `sbx`. **Remote backends** such as Vercel
+Sandbox copy the workspace rather than mounting it, which no backend here does yet.

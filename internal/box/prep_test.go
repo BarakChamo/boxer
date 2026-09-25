@@ -167,3 +167,17 @@ func TestPrepFailureIsReportedRatherThanSwallowed(t *testing.T) {
 		t.Fatalf("want a PREP_FAILED naming the alternative, got %v", err)
 	}
 }
+
+// sharp since 0.33 ships its binaries as @img/sharp-* optional dependencies, which the platform
+// flags select correctly — verified by prep-installing it on a Mac and rendering an image in an
+// Alpine guest. Warning about it was a false alarm. A package that really compiles still warns.
+func TestPrepDoesNotWarnAboutPrebuiltOptionalBinaries(t *testing.T) {
+	lock := `{"packages":{
+	  "node_modules/sharp":{"hasInstallScript":true,"optionalDependencies":{"@img/sharp-linuxmusl-arm64":"0.34.5"}},
+	  "node_modules/better-sqlite3":{"hasInstallScript":true}}}`
+	e := prepEnvFor(t, "node:24-alpine", []string{"npm ci"}, map[string]string{"package-lock.json": lock})
+	w := e.PrepWarnings()
+	if len(w) != 1 || strings.Contains(w[0], "sharp") || !strings.Contains(w[0], "better-sqlite3") {
+		t.Fatalf("want only better-sqlite3 named, got %v", w)
+	}
+}

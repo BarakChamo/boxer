@@ -343,4 +343,10 @@ func TestDXHelpers(t *testing.T) {
 	if firstErr(nil, os.ErrNotExist) != os.ErrNotExist {
 		t.Fatal("firstErr")
 	}
+	if got := lastLines("a\nb\nc\n", 2); got != "b / c" {
+		t.Fatalf("lastLines %q", got)
+	}
+	if got := lastLines("only", 3); got != "only" {
+		t.Fatalf("lastLines short %q", got)
+	}
 }

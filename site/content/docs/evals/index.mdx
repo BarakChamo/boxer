@@ -3,15 +3,17 @@ title: Why there are evaluations
 description: What boxer claims, and how those claims are checked.
 ---
 
-boxer's claims are behavioural: *this harness's commands run in the VM*, *this level of integration
-holds*, *a worktree's sandbox is its own*. None of that can be established by unit tests, because
-the thing being tested is a real coding agent's behaviour against a real hypervisor.
+boxer's claims are behavioural: *this harness's commands run in the sandbox*, *this level of
+integration holds*, *a worktree's sandbox is its own*, *an agent finds its own server*. None of that
+can be established by unit tests, because the thing being tested is a real coding agent's behaviour
+against a real runtime.
 
 So there are evaluation tiers, and the results are published with the conditions that produced
 them.
 
 | Tier | What it asks | Cost |
 | --- | --- | --- |
+| smoke | Does every configuration path work on each backend? | free, minutes |
 | `t1` | Does each integration work, with a scripted model? | free, fast |
 | `t2` | The same, with real models | cents |
 | `adherence` | When boxer only *asks*, how often do agents comply? | cents |
@@ -20,24 +22,14 @@ them.
 | `matrix` | The same workload at every integration level | ~$2 |
 
 ```sh
+make smoke          # one backend; BOXER_BACKEND=docker make smoke for another
 make eval-t1        # no credentials needed
 make eval-matrix    # needs an AI Gateway key
 ```
 
-## What they have caught
-
-Not hypotheticals. Each of these shipped, passed the unit tests, and was found by a tier:
-
-- **Codex ran unsandboxed in linked worktrees.** It resolves project configuration to the main
-  repository, so hooks installed into a worktree were never read. Every orchestrator works in
-  linked worktrees, so this was the ordinary case rather than a corner. One run installed a
-  dependency on the host.
-- **`boxer run` discarded input written before the sandbox attached.** A harness that configures
-  its shell one second after spawning it lost that configuration to the twenty seconds a VM takes
-  to come up, then waited forever for a prompt that was never installed.
-- **A boxer shim could be resolved by boxer itself.** The smolvm launcher runs `uname`; with a
-  `uname` shim on `PATH` that became `boxer run -- uname` inside a boxer already working on the
-  same sandbox. The session deadlocked until it was killed.
-
-The single-command tiers passed throughout all three. It took a real development workload in a real
-worktree to surface them.
+<Cards>
+  <Card title="How boxer is evaluated" href="/docs/evals/strategy" description="The layers, the oracle, the rules, and what they have caught." />
+  <Card title="Support, measured" href="/docs/evals/results" description="The latest results, by level, harness and backend." />
+  <Card title="The matrix tier" href="/docs/evals/matrix" description="The workload, the thirteen claims, and how a cell is scored." />
+  <Card title="Benchmarks" href="/docs/evals/benchmarks" description="What boxer costs, and the numbers that did not survive." />
+</Cards>

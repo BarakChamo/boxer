@@ -1,0 +1,42 @@
+# A web app and an API in one repository, both served from one sandbox per worktree, each at its
+# own name: web.<repo>.localhost and api.<repo>.localhost, prefixed by the branch in a worktree.
+
+image = "mirror.gcr.io/library/node:24-alpine"
+setup = ["npm ci --no-audit --no-fund"]          # one install at the workspace root
+
+# Each start line is launched detached, in order. Both bind 0.0.0.0.
+start = [
+  "npm run dev --workspace api -- --host 0.0.0.0 --port 8080",
+  "npm run dev --workspace web -- --hostname 0.0.0.0 --port 3000",
+]
+# `ready` is one command: wait for both.
+ready = "node -e \"Promise.all([3000,8080].map(p=>fetch('http://127.0.0.1:'+p+'/'))).then(rs=>process.exit(rs.every(r=>r.status<500)?0:1),()=>process.exit(1))\""
+ready_timeout = "300s"
+
+cpus = 4
+memory = "6G"
+
+[network]
+mode = "allowlist"
+allow_hosts = ["registry.npmjs.org"]
+ports = ["auto:3000", "auto:8080"]
+
+[urls]
+enabled = true
+names = { "3000" = "web", "8080" = "api" }
+
+# Named tasks are what an agent should run instead of composing command lines: the brief lists them
+# with their descriptions, and `boxer run --task test` summarises the JUnit report it names.
+[tasks.test]
+cmd = "npm test --workspaces"
+description = "every workspace's unit tests"
+junit = ["web/junit.xml", "api/junit.xml"]
+
+[tasks.lint]
+cmd = "npm run lint --workspaces"
+description = "lint every workspace"
+
+[tasks.e2e]
+cmd = "npm run e2e --workspace web"
+description = "the browser suite; needs both dev servers, which start already runs"
+timeout = "15m"

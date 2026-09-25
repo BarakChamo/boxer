@@ -1,10 +1,10 @@
 ---
 title: Install
-description: smolvm, then boxer, then a command that proves it worked.
+description: A backend, then boxer, then a command that proves it worked.
 ---
 
-boxer is a single Go binary. It needs [smolvm](https://smolmachines.com), which runs the microVMs,
-and a git repository to work in.
+boxer is a single Go binary. It needs a backend to run sandboxes — [smolvm](https://smolmachines.com)
+by default — and a git repository to work in.
 
 macOS on Apple Silicon and Linux on x86-64 or arm64 are supported. Windows is not: smolvm runs
 there, but boxer's worktree model depends on POSIX paths and mounts.
@@ -21,6 +21,29 @@ smolvm version
 ```
 
 Everything below assumes it is on your `PATH`.
+
+### Or another backend
+
+smolvm gives each sandbox its own kernel and is the only backend that enforces an egress allowlist.
+If you would rather use a runtime you already have, boxer drives these too; set `backend` in
+`boxer.toml`, and see [Backends](/docs/concepts/backends) for what each one can and cannot do.
+
+| backend | install | then |
+| --- | --- | --- |
+| Apple `container` (macOS 26, Apple Silicon) | `brew install container`, or the installer from its [releases](https://github.com/apple/container/releases) | `container system start`, `container system kernel set --recommended` |
+| docker | Docker Desktop or OrbStack | — |
+| podman | `brew install podman` | `podman machine init && podman machine start` (use the `applehv` provider on a Mac) |
+
+`boxer backends --probe` proves each installed one can run a sandbox.
+
+### Optional: portless, for dev-server URLs
+
+```sh
+npm install -g portless
+```
+
+Only needed for [`[urls]`](/docs/guides/urls). Without it every forwarded port still works; it just
+has no name.
 
 ## Then boxer
 

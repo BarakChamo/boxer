@@ -1,7 +1,8 @@
 # Architecture
 
-boxer is one Go binary and keeps no state it cannot lose. smolvm holds the microVMs, their images
-and the packs; git holds the code; the binary holds nothing between invocations.
+boxer is one Go binary and keeps no state it cannot lose. The backend — smolvm by default, or
+Apple's `container`, docker or podman — holds the machines, their images and, on smolvm, the packs;
+git holds the code; the binary holds nothing between invocations.
 
 Under `$XDG_STATE_HOME/boxer` it keeps a handful of caches — `last-used`, `packs`, `locks`,
 `events.jsonl`, `runs`, the `branchable`/`staged` markers, `owned` for a backend
@@ -34,7 +35,7 @@ install case, a template namespace and an eval driver, and nothing else.
 | `internal/config` | `boxer.toml` and `BOXER_*`, merged across three locations; an unknown key is rejected, an unknown table warns |
 | `internal/decide` | given a command and a configuration, what happens to it: run here, run there, deny |
 | `internal/box` | the lifecycle above a VM: provision, setup, pack, run, reclaim |
-| `internal/vm` | the smolvm process boundary, and nothing else |
+| `internal/vm` | the backend boundary: `vm.Backend`, its four implementations, capabilities, typed errors |
 | `internal/hook` | one dialect row per harness, translating each one's hook protocol |
 | `internal/install` | writing a repository's configuration, merged and idempotent |
 | `internal/bundle` | rendering the published skill and plugin package, from a version and nothing else |
@@ -43,6 +44,7 @@ install case, a template namespace and an eval driver, and nothing else.
 | `internal/junit` | parsing JUnit XML from the mounted worktree into a run's test summary |
 | `internal/mcp` | the MCP server: `boxer_run`, `boxer_status`, lifecycle signals |
 | `internal/shim` | programs on PATH that are really boxer |
+| `internal/cli` | how the command line talks to whoever is reading: mode detection, colour, tables, prompts. Imported only by `cmd/boxer`; `TestCoreDoesNotImportCLI` enforces it |
 | `pkg/boxer` | the only importable package: a thin facade over the above, with no logic |
 
 ## How a command reaches the guest
@@ -137,8 +139,24 @@ Two things this surfaced that were previously invisible:
 
 The contract every backend answers is [adding-a-backend.md](adding-a-backend.md), written before
 the interface and unchanged by it — which is the point of having written it first. The one rule
-still untested is the fourth, workspace transport: all three backends mount the worktree, so
+still untested is the fourth, workspace transport: all four backends mount the worktree, so
 nothing here has yet had to answer what happens when a backend copies it instead.
+
+Two more things the backends taught, both by running rather than reading: a container runtime's
+own failures ("no such container", "OCI runtime exec failed") exit with statuses a command could
+also have, so the driver recognises the runtime's message at the head of stderr and reports an
+error instead; and on OrbStack a container created moments after its worktree was recreated can
+see a stale mount for its whole life, so a new sandbox's mount is proven by a write before anything
+else runs, and recreated once if it never passes.
+
+## Around the core
+
+Two pieces sit beside the lifecycle rather than inside it. **URLs** (`internal/box/urls.go`) name
+forwarded ports through portless, a host-side proxy: boxer registers `<branch>.<repo>.localhost`
+when a sandbox starts and removes it when the sandbox is deleted, keeping its own registry because
+portless has no machine-readable listing. **The command line** (`cmd/boxer`, `internal/cli`) is
+presentation over the public pieces — `ls`, `backends`, `integrations` and the rest are built from
+`vm.Backend`, `box.Env` and `install`, and nothing in the core knows those commands exist.
 
 ## Where the evidence lives
 
@@ -150,4 +168,4 @@ the scripted model, `internal/vmtest` the fake hypervisor, and the tiers are des
 Full specification: [requirements.md](requirements.md). Stable surface and what may change
 without notice: [release.md](release.md). How the layers of testing fit together:
 [testing.md](testing.md). Adding a tenth harness: [adding-a-harness.md](adding-a-harness.md).
-Adding a second backend, when one exists: [adding-a-backend.md](adding-a-backend.md).
+Adding a fifth backend: [adding-a-backend.md](adding-a-backend.md).

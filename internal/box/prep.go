@@ -3,6 +3,7 @@ package box
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -152,11 +153,25 @@ func (e *Env) PrepWarnings() []string {
 	if err != nil {
 		return nil
 	}
+	var parsed struct {
+		Packages map[string]struct {
+			OptionalDependencies map[string]string `json:"optionalDependencies"`
+		} `json:"packages"`
+	}
+	_ = json.Unmarshal(lock, &parsed) // an unreadable lock falls back to the name check alone
 	var found []string
 	for _, name := range buildsFromSource {
-		if strings.Contains(string(lock), `"node_modules/`+name+`"`) {
-			found = append(found, name)
+		if !strings.Contains(string(lock), `"node_modules/`+name+`"`) {
+			continue
 		}
+		// A package that ships its binaries as per-platform optional dependencies — sharp since
+		// 0.33, through @img/sharp-* — gets the right ones from --os/--cpu/--libc, and compiles
+		// only as a fallback that never runs. Warning about it was a false alarm, found by
+		// running it: sharp installed by prep on a Mac renders an image in an Alpine guest.
+		if len(parsed.Packages["node_modules/"+name].OptionalDependencies) > 0 {
+			continue
+		}
+		found = append(found, name)
 	}
 	if len(found) == 0 {
 		return nil

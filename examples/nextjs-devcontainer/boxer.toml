@@ -1,0 +1,10 @@
+# Only what devcontainer.json has no words for. Everything else comes from
+# .devcontainer/devcontainer.json; boxer.toml wins key by key where the two disagree.
+
+# boxer's default network is an allowlist, and devcontainer has no allowlist key, so the package
+# registry has to be named here or `npm ci` fails with ENOTFOUND. boxer says so when it happens.
+[network]
+allow_hosts = ["registry.npmjs.org"]
+
+[urls]
+enabled = true           # web.<repo>.localhost, from the port's label

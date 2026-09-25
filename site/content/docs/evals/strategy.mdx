@@ -1,0 +1,115 @@
+---
+title: How boxer is evaluated
+description: The layers from unit tests to live agents in parallel worktrees, what each can and cannot prove, and the rules that keep the numbers honest.
+---
+
+boxer's claims are about behaviour: *this harness's commands run in the sandbox*, *this agent finds
+its own worktree's server*, *nothing is left behind*. A unit test can prove boxer does what its
+author meant. It cannot prove a real coding agent, driven by a real model, through a real harness,
+against a real runtime, does what boxer promises. So the evidence is layered, and each layer is
+aimed at what the one below it cannot see.
+
+## The layers
+
+| layer | what it proves | what it cannot | cost |
+| --- | --- | --- | --- |
+| **unit tests**, fake backend | every code path, including every failure | that a runtime behaves like the fake | free, seconds |
+| **real-daemon tests** | docker, podman and Apple `container` argv, JSON and exit codes | anything where the runtime is missing — they skip by name | seconds |
+| **smoke** | every configuration path, on each installed backend | that a harness cooperates | minutes per backend |
+| **t1** | each harness's integration works end to end, with a scripted model | that a real model complies | minutes, free |
+| **t2** | the same, with live models | how often a model complies unprompted | cents |
+| **adherence** | whether an agent told only the brief does the right thing | that development works | cents |
+| **flow**, **sdlc**, **matrix** | a real Next.js workload, at every integration level, in parallel worktrees | — | around $2 |
+| **benchmarks** | what it costs | whether it works — they gate nothing | minutes |
+
+**Smoke** is the layer that catches a divergence between boxer's model of a runtime and the
+runtime. It runs the same cells on smolvm, Apple `container`, docker and podman, and a cell a
+backend cannot support is skipped **by name**, from the capability table boxer itself reports — so
+if `boxer doctor` claims a backend can fork and the fork cell skips, one of them is lying.
+
+**t1** swaps the model for a scripted endpoint that speaks the Anthropic, OpenAI Chat and OpenAI
+Responses APIs, so a harness's hooks, its plugin and boxer run with no key and the same result every
+time. Seventy-one cells: every harness at every level it supports, plus the orchestrators.
+
+**Adherence** is where boxer only *asks* — a brief, a skill, an instruction file — and a live agent
+decides. Each scenario is a prompt that never mentions boxer:
+
+| scenario | the agent is asked to | it passes when |
+| --- | --- | --- |
+| `brief` | run one command | it ran in the guest, with no correction |
+| `recovery` | the same, after being refused once | it ran in the guest after one denial |
+| `multistep` | install dependencies and run the tests | nothing intercepted ran on the host |
+| `task` | run the test suite | it chose the repository's declared task |
+| `prep` | read a file host-side `[prep]` wrote | prep ran once, with the guest's platform |
+| `server` | fetch the running dev server's home page | it returned the page, **reached by its URL** |
+
+**The matrix** runs the same two Next.js tasks — add a page, install a dependency — through every
+integration level, harness and orchestrator, three at a time, each in its own worktree, sandbox and
+automatic port. Each cell scores thirteen weighted claims rather than one verdict; the
+[matrix page](/docs/evals/matrix) has them. With `BOXER_EVAL_URLS=1` every sandbox also gets a
+portless name and the prompt stops giving the agent its address.
+
+## What the oracle looks at
+
+A model's own report of what it did is not evidence. The oracle reads what cannot be faked:
+
+- **A canary.** The command touches a file with a run-specific name. If it exists on the host, the
+  command ran on the host, whatever the agent says.
+- **The guest.** A platform probe written by the work itself, corroborated by a dependency that has
+  to really be in `package.json` and by the level's own signature in boxer's trace.
+- **The trace.** Every hook invocation and its answer, so a command that was allowed silently is
+  distinguishable from one that was rewritten.
+- **The host afterwards.** Sandboxes, routes and scratch left behind are findings.
+- **The Host header.** The `server` scenario's page answers with the host it was reached by, so a
+  URL and a looked-up port are told apart.
+
+## The rules
+
+These exist because every one of them was broken once, and the number it produced was wrong.
+
+- **A skip is named, never silent.** A missing credential, a runtime that is not installed, a
+  harness that cannot do a level — each skips with the reason. A green run has to mean something ran.
+- **Two models before a harness is blamed.** One model failing a cell among passes is that model's
+  adherence. Only when every judged model fails, and at least two were judged, is it the harness.
+- **One variable at a time.** The matrix runs every cell on one model, so the integration level is
+  the only thing that differs. Backends are benchmarked one at a time, alone on the host.
+- **A control for every comparison.** When the matrix scored inside cells lower with URLs on, the
+  inside cells were re-run, alone, alternating the two modes — and the gap mostly did not hold.
+- **Repeat before claiming.** Three samples from a clean host, or the number is labelled a single
+  sample. Three benchmark claims were withdrawn for skipping this.
+- **Prove the cause, not the symptom.** A fix is shown against a build with the old code: the old
+  one fails, the new one passes. A diagnosis that was never tested this way was wrong once, and the
+  written record was corrected rather than left.
+- **Evidence is kept.** A failed cell keeps its repository, transcript and trace; `boxer-eval`
+  removes scratch older than three days, and an interrupted run brings down its own sandboxes.
+- **The harness is held to the same standard.** A test in the suite fails if any benchmark or smoke
+  script allocates a scratch directory without removing it.
+
+## What it has caught
+
+Not hypotheticals — each of these passed the unit tests and shipped until a tier found it:
+
+- **An exit code that depended on whether anyone was watching.** `boxer run -c "exit 4"` reported 1
+  whenever output went to `/dev/null`: boxer took `/dev/null` for a terminal, asked the runtime for
+  one, and the runtime refused before the command ran. Capturing the output to look at it made it
+  pass, which is why it survived weeks as an intermittent `capsule replay` failure.
+- **One retired hostname stopped every inside sandbox from starting.** A host on the harness
+  allowlist stopped resolving, and smolvm refuses the whole machine if one allowlisted host fails.
+- **An agent that did everything right was told the wrong address.** Codex called `boxer_status`
+  exactly as instructed and got a port, because the MCP server it launched had a different state
+  directory from the one that registered the URL.
+- **A reused worktree path skipped setup,** and on docker could see a stale mount — the shape an
+  orchestrator produces every time it reuses a task name.
+- **Codex ran unsandboxed in linked worktrees**, reading project configuration from the main
+  repository — the ordinary case for every orchestrator.
+- **A boxer shim could call boxer.** The smolvm launcher runs `uname`; with a `uname` shim on
+  `PATH`, a boxer working on a sandbox deadlocked calling itself. One such process was found alive
+  five days later.
+
+## Where the results are
+
+[Support, measured](/docs/evals/results) has the latest numbers by level and harness;
+[Benchmarks](/docs/evals/benchmarks) has what it costs. The full reports, with every cell's findings,
+are committed under `docs/` in the repository, and each carries the conditions it was made under —
+boxer and its commit, the backend, the model, the concurrency and the host — because a score
+without them cannot be compared with the one before it.

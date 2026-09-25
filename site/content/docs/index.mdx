@@ -1,14 +1,17 @@
 ---
 title: What boxer is
-description: One microVM per git worktree, so a coding agent's shell commands stop running on your machine.
+description: One sandbox per git worktree, so a coding agent's shell commands stop running on your machine.
 ---
 
 Coding agents run shell commands. `npm install`, `make`, `python script.py`, whatever the model
 decided would help. Those commands run as you, on your machine, with your credentials and your
 filesystem.
 
-boxer puts them in a [smolvm](https://smolmachines.com) microVM instead — one VM per git worktree,
-started on the first command, with the worktree mounted in the guest at `/workspace`.
+boxer puts them in a sandbox instead — one per git worktree, started on the first command, with the
+worktree mounted in the guest at `/workspace`. By default the sandbox is a
+[smolvm](https://smolmachines.com) microVM, with a kernel of its own; Apple's `container`, docker
+and podman are the alternatives, and [choosing between them](/docs/concepts/backends) is a
+question of what you want the boundary to be.
 
 The agent is not told. It types `npm test`, the command runs in the VM, and the output comes back
 looking exactly as it would have — same exit code, same stdout, same stderr, the working directory
@@ -27,9 +30,9 @@ The worktree is mounted read-write, because the agent is there to change it. box
 away from everything else on your machine, not away from the code you asked the agent to work on.
 
 boxer is not a container runtime, and it does not replace your dev environment. It is a shim
-between a coding agent and the commands it wants to run, with a VM behind it. The VMs, their
-images and their snapshots all belong to smolvm; boxer keeps no state of its own beyond a few
-markers.
+between a coding agent and the commands it wants to run, with a sandbox behind it. The machines,
+their images and their snapshots belong to the backend; boxer keeps only small records it can lose,
+and removes them with the sandbox.
 
 It is also not a security boundary against an adversary who knows they are in it. A microVM is a
 real isolation boundary and a good one, but boxer's threat model is *an agent doing something
@@ -46,4 +49,9 @@ your threat model is the other one.
   <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
   <Card title="Build on boxer" href="/docs/guides/building-on-boxer" description="The Go package, the JSON output, and the CLI as an interface." />
   <Card title="Security model" href="/docs/concepts/security" description="What the boundary holds against, and the three ways out that are deliberate." />
+  <Card title="Backends" href="/docs/concepts/backends" description="smolvm, Apple container, docker, podman: what each boundary is, and what each costs." />
+  <Card title="Dev servers and URLs" href="/docs/guides/urls" description="Every worktree's server at a stable name, and agents told where it is." />
+  <Card title="Managing sandboxes" href="/docs/guides/managing" description="See, remove and check everything boxer has on this machine." />
+  <Card title="Examples" href="/docs/guides/examples" description="Working boxer.toml files for Next.js, Python, Go, monorepos and more." />
+  <Card title="How it is evaluated" href="/docs/evals/strategy" description="The tiers, the oracle, and what the numbers mean." />
 </Cards>

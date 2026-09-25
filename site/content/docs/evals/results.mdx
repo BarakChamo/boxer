@@ -1,30 +1,71 @@
 ---
 title: Support, measured
-description: Which harness works at which level, from the last full run.
+description: Which harness works at which level, on which backend, from the latest runs.
 ---
 
 Everything here comes from the matrix tier. Nothing is listed as supported because the code
 exists; it is listed because a cell ran and scored.
 
-Last full run, 2026-09-21: **94.0% of weighted checks**, 47 of 55 cells at 100%, 2 skipped, $1.56,
-every cell on `zai/glm-5.3-flash` so that the integration level is the only variable. The full
-scorecard is `docs/eval-matrix-report.md`.
+Latest runs, 2026-09-25, on the release binary: two full passes of the matrix — 55 cells, three at
+a time, every cell on `zai/glm-5.3-flash` so the integration level is the only variable — one with
+`[urls]` on and the address withheld from the prompt, one without as the control. The full
+scorecards are `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
+
+| | default | URLs mode |
+| --- | --- | --- |
+| weighted checks | **99.4%** | **98.7%** |
+| cells at 100% | 54 of 55 | 50 of 55 |
+| cost | $1.89 | $3.04 |
 
 ## By integration level
 
-| Level | Score | Harnesses |
-| --- | --- | --- |
-| hook rewrite | 100% | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
-| shell substitution | 100% | OpenHands |
-| tool mode | 96.5% | Claude Code, Kimi Code, DSH, Codex, Grok |
-| bash shim | 95.7% | Claude Code, Kimi Code, Codex, Copilot |
-| inside | 93.0% | Claude Code, Codex, OpenCode, Kimi Code, fx |
-| command shims | 91.3% | Claude Code, Kimi Code, Codex, Copilot |
-| orchestrator | 79.7% | T3 Code, Paperclip, herdr |
+| Level | default | URLs mode | Harnesses |
+| --- | --- | --- | --- |
+| hook rewrite | 12/12 | 11/12 | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
+| tool mode | 10/10 | 10/10 | Claude Code, Kimi Code, DSH, Codex, Grok |
+| command shims | 8/8 | 8/8 | Claude Code, Kimi Code, Codex, Copilot |
+| bash shim | 7/8 | 8/8 | the same four, shimming `bash` |
+| shell substitution | 1/1 | 1/1 | OpenHands |
+| inside | 10/10 | 6/10 | Claude Code, Codex, OpenCode, Kimi Code, fx |
+| orchestrator | 6/6 | 6/6 | T3 Code, Paperclip, herdr |
+
+The inside gap did not hold up for four of the five harnesses. Re-run in isolation, alternating the
+modes, twice each: URLs mode 19 of 20, default 20 of 20. The one miss in those re-runs was fx's
+`add-a-page` cell losing its dev server — which fx also did in an earlier run with no URLs involved.
+It is recorded as open rather than explained.
 
 Every level is carried by at least two harnesses, except shell substitution — OpenHands is the only
 harness whose terminal shell is configurable, and a second witness would have to be invented rather
 than found.
+
+## On each backend
+
+The smoke suite, with no model, on the release binary:
+
+| backend | passed | skipped, by capability |
+| --- | ---: | ---: |
+| smolvm | 85 of 85 | 0 |
+| docker | 76 | 9 |
+| podman | 76 | 9 |
+| Apple `container` | 76 | 9 |
+
+The skips are forks, named packs and the egress log, which only smolvm has. The scripted-model
+matrix (t1) passed all 68 runnable cells on two of three runs; the third missed one, a herdr pane
+that inherited the environment of the session running the evaluation, and it did not recur. The
+one skip is Multica, which needs a server configured on the host.
+
+## When boxer only asks
+
+Live, eight harnesses, four models each, with a prompt that never mentions boxer:
+
+| scenario | result | notes |
+| --- | --- | --- |
+| `prep` — host-side setup, reached through the harness | **32 of 32** | every harness, every model; 8 of 8 on docker |
+| `server` — find this worktree's dev server | **25 of 32** | 5 harnesses on all four models; Kimi and Copilot on two of four; Grok on one |
+
+A harness is blamed only when every model fails it. Kimi and Copilot passing on two of four is
+model adherence. Grok never shows boxer's brief to the model, which is a known harness fact rather
+than a boxer defect; its cell is kept failing on purpose so the finding stays visible.
 
 ## Known limits
 
@@ -43,9 +84,10 @@ debugging port to drive, and its CLI drives cloud workspaces where boxer has not
 
 **fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
 and it resolves commands past a PATH shim, so outside the guest there is nothing for boxer to hold
-onto. Inside there is: `add-a-page` scores 100%. `prove-and-install` scores 54% — the agent never
-recorded a platform and never installed the dependency, so nothing in that cell proves the work
-reached the guest. The mechanism is there; the model did not do the task.
+onto. Inside there is, and it passes — but it is the least stable inside harness measured: its
+`add-a-page` cell lost its dev server in two of three runs with `[urls]` on and none of three
+without, and an earlier run without URLs lost its `prove-and-install` server the same way. The
+agent in those runs did not touch the server or the URL variables, so the cause is not established.
 
 ## Reading a run
 

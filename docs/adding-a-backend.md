@@ -5,7 +5,7 @@ This page is the
 contract each of them answers, and it was written before the interface existed, deliberately: the
 interface then fell out of two real implementations rather than one imagined one.
 
-It is still the page to read before adding a fourth. Nothing below changed when docker arrived,
+It is still the page to read before adding a fifth. Nothing below changed when docker arrived,
 which is the strongest thing that can be said for it.
 
 **What the current backends answer.** Every rule below is satisfied by smolvm; the container
@@ -92,18 +92,35 @@ back metadata cannot be swept safely, and `gc` must leave its machines alone.
 that can only return the whole log at the end is usable but is a visible downgrade, and belongs
 behind a documented capability rather than in the default path.
 
-## What the interface would look like
+## What the interface looks like
 
-Nothing here requires one yet. When it lands, it should be the smallest surface that both
-implementations actually need — roughly today's `vm.Client` minus the smolvm-shaped verbs
-(`pack create`, `machine branch`, `machine update`) and plus a capability set, so that
-`boxer doctor` can say "this backend has no staged mounts" instead of failing three commands
-later. Features built on a verb the second backend lacks stay available on the one that has it
-and are refused, by name, on the one that does not.
+It landed after the second implementation, as this page said it should. `vm.Backend` is the nine
+methods every backend must have — `Name`, `Version`, `Status`, `List`, `Create`, `Start`, `Stop`,
+`Delete`, `Exec` — and what only some can do is an optional interface found by type assertion:
+`Packer`, `Brancher`, `EgressReporter`, `DiskReporter`. `vm.CapsOf` derives the capability table
+from which of those a backend implements, plus the facts no method expresses (boundary, allowlist,
+ownership, whether the mount is owned by the host uid), which a backend states with `Declare()`.
+`boxer doctor` and `boxer backends` print that table; a feature a backend lacks is refused by name
+with `vm.Unsupported`.
+
+What a new backend has to get right, learned from the four that exist:
+
+- **Typed errors.** Classify the runtime's own stderr once, in the driver, into `ErrNotFound`,
+  `ErrNotRunning` and the rest. Call sites use `errors.Is`, never a substring.
+- **The runtime's failures are not exit codes.** docker and Apple's `container` exit 1 for "no
+  such container", podman 125, docker 127 for "OCI runtime exec failed". Recognise the message at
+  the head of stderr and return an error; otherwise a command that never ran is recorded as having
+  failed (contract rule 2).
+- **`Start` waits for running.** A daemon that has accepted a start has not necessarily started
+  the process.
+- **Ownership is a label read back.** A runtime with no labels uses the registry in `owned.go`,
+  whose failure mode is leaking, never deleting something boxer did not create.
+- **Run the smoke suite on it.** `BOXER_BACKEND=<name> make smoke`. Every backend so far has had a
+  defect that only the real runtime showed.
 
 ## What does not change
 
 The enforcement layers. Hooks, shims, the substituted shell, MCP and inside mode all sit above
 `boxer run` and know nothing about where the command executes. That is the property worth
-protecting when a second backend arrives: whatever else is negotiable, the agent still cannot opt
+protecting with every backend added: whatever else is negotiable, the agent still cannot opt
 out of the sandbox.

@@ -8,10 +8,23 @@ below, and it is worth reading before you rely on boxer for something it was not
 
 ## What the boundary is
 
-A smolvm microVM whose only mount is the git worktree. A command in the guest cannot read your
-home directory, your SSH keys, your cloud credentials or anything else outside the worktree, and
-the network is an allowlist by default: the registry hosts needed for the image, plus whatever you
-name in `allow_hosts`, and nothing else.
+A sandbox whose only mount is the git worktree. A command in the guest cannot read your home
+directory, your SSH keys, your cloud credentials or anything else outside the worktree. On the
+default backend, smolvm, the network is an allowlist: the registry hosts needed for the image, plus
+whatever you name in `allow_hosts`, and nothing else.
+
+How strong the boundary is depends on the backend, and `boxer doctor` prints which one you have:
+
+| backend | boundary | egress |
+| --- | --- | --- |
+| `smolvm` (default) | a kernel per sandbox | allowlist by default |
+| Apple `container` | a kernel per sandbox | on or off — no allowlist |
+| `docker`, `podman` | **one kernel shared by every sandbox on the machine** | on or off — no allowlist |
+
+A backend that cannot enforce the allowlist **refuses** `network.mode = "allowlist"` rather than
+running with a network boxer said it would deny. A container escape on a shared-kernel backend
+reaches every sandbox on that machine; on a kernel-per-sandbox backend it reaches one guest. If
+containment is why you use boxer, keep the default. See [Backends](/docs/concepts/backends).
 
 That is a real isolation boundary. A postinstall script in a dependency tree runs somewhere with
 nothing worth taking, and a command that decides to reconfigure the machine reconfigures a machine
@@ -89,7 +102,8 @@ into the guest by default.
 
 Both lists are forwarded **by name**, through smolvm's `--secret-env`: boxer passes
 `NPM_TOKEN=NPM_TOKEN`, smolvm reads the value out of its own environment, and the value never
-appears in an argument vector. That matters because argument vectors are world-readable on a
+appears in an argument vector. The container backends have no such flag, so there the values go
+through an `--env-file` only your user can read, deleted as soon as the command returns. That matters because argument vectors are world-readable on a
 normal machine — `ps` shows every other process on the host exactly what you forwarded.
 
 They reach `setup` and `image_setup` as well as ordinary commands, because a build that needs a

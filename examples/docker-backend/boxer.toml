@@ -1,0 +1,22 @@
+# The same project on docker (or podman) instead of a microVM.
+#
+# What you give up, said plainly: every sandbox on the machine shares one kernel, and there is no
+# egress allowlist — boxer's default network mode is refused on a container runtime rather than
+# silently opened. What you get: sandboxes start about 4 s sooner, and on Linux boxer runs
+# without KVM. `boxer backends` compares them; the site's Backends page has the numbers.
+
+backend = "docker"          # or "podman"; BOXER_BACKEND overrides it per command
+
+image = "mirror.gcr.io/library/node:24-alpine"
+setup = ["npm ci --no-audit --no-fund"]
+start = ["npx next dev -p 3000 -H 0.0.0.0"]
+ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+ready_timeout = "240s"
+
+[network]
+# "allowlist" is refused here. Choose one on purpose: "on" to reach npm, "off" for nothing.
+mode = "on"
+ports = ["auto:3000"]
+
+[urls]
+enabled = true

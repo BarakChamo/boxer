@@ -1,0 +1,107 @@
+---
+title: Dev servers and URLs
+description: Every worktree's dev server at a stable name, and every agent told where its own one is.
+---
+
+A dev server inside a sandbox is reached from the host through a forwarded port. Commit a fixed
+host port and the second worktree fails to start on a busy address; use `auto:` and every worktree
+gets its own port — and nobody, person or agent, knows which one without asking.
+
+`[urls]` gives each forwarded port a name instead, through
+[portless](https://github.com/vercel-labs/portless), a small reverse proxy on your machine that
+routes by hostname.
+
+## Turn it on
+
+```sh
+npm install -g portless
+```
+
+```toml
+start = ["cd app && npx next dev -p 3000 -H 0.0.0.0"]
+ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+
+[network]
+mode  = "on"
+ports = ["auto:3000"]
+
+[urls]
+enabled = true
+```
+
+```console
+$ boxer up
+boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
+```
+
+The server must listen on `0.0.0.0` inside the guest. A forwarded port arrives on the guest's
+network interface, so a server bound to `127.0.0.1` never sees it.
+
+## What each worktree is called
+
+| worktree | URL |
+| --- | --- |
+| the main checkout | `https://myapp.localhost:1355` |
+| a linked worktree on branch `fix-ui` | `https://fix-ui.myapp.localhost:1355` |
+| a detached worktree, or one whose name is taken | `https://swift-crab.myapp.localhost:1355` |
+
+`myapp` is the repository's directory name, or `urls.name`. The branch prefix is portless's own
+naming, and boxer asks portless for it rather than reproducing it. The last row is boxer's: portless
+gives a **detached** worktree — which is what most orchestrators create — no prefix at all, so it
+would collide with the main checkout; two branches ending in the same segment (`feat/login`,
+`fix/login`) would collide too. boxer uses the sandbox's own two-word name instead, and never takes
+a name another sandbox or a person already registered.
+
+Several ports are named `<label>.<repo>`, from `urls.names`, a devcontainer's
+`portsAttributes.label`, or the port number:
+
+```toml
+[network]
+ports = ["auto:3000", "auto:8080"]
+
+[urls]
+enabled = true
+names   = { "3000" = "web", "8080" = "api" }   # web.myapp…, api.myapp…
+```
+
+## Where agents learn it
+
+Every path an agent takes into boxer says the same thing:
+
+- the **brief** every harness shows the agent before its first action: run `boxer url`, not
+  `localhost:<port>`;
+- the **skill** and `AGENTS.md`;
+- the **`boxer_status`** MCP tool, which returns each forwarded port's URL;
+- **`boxer url [port]`**, which prints just the address, and `boxer open` for a person;
+- `boxer status --json` and `boxer ls --json`, under `urls`.
+
+A harness running **inside** the sandbox cannot reach the names — the proxy is on the host's
+loopback — so it is told the truth for where it is: its server is at `127.0.0.1:<port>`, and the
+host-side address a person should open is in `$BOXER_URLS`.
+
+Measured: in a live scenario where an agent is told only that a dev server is running and asked to
+fetch its home page, five of the eight harnesses found it by its name on all four models tried.
+Details on the [strategy](/docs/evals/strategy) page.
+
+## Lifecycle
+
+A name is registered when the sandbox starts and removed when it is deleted — by `down`, `rm`,
+`gc` or `down --all`. `gc` also removes a route whose sandbox disappeared some other way. If the
+portless proxy is not running, boxer starts it on port 1355 the next time it runs a command; it
+never uses 443, which needs sudo and would stop a hook to ask for a password.
+
+Without portless installed, boxer says so once and everything else works: ports are still
+forwarded, and `boxer url` prints `http://127.0.0.1:<host port>`.
+
+## Next.js
+
+Next.js 15 serves the page, its chunks and hot reload through the name, and logs a warning that a
+future version will refuse cross-origin dev requests. One setting covers every worktree's name:
+
+```ts
+// next.config.ts
+const nextConfig = { allowedDevOrigins: ["*.localhost"] };
+export default nextConfig;
+```
+
+A complete setup is in [Examples](/docs/guides/examples).

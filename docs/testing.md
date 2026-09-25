@@ -8,7 +8,8 @@ layer exists because the one below it cannot see something.
 | Layer | What it can prove | What it cannot | Cost |
 | --- | --- | --- | --- |
 | Unit tests, fake smolvm | every code path, including failures | that smolvm behaves as the fake does | free, seconds |
-| `make smoke` | every configuration path against a real microVM | that a harness cooperates | minutes |
+| Real-daemon tests in `internal/vm` | docker, podman and Apple `container` argv, JSON and exit codes | anything on a machine without the runtime (they skip by name) | seconds |
+| `make smoke` | every configuration path against a real sandbox, on each installed backend | that a harness cooperates | minutes per backend |
 | `make eval-t1` | each integration works, scripted model | that a real model complies | minutes |
 | `make eval-t2` | the same with live models | how often a model complies unprompted | cents |
 | `make eval-adherence` | compliance when boxer only asks | that development works end to end | cents |
@@ -71,21 +72,48 @@ and the same result every time. This is what makes `t1` deterministic and free.
 `internal/eval` is the exception and says so in the file: it is the evaluation harness itself,
 proven by running the tiers rather than by unit coverage.
 
-### The core-purity test
+### The core-purity tests
 
 `TestCoreNamesNoHarness` parses `internal/{box,vm,scope,config,decide,shim}` and fails if a
 harness name appears in an identifier or a string literal. It is how "the core knows nothing about
 any harness" stays true rather than remaining an intention. See
 [adding-a-harness.md](adding-a-harness.md).
 
+`TestCoreDoesNotImportCLI` does the same for presentation: nothing under `internal/` or `pkg/`
+except `internal/cli` may import it, so the core — which is also a library — never decides whether
+to print colour.
+
+### Hermetic by construction
+
+A unit test must not reach a real runtime, a real proxy or the source tree. Three ways that went
+wrong, each now guarded:
+
+- **A test that listed every backend deleted another test's container.** `rm --all` once implied
+  every backend, and a unit test's `rm --all` reached the real docker daemon. `--all` is now the
+  configured backend only, and tests that exercise listing name the fake backend explicitly.
+- **The fake runs guest commands in the process's own directory**, which during `go test` is the
+  package source. A probe's write once landed as `cmd/boxer/probe.txt`. A test whose command
+  writes a file changes into a temporary directory first.
+- **Every harness removes its scratch.** `TestEveryHarnessRemovesItsScratchDirectory` reads the
+  benchmark and smoke scripts and fails if one allocates a temporary directory without removing
+  it, or allocates before re-executing under the host lock, which orphaned two per run.
+
+External programs a test needs — portless, `npx`, `gh`, podman — are small scripts put first on
+`PATH` that record their arguments (`fakePortless` in `internal/box`, `fakeBin` in `cmd/boxer`).
+
 ## Smoke
 
 ```sh
-make smoke     # real smolvm, no model
+make smoke                          # real smolvm, no model
+BOXER_BACKEND=docker make smoke     # the same cells on another backend
 ```
 
-Every configuration path against a real microVM: provision, setup, pack, run, ports, network
-modes, reclaim, test-result summaries, capsule replay, named packs and forking. It needs smolvm
+Every configuration path against a real sandbox: provision, setup, pack, run, ports, network
+modes, reclaim, test-result summaries, capsule replay, named packs, forking, devcontainer
+variables and users, three worktrees at three portless URLs, a worktree recreated at the same
+path, host-state cleanup, and the management commands. A cell a backend cannot support is skipped
+**by name**, from the capability table `boxer doctor --json` reports, so the output doubles as a
+test of that table. It needs smolvm
 installed and is serialised by a host lock, because several suites on one machine contend for the
 same hypervisor.
 
