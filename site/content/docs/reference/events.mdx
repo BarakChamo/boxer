@@ -1,10 +1,10 @@
 ---
 title: Events
-description: What boxer records, when you ask it to.
+description: The JSON event stream boxer writes when telemetry is on, its schema, and how to read it.
 ---
 
-boxer records what it did as a stream of JSON events. The stream is **off by default**: with no
-`[telemetry]` table and no `BOXER_TRACE`, boxer writes nothing anywhere.
+boxer can record what it did as a stream of JSON events. The stream is off by default: with no
+`[telemetry]` table and no `BOXER_TRACE`, boxer writes no events.
 
 ```toml
 [telemetry]
@@ -15,8 +15,9 @@ record_commands = false     # command lines stay out of the stream unless this i
 endpoint = ""               # otel only; without it nothing leaves the machine
 ```
 
-`BOXER_TRACE=<path>` turns the file sink on at that path regardless of configuration. That is what
-the hooks and the evaluation harness use, and it is the fastest way to see what boxer is deciding.
+`BOXER_TRACE=<path>` turns the file sink on at that path regardless of configuration. The
+evaluation harness uses it, and it is the quickest way to see what boxer is deciding. `enabled =
+true` with no `sink` uses the file sink.
 
 ## Shape
 
@@ -45,16 +46,14 @@ the hooks and the evaluation harness use, and it is the fastest way to see what 
 | `gc` | a sweep ran |
 | `error` | something failed outside the other names |
 
-`outcome` is `ok`, `error`, `denied` or `skipped`. `payload` carries what that event needs and
-nothing more.
+`outcome` is `ok`, `error`, `denied` or `skipped`. `payload` holds event-specific fields.
 
-`duration_ms` is omitted when zero, as are `scope`, `harness`, `outcome` and `payload`. Treat a
-missing field as absent rather than as a default, and ignore a name you do not recognise: names
-are added, never repurposed.
+`duration_ms`, `scope`, `harness`, `outcome` and `payload` are omitted when empty. Treat a missing
+field as absent, not as a default, and ignore event names you do not recognise: names are added,
+never repurposed.
 
-Command lines are omitted unless `record_commands = true`, because an event log that captures every
-command an agent runs is a different thing to store than one that captures what boxer did with
-them.
+Command lines are omitted unless `record_commands = true`. The separate last-run record is covered
+in the [security model](/docs/concepts/security#what-boxer-records).
 
 ## Reading it back
 

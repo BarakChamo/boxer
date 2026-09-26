@@ -3,6 +3,8 @@ package boxer
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,5 +57,19 @@ func TestOpenOutsideRepositoryIsError(t *testing.T) {
 	var be *Error
 	if !errors.As(err, &be) || be.Cause != "NO_REPOSITORY" {
 		t.Fatalf("want *Error NO_REPOSITORY, got %v", err)
+	}
+}
+
+// The host-wide functions look at the backend boxer.toml names, as the CLI does; they once always
+// looked at smolvm, so a docker-configured caller listed nothing and stopped nothing.
+func TestHostWideFunctionsUseConfiguredBackend(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("backend = \"docker\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if got := host().Name(); got != "docker" {
+		t.Fatalf("host backend = %q, want docker", got)
 	}
 }

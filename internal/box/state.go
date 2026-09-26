@@ -1,6 +1,7 @@
 package box
 
 import (
+	"github.com/BarakChamo/boxer/internal/scope"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,4 +118,15 @@ func removeUnheldLock(path string) bool {
 		return false
 	}
 	return os.Remove(path) == nil
+}
+
+// HostBackend is the backend a host-wide command (ls, gc, stop, rm) should look at from cwd: the
+// one this checkout's configuration names, or "" for BOXER_BACKEND and then the default. A
+// checkout that does not resolve still yields its configured backend when it has one.
+func HostBackend(cwd string) string {
+	e, err := Resolve(cwd, "", scope.Identity{})
+	if e == nil || err != nil && e.Cfg.Backend == "" {
+		return ""
+	}
+	return e.Cfg.Backend
 }

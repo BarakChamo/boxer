@@ -1,44 +1,36 @@
 ---
 title: What boxer is
-description: One sandbox per git worktree, so a coding agent's shell commands stop running on your machine.
+description: One sandbox per git worktree, so a coding agent's shell commands run there instead of on your machine.
 ---
 
-Coding agents run shell commands. `npm install`, `make`, `python script.py`, whatever the model
-decided would help. Those commands run as you, on your machine, with your credentials and your
-filesystem.
+Coding agents run shell commands — `npm install`, `make`, `python script.py` — as you, on your
+machine, with your credentials and filesystem.
 
-boxer puts them in a sandbox instead — one per git worktree, started on the first command, with the
-worktree mounted in the guest at `/workspace`. By default the sandbox is a
-[smolvm](https://smolmachines.com) microVM, with a kernel of its own; Apple's `container`, docker
-and podman are the alternatives, and [choosing between them](/docs/concepts/backends) is a
-question of what you want the boundary to be.
+boxer runs them in a sandbox instead: one per git worktree, created on the first command, with the
+worktree mounted at `/workspace`. The default sandbox is a [smolvm](https://smolmachines.com)
+microVM with its own kernel; Apple `container`, docker and podman are
+[alternatives](/docs/concepts/backends) with different isolation and cost.
 
-The agent is not told. It types `npm test`, the command runs in the VM, and the output comes back
-looking exactly as it would have — same exit code, same stdout, same stderr, the working directory
-mapped to the matching place under the mount.
+The agent does not need to know. It runs `npm test`; the command runs in the sandbox, from the
+matching directory under the mount, and returns the same exit code, stdout and stderr.
 
 ```console
 $ boxer run -c 'uname -a'
 Linux sb-7f2a91 6.12.95 #1 SMP aarch64 Linux
 ```
 
-That ran on Linux. The host is a Mac.
+(The host here is a Mac.)
 
 ## What it is not
 
-The worktree is mounted read-write, because the agent is there to change it. boxer keeps commands
-away from everything else on your machine, not away from the code you asked the agent to work on.
-
-boxer is not a container runtime, and it does not replace your dev environment. It is a shim
-between a coding agent and the commands it wants to run, with a sandbox behind it. The machines,
-their images and their snapshots belong to the backend; boxer keeps only small records it can lose,
-and removes them with the sandbox.
-
-It is also not a security boundary against an adversary who knows they are in it. A microVM is a
-real isolation boundary and a good one, but boxer's threat model is *an agent doing something
-destructive or careless*, not *an attacker deliberately breaking out*. The
-[security model](/docs/concepts/security) says exactly where that line falls, and what to do if
-your threat model is the other one.
+- **Not a guard for your code.** The worktree is mounted read-write, because the agent is there to
+  change it. boxer protects everything else on the machine.
+- **Not a container runtime or dev environment.** It sits between the agent and its commands. The
+  machines, images and snapshots belong to the backend; boxer keeps only small records, removed with
+  the sandbox.
+- **Not a defence against a deliberate attacker.** The threat model is an agent being careless or
+  destructive, not one trying to escape. [Security model](/docs/concepts/security) says where the
+  line is.
 
 ## Where to start
 
@@ -46,12 +38,12 @@ your threat model is the other one.
   <Card title="Install" href="/docs/start/install" description="The binary, smolvm, and a first sandboxed command." />
   <Card title="Connect your harness" href="/docs/start/harnesses" description="Claude Code, Codex, Copilot, Kimi, OpenCode and the rest." />
   <Card title="How it works" href="/docs/guides/how-it-works" description="Scopes, integration levels, and what happens on the first command." />
-  <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
-  <Card title="Build on boxer" href="/docs/guides/building-on-boxer" description="The Go package, the JSON output, and the CLI as an interface." />
-  <Card title="Security model" href="/docs/concepts/security" description="What the boundary holds against, and the three ways out that are deliberate." />
-  <Card title="Backends" href="/docs/concepts/backends" description="smolvm, Apple container, docker, podman: what each boundary is, and what each costs." />
-  <Card title="Dev servers and URLs" href="/docs/guides/urls" description="Every worktree's server at a stable name, and agents told where it is." />
-  <Card title="Managing sandboxes" href="/docs/guides/managing" description="See, remove and check everything boxer has on this machine." />
   <Card title="Examples" href="/docs/guides/examples" description="Working boxer.toml files for Next.js, Python, Go, monorepos and more." />
-  <Card title="How it is evaluated" href="/docs/evals/strategy" description="The tiers, the oracle, and what the numbers mean." />
+  <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
+  <Card title="Backends" href="/docs/concepts/backends" description="smolvm, Apple container, docker, podman: what each isolates and costs." />
+  <Card title="Dev servers and URLs" href="/docs/guides/urls" description="A stable URL for each worktree's server, passed to agents." />
+  <Card title="Managing sandboxes" href="/docs/guides/managing" description="List, remove and check what boxer has on this machine." />
+  <Card title="Security model" href="/docs/concepts/security" description="What the boundary holds, and the deliberate ways out." />
+  <Card title="Build on boxer" href="/docs/guides/building-on-boxer" description="The Go package, JSON output, and the CLI as an interface." />
+  <Card title="How it is evaluated" href="/docs/evals/strategy" description="The test tiers, the oracle, and what the numbers mean." />
 </Cards>

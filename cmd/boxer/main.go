@@ -67,8 +67,7 @@ Run and configure
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all|--scope NAME]  delete this scope's sandbox, every one, or one by name
   boxer status                     this scope's sandbox; exit 0 running, 3 stopped, 4 absent
-  boxer ls                         list boxer sandboxes
-  boxer gc [--dry-run]             delete sandboxes whose worktree is gone, idle sandboxes and packs
+  boxer gc [--all] [--dry-run]     delete sandboxes whose worktree is gone, idle sandboxes and packs
   boxer doctor                     explain the resolved configuration and state
   boxer brief [--json]             the agent brief for this checkout: mount, mode, intercept, tasks
   boxer tasks [--json]             the command lines this repository declares in [tasks]
@@ -477,11 +476,7 @@ func hostBackend() string {
 	if err != nil {
 		return ""
 	}
-	e, err := box.Resolve(cwd, "", scope.Identity{})
-	if e == nil || err != nil && e.Cfg.Backend == "" {
-		return ""
-	}
-	return e.Cfg.Backend
+	return box.HostBackend(cwd)
 }
 
 func dataDir(client vm.Backend, name string) (string, error) {
@@ -672,10 +667,10 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// For sandboxes, --all turns the idle rule off rather than making everything idle: a running
+	// sandbox is in use, and only a stopped one is taken below. Packs are aged separately.
 	var idle time.Duration
-	if *all {
-		idle = time.Nanosecond // everything is old enough
-	} else if cfg.IdleTimeout != "" && cfg.IdleTimeout != "never" {
+	if !*all && cfg.IdleTimeout != "" && cfg.IdleTimeout != "never" {
 		if idle, err = time.ParseDuration(cfg.IdleTimeout); err != nil {
 			fmt.Fprintf(stderr, "idle_timeout = %q: %v\n", cfg.IdleTimeout, err)
 			return 1
@@ -743,11 +738,12 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	if *all {
 		reason = "pack unreferenced (--all)"
 	}
-	keepLast := cfg.PacksKeepLast
+	keepLast, packAge := cfg.PacksKeepLast, idle
 	if *all {
 		keepLast = 1 // --all means the cache goes, not that it is trimmed
+		packAge = time.Nanosecond
 	}
-	for _, p := range box.StalePacks(ms, idle, keepLast) {
+	for _, p := range box.StalePacks(ms, packAge, keepLast) {
 		size := int64(0)
 		if st, err := os.Stat(p); err == nil {
 			size = st.Size()

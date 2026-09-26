@@ -1,11 +1,10 @@
 ---
 title: Managing sandboxes
-description: See everything boxer has on this machine, remove what you do not need, and check that backends and integrations work.
+description: List every sandbox on the machine, remove the ones you do not need, and check that backends and integrations work.
 ---
 
-Agents and orchestrators create sandboxes faster than anyone thinks about them. These commands are
-for the other half: what is running, what it belongs to, what is safe to remove, and whether the
-pieces boxer depends on are actually working.
+These commands show what is running and which worktree it belongs to, remove what is safe to
+remove, and check that the backends and integrations boxer depends on work.
 
 ## What is here
 
@@ -17,16 +16,17 @@ olive-fern    sb-2b107321041f  running  docker   main              gone      cod
 → boxer rm --gone  1 sandbox serves a worktree that no longer exists
 ```
 
-- **`-A`** looks on every installed backend rather than only the configured one.
-- **`BRANCH`** is the worktree's branch and its distance from upstream; **`--pr`** adds its pull
-  request through `gh` (a network call per worktree, so it is opt-in).
-- **`GIT`** is `clean`, `dirty(n)`, or `gone` — the worktree was deleted and the sandbox is waiting
-  to be reclaimed.
-- **`ATTACHED`** is the harness and session that created it, when they said.
-- **`SERVES`** is its URL, or its forwarded port.
-- **`--resources`** adds memory and disk.
+- `-A` looks on every installed backend, not only the configured one.
+- `SCOPE` is the sandbox's key; see [scopes](/docs/concepts/scopes-and-packs).
+- `BRANCH` is the worktree's branch and its distance from upstream. `--pr` adds its pull request
+  through `gh` (a network call per worktree, so it is opt-in).
+- `GIT` is `clean`, `dirty(n)`, or `gone`: the worktree was deleted and the sandbox is waiting to
+  be reclaimed.
+- `ATTACHED` is the harness and session that created it, if they reported one.
+- `SERVES` is its [URL](/docs/guides/urls), or its forwarded port.
+- `--resources` adds memory, CPU and disk.
 
-`boxer status` is the same for this worktree alone; `boxer url` prints just where its server is.
+`boxer status` is the same for this worktree alone; `boxer url` prints only its address.
 
 ## Removing
 
@@ -39,9 +39,10 @@ boxer rm -i                     # choose from a list
 boxer stop swift-crab           # stop without removing
 ```
 
-`rm` takes everything boxer kept about a sandbox with it — its run record, its lock, its URL. A
-person is asked before a filter removes anything; a sandbox named on the command line was already
-the answer. `gc` does the reclaiming automatically in the background, at most every six hours.
+`rm` also removes everything boxer kept about the sandbox: its run record, its lock, its URL. A
+filter (`--gone`, `--stopped`, `--all`) asks before removing anything; `-y` skips the question. A
+sandbox named on the command line is removed without asking. `gc` reclaims in the background, at
+most every six hours by default.
 
 ## Is the backend working
 
@@ -54,13 +55,12 @@ podman     ready   5.8.7    namespace  no         0          ok 0.5s
 container  ready   1.4.1    kernel     no         0          ok 1.0s
 ```
 
-That is a real run on an Apple Silicon Mac with every image already cached; a first probe also
-pulls one.
+This run is from an Apple Silicon Mac with every image cached; a first probe also pulls one.
 
-`*` marks the configured backend. Without `--probe` this only asks each runtime whether it answers;
-with it, boxer creates a sandbox on each, runs a command, checks the write reached the host, and
-removes it — the only check that proves a runtime can run anything. Misconfigurations found on real
-machines are named under the table; see [Backends](/docs/concepts/backends#problems-found-on-real-machines).
+`*` marks the configured backend. Without `--probe`, boxer only asks each runtime whether it
+answers. With it, boxer creates a sandbox on each, runs a command, checks the write reached the
+host, and removes it. Known misconfigurations are named under the table; see
+[Backends](/docs/concepts/backends#known-runtime-problems).
 
 ## Are the integrations wired
 
@@ -76,10 +76,10 @@ portless     tool          yes      -          -     -
 → boxer integrations add <name>  on PATH and not wired to boxer: copilot
 ```
 
-For each harness: whether its program is here, whether boxer's hooks, skill and MCP entry are
-installed in this repository and for your user, and whether the installed files came from another
-boxer release (`stale`). "Installed" is decided by asking boxer's own installer which files it
-would write, so this and `boxer install` cannot disagree.
+For each integration: whether its program is on `PATH`, whether boxer's hooks, skill and MCP
+entry are installed in this repository and for your user, and whether the installed files came
+from another boxer release (`stale`). The check asks `boxer install` which files it would write,
+so the two always agree.
 
 ```sh
 boxer integrations add claude-code            # the same as boxer install claude-code
@@ -89,11 +89,13 @@ boxer integrations add plugin                 # through npx plugins add BarakCha
 
 ## For people, for agents, for programs
 
-Every one of these commands adapts to who is reading. At a terminal with no agent in the
-environment: colour, aligned tables, a `→` hint about what to run next, and a question before
-anything destructive. For an agent or a pipe: plain text, a `next:` line with the exact command,
-and never a prompt — a command that would have asked a person instead refuses and says what to
-pass. For a program: `--json`.
+These commands adapt to who is reading:
+
+- a person at a terminal: colour, aligned tables, a `→` hint about what to run next, and a
+  question before anything destructive;
+- an agent or a pipe: plain text, a `next:` line with the exact command, and no prompts. A
+  command that would have asked instead refuses and says what flag to pass;
+- a program: `--json`.
 
 | | |
 | --- | --- |
@@ -103,9 +105,9 @@ pass. For a program: `--json`.
 | `BOXER_AGENT=1` | mark an agent whose shell runs on a terminal |
 | `NO_COLOR` | no colour, even for a person |
 
-Claude Code is recognised by the `CLAUDECODE` variable it sets; anything else an agent runs has no
-terminal, and that alone is enough. The table layout is not a contract — parse `--json`, never a
-table. The shapes are in the [JSON reference](/docs/reference/json).
+Claude Code is recognised by the `CLAUDECODE` variable it sets; other agents run commands without
+a terminal, which is enough. The table layout is not a contract: parse `--json`. The shapes are in
+the [JSON reference](/docs/reference/json).
 
 ```sh
 boxer completion zsh > "${fpath[1]}/_boxer"    # or bash, fish

@@ -1,24 +1,23 @@
 ---
 title: The matrix tier
-description: The same workload at every integration level, scored claim by claim.
+description: The same Next.js workload at every integration level and harness, scored on thirteen weighted claims.
 ---
 
-The `sdlc` tier proves development works in a boxer sandbox — for one configuration. The `matrix`
-tier varies the configuration instead of the task: the same Next.js workload across every
-integration level, harness and orchestrator, each cell in its own worktree with its own sandbox and
-its own automatic host port.
+The `matrix` tier runs the same Next.js workload across every integration level, harness and
+orchestrator. Each combination is a cell, and each cell gets its own worktree, sandbox and automatic
+host port. Where `sdlc` varies the task on one configuration, the matrix varies the configuration
+on one task.
 
 ## The two tasks
 
-- **`add-a-page`** — write a route that renders a marker and verify it. Every configuration can do
-  this, so a difference between cells is a difference in the level rather than in the task.
-- **`prove-and-install`** — install a dependency, then record what `uname -s` says. This is the one
-  that catches a level which quietly ran on the host.
+- **`add-a-page`**: write a route that renders a marker and verify it. Every configuration can do
+  this, so a difference between cells is a difference in the level.
+- **`prove-and-install`**: install a dependency, then record what `uname -s` says. This catches a
+  level that ran the command on the host.
 
 ## Scoring
 
-A cell is not one question, so it is not one verdict. Each cell scores thirteen claims
-independently, weighted by what they are worth:
+Each cell scores thirteen claims independently, weighted:
 
 | Weight | Claims |
 | --- | --- |
@@ -26,22 +25,20 @@ independently, weighted by what they are worth:
 | 2 | the page renders · the change is in the worktree · the dependency is installed · the agent converged · the server was not replaced |
 | 1 | the sandbox came up · a host port was forwarded · the dev server answered first · the agent finished · the sandbox was left clean |
 
-Claims are declared before the cell runs, so a cell that dies early reports which claims went
-*unanswered* rather than quietly shortening its own denominator. A provider that refuses a turn is
-a skip, not a shortfall.
+Claims are declared before the cell runs, so a cell that dies early reports the unanswered claims
+as failures instead of shrinking its denominator. A provider that refuses a turn makes the cell a
+skip.
 
 ## What the evidence is worth
 
-The file the agent writes to record the platform proves nothing on its own — a model that skips the
-work can type `Linux` into a file as easily as run the command. It is corroborated twice: the
-dependency has to really be in `package.json`, and the level's own signature has to show boxer
-carrying a command. An earlier version of this tier trusted the file, and an agent that had
-installed nothing passed.
+The platform file the agent writes is not trusted alone, since a model can write `Linux` without
+running anything. Two checks corroborate it: the dependency must be in `package.json`, and boxer's
+trace must show the level's own signature carrying a command.
 
-Two levels need their evidence read differently, and the report names which mechanism it found. The
-OpenCode plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher builds a
-clean environment for the harness it starts, so boxer's trace variable never reaches it however well
-the interception worked — for those the worktree the orchestrator cut is the evidence.
+Two levels leave different evidence, and the report names which mechanism it found. The OpenCode
+plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher gives the harness
+a clean environment, so boxer's trace variable never reaches it; there, the worktree the
+orchestrator created is the evidence.
 
 ## Running it
 
@@ -52,13 +49,12 @@ bin/boxer-eval --tier matrix --list                        # what would run; run
 BOXER_EVAL_URLS=1 bin/boxer-eval --tier matrix             # every sandbox named, no address in the prompt
 ```
 
-`BOXER_EVAL_URLS=1` gives every sandbox a portless name and stops telling the agent where its dev
-server is, at every outside level, so each agent — several at once in sibling worktrees — has to
-find its own from the brief. The oracle still reads the page through the host port boxer allocated,
-so an agent that found another worktree's server fails the render check. An interrupted run brings
-down its own sandboxes and removes its scratch.
+`BOXER_EVAL_URLS=1` gives every sandbox a [portless name](/docs/guides/urls) and, at every outside
+level, stops telling the agent where its dev server is, so each agent has to find its own from the
+brief while sibling worktrees run theirs. The oracle still reads the page through the host port
+boxer allocated, so an agent that used another worktree's server fails the render check. An
+interrupted run brings down its own sandboxes and removes its scratch.
 
 Every run is archived under `docs/evals/matrix/`: the full scorecard, an index rebuilt from the
-data, and a JSON line per run. Each report opens with the conditions it was made under — boxer and
-its commit, smolvm, the model, the image, the concurrency and the host — because a score without
-them cannot be compared with the run before it.
+data, and a JSON line per run. Each report opens with its conditions: boxer and its commit, smolvm,
+the model, the image, the concurrency and the host.

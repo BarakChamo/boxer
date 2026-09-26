@@ -1,22 +1,23 @@
 ---
 title: Scopes and packs
-description: What a sandbox is keyed to, and what makes the second command fast.
+description: How boxer decides which sandbox a command runs in, and how it caches built environments.
 ---
 
-Two mechanisms carry most of boxer's behaviour. A **scope** decides which VM a command belongs to.
-A **pack** decides whether that VM has to be built. Almost every surprising thing boxer does — a
-sandbox that appeared, a sandbox that did not, a setup step that ran again — is one of these two.
+A **scope** is the identity of one sandbox: it decides which sandbox a command runs in. A **pack**
+is a cached snapshot of a built environment: it decides whether a new sandbox has to be built. An
+unexpected new sandbox, a missing one, or a setup step that ran again is usually one of these two.
 
 ## Scope
 
-A scope is a name derived from where you are and who is asking.
+A scope is a name derived from the working directory and, for finer isolation, the agent's session
+or subagent id.
 
 ```
 sb-7e1852e4a3c3
 ```
 
-Twelve hex characters of a SHA-256, and also the VM's name in smolvm. What goes into the hash is
-decided by `isolation`:
+`sb-` plus twelve hex characters of a SHA-256. It is also the sandbox's name on the backend. What
+goes into the hash is set by `isolation`:
 
 | `isolation` | Hashed | One VM per |
 | --- | --- | --- |
@@ -25,37 +26,34 @@ decided by `isolation`:
 | `session` | the worktree root and the session id | agent session |
 | `subagent` | the worktree root, the session id and the agent id | subagent |
 
-The worktree is the default because it is the unit agents already work in. Orchestrators cut one
-per task; `git worktree add` is how a person opens a second line of work. Keying to it means
-parallel agents get separate machines without anyone arranging it, and it means a sandbox's
-lifetime is bounded by something that already gets cleaned up.
+`worktree` is the default because orchestrators already create one worktree per task. Parallel
+agents get separate sandboxes with no extra setup, and a sandbox's lifetime follows a worktree's.
 
 ### Degradation
 
-`session` and `subagent` need an id the harness supplies. Not every harness does, and the same
-configuration is read by several.
+`session` and `subagent` need an id the harness supplies. Not every harness supplies one, and one
+configuration may be read by several harnesses.
 
 ```toml
 isolation     = "session"
 on_missing_id = "degrade"    # degrade | fail
 ```
 
-`degrade` falls back one step — subagent to session, session to worktree — and says so. `fail`
-refuses. The choice is whether a missing id should quietly sandbox at a coarser granularity or
-stop, and boxer will not decide that for you.
+`degrade` falls back one step (subagent to session, session to worktree) and prints a warning.
+`fail` refuses to run.
 
 ### Placement is part of the key
 
-Running the harness inside the guest and running it outside produce two different scopes for the
-same worktree. They are genuinely different machines — one carries the harness, the other does not
-— so they do not share one.
+Running the harness inside the guest ([inside mode](/docs/guides/inside)) and outside it produce
+two different scopes for the same worktree, because one sandbox carries the harness and the other
+does not.
 
 ## Packs
 
-A pack is a snapshot of a guest after its image setup has run, taken with `smolvm pack create`.
-The next VM that wants the same environment starts from the snapshot instead of building it.
-
-This is the difference between twenty seconds and one.
+A pack is a snapshot of a guest after `image_setup` has run, taken with `smolvm pack create`. The
+next sandbox with the same environment starts from the snapshot instead of rebuilding it. Packs
+exist on smolvm only; on other [backends](/docs/concepts/backends) `image_setup` runs once per
+sandbox.
 
 ### The key
 
@@ -66,15 +64,13 @@ A pack is keyed on the image plus a hash of everything that shaped it:
 - `mounts` — what else is attached
 - `start` and `ready` — what a VM from this pack is expected to be running
 
-Change any of them and the key changes, so the next VM builds a fresh pack rather than inheriting
-one that no longer matches its configuration.
+Change any of them and the next sandbox builds a fresh pack.
 
-`setup` is deliberately **not** in the key. It prepares the worktree, which no pack carries.
+`setup` is not in the key. It prepares the worktree, which no pack carries.
 
-### Why the two setup lists exist
+### `image_setup` versus `setup`
 
-This is the same distinction from the other side, and it is the configuration mistake people make
-most.
+Putting a command in the wrong list is the most common configuration mistake.
 
 ```toml
 image_setup = ["apt-get install -y libpq-dev"]   # changes the image → packed
@@ -82,22 +78,22 @@ setup       = ["npm ci"]                          # changes the worktree → not
 ```
 
 A pack carries the guest's filesystem. The worktree is mounted from the host, so it is not in the
-snapshot. Put `npm install` in `image_setup` and the second worktree starts from a pack carrying a
-marker that says the install is done, with no `node_modules` in the worktree to show for it.
-Dependency installs belong in `setup`.
+snapshot. Put `npm install` in `image_setup` and the second worktree starts from a pack that marks
+the install done, with no `node_modules` in its worktree. Dependency installs belong in `setup`.
+[Environment](/docs/guides/environment#dependencies) covers both lists and `[prep]`.
 
 ### Cache management
 
 Packs are hundreds of megabytes each, and an environment that changes often leaves one per
-version.
+version. Two settings bound the cache:
 
 ```toml
 packs_keep_last = 5      # bound by count, not only by age
-min_free_gb     = 5      # below this, skip packing and pull instead
+min_free_gb     = 5      # below this much free disk, skip packing
 ```
 
-`min_free_gb` is a margin boxer refuses to spend on its own cache. A full disk breaks every VM on
-the host, not only boxer's, so below the margin it takes the slow path instead of the space.
+Below `min_free_gb`, boxer does not write a pack and says so; the next worktree runs its setup
+again.
 
 ```sh
 boxer up --rebuild     # drop this environment's pack and build it again
@@ -105,12 +101,12 @@ boxer gc               # unreferenced packs and idle sandboxes
 boxer doctor           # what boxer currently costs on disk
 ```
 
-`--rebuild` is for when something outside the key moved — a mutable base image tag, a dependency
-resolved at install time. The key cannot see those, so you tell it.
+Use `--rebuild` when something outside the key changed, such as a mutable base image tag or a
+dependency resolved at install time.
 
 ### Packs you name
 
-The packs above are a cache boxer manages. A pack you name is an artifact you manage:
+The packs above are a cache boxer manages. A named pack is one you manage:
 
 ```sh
 boxer pack save base     # snapshot this sandbox as it stands
@@ -119,20 +115,15 @@ boxer pack use base      # recreate this scope's sandbox from it
 boxer pack rm base
 ```
 
-Use one for a prepared guest that took real time to build — a toolchain assembled by hand, a
-state worth returning to before a risky upgrade, a base several worktrees should start from.
+Use one for a guest that took real time to prepare: a toolchain assembled by hand, a state to
+return to before a risky upgrade, or a base several worktrees should start from.
 
-`gc` never touches a named pack. That is the whole point of the separation: the automatic cache
-is swept by age and by count, and a pack someone named is a pack someone meant to keep.
+`gc` never touches a named pack. The automatic cache is swept by age and count.
 
 <Callout>
-A named pack is a **filesystem** snapshot. It carries what is installed, not what is running.
-
-smolvm can write a real checkpoint — a portable `.smolcheckpoint` including RAM and live
-processes — but it refuses on any machine that holds a host mount, and boxer always mounts the
-worktree. Resume-from-RAM is therefore out of reach for a boxer sandbox by construction. The
-nearest thing boxer has to a live snapshot is a [fork](/docs/guides/forking), which is
-copy-on-write and host-local rather than portable.
+A named pack is a filesystem snapshot: what is installed, not what is running. smolvm cannot
+checkpoint RAM on a machine with a host mount, and boxer always mounts the worktree. The nearest
+live snapshot is a [fork](/docs/guides/forking).
 </Callout>
 
 ## Reading the current state
@@ -143,21 +134,19 @@ boxer ls         # every sandbox, with the worktree each is keyed to
 boxer doctor     # the resolved scope, and why it is that one
 ```
 
-`doctor` is the one to reach for when a sandbox is not the one you expected. It prints the
-isolation in force, the scope it resolved, and whether that resolution degraded.
+When a sandbox is not the one you expected, run `boxer doctor`. It prints the isolation in force,
+the resolved scope, and whether resolution degraded.
 
 ### Names
 
-A scope key is a hash because it has to be a legal machine name whatever the worktree path
-contains. It is also unreadable, and it is read constantly, so boxer derives two words from the
-same hash and prints them beside it:
+A scope key is a hash so that it is a legal machine name whatever the worktree path contains. For
+readability, boxer also derives two words from the same hash and prints them beside it:
 
 ```console
 NAME               SCOPE            STATE     ISOLATION  WORKTREE
 swift-crab         sb-7e1852e4a3c3  running   worktree   /Users/me/src/demo
 ```
 
-The name is a function of the key alone: nothing stores it, two boxers agree without
-coordinating, and the same worktree always gets the same pair of words. It is a label rather than
-an identifier — collisions are possible and harmless, because the key is always printed beside it
-— and `--scope` accepts either form.
+The name is computed from the key and never stored, so the same worktree always gets the same
+words. Two keys can share a name; the key is always printed beside it. `--scope` accepts either
+form.

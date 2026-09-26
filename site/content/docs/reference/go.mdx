@@ -1,24 +1,22 @@
 ---
 title: Go package
-description: pkg/boxer, the only importable package.
+description: The pkg/boxer API for opening, running and managing sandboxes from Go.
 ---
 
 ```go
 import "github.com/BarakChamo/boxer/pkg/boxer"
 ```
 
-Everything else in the module lives under `internal/`. This package is a thin facade with no logic
-of its own, so its behaviour cannot drift from the CLI's.
+`pkg/boxer` is the module's only importable package; everything else is under `internal/`. It is
+a thin facade over the code the CLI uses, so it behaves the same as the CLI.
 
 <Callout>
-Experimental until 1.0. From 1.0 the [stability
-contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md) covers this package's
-exported functions, types and their fields, and breaking one needs a major version. Until that
-tag, it may change.
+Experimental until 1.0, and may change. From 1.0 the [stability
+contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md) covers its exported
+functions, types and fields, and breaking one needs a major version.
 </Callout>
 
-For worked examples and the surrounding decisions, see [Building on
-boxer](/docs/guides/building-on-boxer).
+For worked examples, see [Building on boxer](/docs/guides/building-on-boxer).
 
 ## Types
 
@@ -30,7 +28,7 @@ type Options struct {
 }
 
 type RunOpts = box.RunOpts   // Stdin, Stdout, Stderr, TTY
-type Machine = vm.Machine    // one smolvm machine; Labels carry the boxer.* keys
+type Machine = vm.Machine    // one sandbox, on any backend; Labels carry the boxer.* keys
 type Scope   = scope.Scope   // Key is the machine name, Root the mounted worktree
 type Error   = box.Error     // Reason, Cause, Fix, Scope
 ```
@@ -59,8 +57,7 @@ Resolves the sandbox for `cwd` — the process working directory when empty. The
 Both it and `Run` are safe to call on a running sandbox.
 
 `Run` returns `-1` with an error when `on_sandbox_unavailable = "passthrough"` and the sandbox
-could not be provisioned. The caller decides whether to fall back to the host — boxer will not
-make that choice silently.
+could not be provisioned. The caller decides whether to run the command on the host.
 
 ## Host-wide functions
 
@@ -71,12 +68,12 @@ make that choice silently.
 | `Delete(name string) error` | remove one |
 | `LastUsed(name string) time.Time` | when the scope last ran a command; zero when unknown |
 
-These take a machine name rather than a directory, because a caller that has been watching
-`List` has names and the worktree may be gone.
+These take a machine name rather than a directory, because the worktree may be gone. They act on
+the backend the CLI would use from the process's working directory: the one `boxer.toml` names,
+else `BOXER_BACKEND`, else smolvm.
 
-`Stop` halts a machine without deleting it, which is the state `boxer status` reports as exit code
-3. No CLI command produces it: `boxer down` deletes. If your tool wants to park a sandbox rather
-than destroy it, this is the only way to ask.
+`Stop` halts a machine without deleting it, the state `boxer status` reports as exit code 3. It is
+the same operation as `boxer stop NAME`.
 
 ## Errors
 
@@ -87,6 +84,6 @@ if errors.As(err, &be) {
 }
 ```
 
-`Cause` is the stable identifier — match on it rather than on the message. The
-[full list](/docs/reference/json#errors) is on the JSON page, because the same causes appear in
-`--json` output and in failed MCP tool calls.
+Match on `Cause`, the stable identifier, not on the message. The
+[full list](/docs/reference/json#errors) is on the JSON page; the same causes appear in `--json`
+output and in failed MCP tool calls.

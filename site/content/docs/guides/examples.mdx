@@ -4,11 +4,9 @@ description: Working boxer.toml files for Next.js, Vite, Python, Go, monorepos, 
 ---
 
 The repository's [`examples/`](https://github.com/BarakChamo/boxer/tree/main/examples) directory
-has a configuration for each common setup. Each is either a **complete project** you can run as it
-is, or a **config** to drop into an existing one. The test suite parses every one. Each runnable
-one, and each Next.js config applied to a real Next.js app, has been brought up on a real sandbox
-and answered HTTP 200 through its URL, twice; `host-prep` was checked by the binary it installed
-resolving in the guest. `monorepo` is a pattern for a two-service repository and has not been run.
+has a `boxer.toml` for each common setup. Each is either a **runnable** project or a **config** to
+drop into an existing one. The test suite parses every one, and every one except `monorepo` has
+been run on a real sandbox.
 
 | example | kind | shows |
 | --- | --- | --- |
@@ -20,6 +18,16 @@ resolving in the guest. `monorepo` is a pattern for a two-service repository and
 | `monorepo` | config | two services in one sandbox, named ports, JUnit-reporting tasks |
 | `host-prep` | config | installing on the host with `[prep]`, and when not to |
 | `docker-backend` | config | the same project on docker or podman, and what that gives up |
+
+A runnable example must be its own git repository, because boxer keys a sandbox to a worktree:
+
+```sh
+cp -R examples/go-api /tmp/go-api && cd /tmp/go-api
+git init -q && git add -A && git commit -qm init
+boxer up && curl -sk "$(boxer url)"
+```
+
+The snippets below are trimmed; the files carry comments and more tasks.
 
 ## Next.js
 
@@ -59,15 +67,19 @@ image_setup = ["pip install --no-cache-dir uv"]   # a tool: once, kept in the pa
 setup = ["uv sync"]                               # the project: once per worktree, into .venv
 start = ["uv run uvicorn main:app --host 0.0.0.0 --port 8000"]
 ready = "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/').status == 200 else 1)\""
+ready_timeout = "120s"
 
 [network]
 allow_hosts = ["pypi.org", "files.pythonhosted.org"]
 ports = ["auto:8000"]
+
+[urls]
+enabled = true
 ```
 
-The split is the one worth copying. Installing uv changes the image, so it is `image_setup`: run
-once and cached, so the next worktree does not repeat it. Installing the project's dependencies
-lands in this worktree's `.venv`, which no cached image can carry, so it is `setup`.
+Installing uv changes the image, so it is `image_setup`: run once and cached for every worktree.
+The project's dependencies land in this worktree's `.venv`, so they are `setup`. See
+[environment](/docs/guides/environment).
 
 ## Go
 
@@ -75,9 +87,13 @@ lands in this worktree's `.venv`, which no cached image can carry, so it is `set
 image = "mirror.gcr.io/library/golang:1.24-alpine"
 start = ["go run ."]
 ready = "wget -q -O /dev/null http://127.0.0.1:8080/"
+ready_timeout = "120s"
 
 [network]
 ports = ["auto:8080"]
+
+[urls]
+enabled = true
 
 [tasks.test]
 cmd = "go test ./..."
@@ -89,9 +105,9 @@ With module dependencies, add `go mod download` to `setup` and `"proxy.golang.or
 
 ## From a devcontainer
 
-A repository with `.devcontainer/devcontainer.json` keeps it as the source of truth, and a short
-`boxer.toml` beside it holds what devcontainer has no key for — above all the allowlist, since
-boxer's default network reaches the image registry and nothing else:
+boxer reads `.devcontainer/devcontainer.json` as its first layer. A short `boxer.toml` beside it
+adds what devcontainer has no key for, above all the allowlist, since boxer's default network
+reaches only the image registry:
 
 ```toml
 [network]
@@ -102,8 +118,6 @@ enabled = true
 ```
 
 ## What every example has in common
-
-Every one of these tripped someone, which is why each example does it:
 
 - **The server binds `0.0.0.0`**, never `127.0.0.1`: a forwarded port arrives on the guest's
   interface.

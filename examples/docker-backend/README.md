@@ -1,7 +1,8 @@
 # On docker or podman
 
-Everything above the backend — hooks, the MCP server, tasks, URLs, devcontainer support, `[prep]` —
-works the same. What changes is the boundary and what boxer can enforce through it:
+The Next.js config on docker (or podman) instead of a microVM. Drop `boxer.toml` into a Next.js
+project. Hooks, the MCP server, tasks, URLs, devcontainer support and `[prep]` work the same; the
+boundary and what boxer can enforce through it change:
 
 | | smolvm | docker / podman |
 | --- | --- | --- |
@@ -10,9 +11,9 @@ works the same. What changes is the boundary and what boxer can enforce through 
 | environment packs, forks | yes | no |
 
 ```sh
-boxer backends --probe       # proves docker can actually run a sandbox here
+boxer backends --probe       # creates, uses and deletes a small sandbox on each installed backend
 boxer up
 ```
 
-On a Mac with podman, create the machine with the `applehv` provider: the `libkrun` provider cannot
-bind-mount host paths, so no worktree can be mounted.
+For podman, set `backend = "podman"`. On a Mac, create the podman machine with the `applehv`
+provider: `libkrun` cannot bind-mount host paths, so the worktree cannot be mounted.

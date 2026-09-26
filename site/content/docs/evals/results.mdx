@@ -1,15 +1,15 @@
 ---
 title: Support, measured
-description: Which harness works at which level, on which backend, from the latest runs.
+description: Which harness works at which integration level and on which backend, from the latest recorded runs.
 ---
 
-Everything here comes from the matrix tier. Nothing is listed as supported because the code
-exists; it is listed because a cell ran and scored.
+A harness is listed as supported at a level only if a cell ran and scored there. The level and
+harness tables come from the [matrix tier](/docs/evals/matrix).
 
-Latest runs, 2026-09-25, on the release binary: two full passes of the matrix — 55 cells, three at
-a time, every cell on `zai/glm-5.3-flash` so the integration level is the only variable — one with
-`[urls]` on and the address withheld from the prompt, one without as the control. The full
-scorecards are `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
+Conditions: 2026-09-25, release binary, two full matrix passes of 55 cells, three at a time, every
+cell on `zai/glm-5.3-flash` so the integration level is the only variable. One pass had `[urls]` on
+and the dev server's address withheld from the prompt (URLs mode); the other is the control
+(default). Scorecards: `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
 
 | | default | URLs mode |
 | --- | --- | --- |
@@ -29,18 +29,14 @@ scorecards are `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md
 | inside | 10/10 | 6/10 | Claude Code, Codex, OpenCode, Kimi Code, fx |
 | orchestrator | 6/6 | 6/6 | T3 Code, Paperclip, herdr |
 
-The inside gap was a boxer bug, and it had nothing to do with URLs. The first time a harness runs
-inside a sandbox on a host, boxer caches the install as a pack — and packing stops the machine,
-which empties the guest's `/tmp` and ends every service `start` launched. boxer restarted the
-machine and not the services, so the dev server was simply gone. It showed only on a host's first
-round of inside cells, and the URLs-mode runs happened to go first. Found when the eval's autopsy
-reported the server's log missing from a sandbox that was still running; fixed by restarting the
-services after the snapshot; verified by clearing the pack cache and running the inside cells cold,
-once in each mode: 10 of 10 and 10 of 10.
+The inside gap in URLs mode was a boxer bug unrelated to URLs: caching a harness install as a
+[pack](/docs/concepts/scopes-and-packs) stops the machine, and boxer did not restart the `start`
+services afterwards. It showed only on a host's first round of inside cells, and the URLs-mode pass
+ran first. After the fix, with the pack cache cleared, the inside cells ran cold once in each mode:
+10 of 10 and 10 of 10.
 
-Every level is carried by at least two harnesses, except shell substitution — OpenHands is the only
-harness whose terminal shell is configurable, and a second witness would have to be invented rather
-than found.
+Every level has at least two passing harnesses except shell substitution: OpenHands is the only
+harness whose terminal shell is configurable.
 
 ## On each backend
 
@@ -54,32 +50,30 @@ The smoke suite, with no model, on the release binary:
 | Apple `container` | 76 | 9 |
 | podman on Linux | 68 | 10 |
 
-The skips are forks, named packs and the egress log, which only smolvm has. The Linux row is boxer
-running natively on Fedora CoreOS with rootless podman and SELinux enforcing; its tenth skip is the
-URL cells, because portless was not installed there. The first Linux run failed nearly every cell —
-SELinux, then rootless podman's user mapping — and both were fixed before this one. Every runnable
-example also served HTTP 200 there. These rows are checked against the recorded runs in
-`docs/smoke-results.jsonl`, so the page cannot quietly fall behind them. The scripted-model
-matrix (t1) passed all 68 runnable cells on two of three runs; the third missed one, a herdr pane
-that inherited the environment of the session running the evaluation, and it did not recur. The
-one skip is Multica, which needs a server configured on the host.
+- The skips are forks, named packs and the egress log, which only smolvm has.
+- The Linux row is boxer running natively on Fedora CoreOS with rootless podman and SELinux
+  enforcing. Its tenth skip is the URL cells, because portless was not installed there. Every
+  runnable example also served HTTP 200 there.
+- A test checks these rows against the recorded runs in `docs/smoke-results.jsonl`.
+
+The scripted-model matrix (t1) passed all 68 runnable cells on two of three runs. The third missed
+one: a herdr pane that inherited the environment of the session running the evaluation; it did not
+recur. The one skip is Multica, which needs a server configured on the host.
 
 ## When boxer only asks
 
-Live, eight harnesses, four models each, with a prompt that never mentions boxer:
+The adherence tier: eight harnesses, four live models each, with a prompt that never mentions boxer.
 
 | scenario | result | notes |
 | --- | --- | --- |
 | `prep` — host-side setup, reached through the harness | **32 of 32** | every harness, every model; 8 of 8 on docker |
 | `server` — find this worktree's dev server | **25 of 32** | 5 harnesses on all four models; Kimi and Copilot on two of four; Grok on one |
 
-A harness is blamed only when every model fails it. Kimi and Copilot passing on two of four is
-model adherence. Grok never shows boxer's brief to the model, which is a known harness fact rather
-than a boxer defect; its cell is kept failing on purpose so the finding stays visible.
+A harness is blamed only when every model fails it, so Kimi and Copilot passing on two of four is
+model adherence. Grok never shows boxer's brief to the model; its cell is left failing so the
+finding stays visible.
 
 ## Known limits
-
-These are measured, not suspected.
 
 **PATH shims do not survive a login shell.** A login shell rebuilds `PATH`; on macOS `path_helper`
 puts the system directories first. A harness that runs commands through `zsh -lc` — Codex does —
@@ -93,16 +87,13 @@ serve, so its cells skip rather than run.
 debugging port to drive, and its CLI drives cloud workspaces where boxer has nothing to sandbox.
 
 **fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
-and it resolves commands past a PATH shim, so outside the guest there is nothing for boxer to hold
-onto. Inside there is, and it passes. It looked like the least stable inside harness for a while;
-it was the one most often installing for the first time, which is when boxer's harness cache
-stopped the dev server — see above.
+and it resolves commands past a PATH shim, so boxer has no way to intercept it from outside. Inside
+the guest it passes.
 
 ## Reading a run
 
-Archived runs live in `docs/evals/matrix/`, newest first, with a JSON line per run for reading the
-series by machine. A run is comparable with another only when the model, the concurrency and the
-host match, which is why each report carries them.
+Archived runs are in `docs/evals/matrix/`, newest first, with a JSON line per run. Two runs are
+comparable only when the model, the concurrency and the host match; each report records them.
 
-Cells that fall short are worth reading rather than counting: the scorecard names which claim
-failed, and the report keeps the transcript and the trace for each one.
+For a cell below 100%, the scorecard names the claim that failed, and the report keeps the cell's
+transcript and trace.

@@ -1,7 +1,10 @@
 ---
 title: The guest environment
-description: Images, dependencies, services and ports.
+description: Images, dependencies (image_setup, setup and prep), services, ports, environment and network.
 ---
+
+Everything on this page is set in `boxer.toml`. [Configuration](/docs/reference/configuration)
+lists every key and its default.
 
 ## Choosing an image
 
@@ -9,12 +12,11 @@ description: Images, dependencies, services and ports.
 image = "node:24-bookworm-slim"
 ```
 
-Any OCI reference works. Leave it out and boxer infers one from your lockfile — `package-lock.json`
-gets node, `requirements.txt` gets python, and so on.
+Any OCI reference works. Without one, boxer picks an image from your lockfile: `package-lock.json`
+gets node, `requirements.txt` gets python, and so on, falling back to `debian:bookworm-slim`.
 
-**Pick a small image, and prefer it over a fat one you will not use.** A microVM starts by
-attaching the image's filesystem, so the image's size is start-up latency you pay on every
-`boxer up`. Measured on an M4 with the pack already built:
+**Prefer a small image.** A microVM starts by attaching the image's filesystem, so image size is
+start-up time on every `boxer up`. Measured on an M4 with the pack already built:
 
 | image | `boxer up` | first pack build |
 | --- | ---: | ---: |
@@ -23,16 +25,15 @@ attaching the image's filesystem, so the image's size is start-up latency you pa
 | `node:24-bookworm-slim` | 2.5s | 13.4s |
 | `node:24-bookworm` | 9.5s | 26.2s |
 
-That is a 4x spread on start-up for the same runtime. The inferred defaults are all slim for this
-reason. Alpine is faster still but links musl rather than glibc, so a dependency shipping only a
-glibc prebuilt will break in a way that is hard to read — worth it when you know your
-dependencies, not as a default.
+The inferred images are all slim for this reason. Alpine is faster but uses musl rather than glibc,
+so a dependency that ships only a glibc prebuilt breaks with an unclear error. Use it when you know
+your dependencies.
 
-A slim image has no compiler. If a dependency builds from source, add it to `image_setup` rather
-than reaching for the fat image: `image_setup` is snapshotted into the pack, so you pay it once
-per host instead of on every start.
+A slim image has no compiler. If a dependency builds from source, install the toolchain in
+`image_setup` rather than switching to the full image: on smolvm, `image_setup` is captured in the
+pack, so you pay for it once per host rather than on every start.
 
-It also takes a local image, which is the path for a repository that builds its own:
+A local image also works, for a repository that builds its own:
 
 ```toml
 image = "./dev.tar"        # docker save archive
@@ -40,65 +41,73 @@ image = "./rootfs"         # extracted rootfs directory
 image = "-"                # read from stdin
 ```
 
-Nothing is pulled for these, so no registry host has to be opened.
+Nothing is pulled for these, so no registry host has to be allowed.
 
 <Callout>
-Prefer a registry mirror for public images. Docker Hub's anonymous pull quota is 100 an hour, and
-a machine running several sandboxes reaches it. `mirror.gcr.io/library/node:24-bookworm-slim` has
-no quota.
+Use a registry mirror for public images. Docker Hub allows 100 anonymous pulls an hour, which a
+machine running several sandboxes can reach. `mirror.gcr.io/library/node:24-bookworm-slim` has no
+quota.
 </Callout>
 
 ## Dependencies
 
+Three keys install things. They differ in where they run and how often:
+
+| key | runs | how often | use it for |
+| --- | --- | --- | --- |
+| `image_setup` | in the guest, before `setup` | once per VM; on smolvm the result is captured in an [environment pack](/docs/concepts/scopes-and-packs), so later VMs skip it | system packages, global tools, compilers |
+| `setup` | in the guest, in the mounted worktree | once per worktree, and again when the list changes | `npm ci`, `uv sync`: anything that writes into the worktree |
+| `[prep] commands` | on the host, while the sandbox boots | once per worktree | fetching dependencies with prebuilt binaries, opt-in |
+
 ```toml
-image_setup = ["npm i -g typescript"]   # once per image, captured in the pack
+image_setup = ["npm i -g typescript"]   # once per image on smolvm, captured in the pack
 setup = ["npm ci"]                       # once per worktree, lands in your files
 ```
 
-Installing through the guest's mount is the slow part of a first start. Two things take work out
-of it.
+Do not put `npm install` in `image_setup`. The pack records it as done, but `node_modules` is in
+the worktree, which the pack does not carry, so the next worktree has no dependencies.
 
-**The host's package caches are mounted read-only by default**, detected from the lockfile — `~/.npm`
-for `package-lock.json`, the uv and cargo caches for theirs. The install still runs in the guest, so
-every native binary is still chosen for the guest's platform; only the download is saved.
+Installing through the guest's mount is the slow part of a first start. Two features reduce it.
+
+**Host package caches are mounted read-only by default**, detected from the lockfile: `~/.npm` for
+`package-lock.json`, the uv and cargo caches for theirs. The install still runs in the guest, so
+native binaries are still chosen for the guest's platform; only the download is saved.
 
 ```toml
 [cache]
 enabled  = true          # the default
-managers = ["auto"]      # or an explicit list: npm, pnpm, yarn, bun, uv, cargo, go
+managers = ["auto"]      # or an explicit list: npm, pnpm, yarn, bun, uv, poetry, cargo, go
 ```
 
-**`[prep]` runs on the host before the sandbox exists**, alongside its boot. It is devcontainer's
-`initializeCommand`, and it is opt-in because it is only correct for packages that ship prebuilt
-platform binaries. `$BOXER_TARGET_FLAGS` carries the guest's platform so npm and bun fetch the
-right ones:
+**`[prep]` runs on the host before the sandbox exists**, in parallel with its boot, and finishes
+before `setup` starts. It is the equivalent of devcontainer's `initializeCommand`. It is opt-in
+because it is correct only for packages that ship prebuilt platform binaries.
+`$BOXER_TARGET_FLAGS` carries the guest's platform so npm and bun fetch the right ones:
 
 ```toml
 [prep]
 commands = ["npm ci $BOXER_TARGET_FLAGS"]   # --os=linux --cpu=arm64 --libc=musl on an alpine image
 ```
 
-A package that compiles at install time (`better-sqlite3`, `node-pty`) builds for the host no
-matter what the flags say, and fails inside the guest with `invalid ELF header`. `boxer doctor`
-names any such package in your lockfile; keep those in `setup`.
+A package that compiles at install time (`better-sqlite3`, `node-pty`) builds for the host whatever
+the flags say, and fails in the guest with `invalid ELF header`. `boxer doctor` names any such
+package in your lockfile; install those in `setup`.
 
 ### From a devcontainer
 
-A repository with `.devcontainer/devcontainer.json` keeps it: boxer reads the image, the lifecycle
-commands, ports, environment, mounts and the user from it, resolves its `${localWorkspaceFolder}`-
-style variables, and names — rather than ignores — anything it will not do, such as `features` or
-`runArgs`. The full mapping is in the
-[configuration reference](/docs/reference/configuration#devcontainerjson).
+If the repository has `.devcontainer/devcontainer.json`, boxer reads the image, lifecycle commands,
+ports, environment, mounts and user from it, and resolves its `${localWorkspaceFolder}`-style
+variables. It reports anything it will not do, such as `features` or `runArgs`. `boxer.toml`
+overrides it. The mapping is in the [configuration reference](/docs/reference/configuration#devcontainerjson).
 
-Usually a short `boxer.toml` still sits beside it, for what devcontainer has no key for. The one
-that matters first is the **allowlist**: boxer's default network reaches the image registry and
-nothing else, so a devcontainer whose `postCreateCommand` installs packages needs the package
-registry named in `network.allow_hosts`. When it is missing, the failed install says which host was
-refused.
+You will usually still need a short `boxer.toml` for the **allowlist**. boxer's default network
+reaches the image registry and nothing else, so a `postCreateCommand` that installs packages needs
+the package registry in `network.allow_hosts`. When it is missing, the failed install names the
+refused host.
 
 ## Services
 
-`start` launches long-running processes; `ready` is how boxer knows they are up.
+`start` launches long-running processes; `ready` is a command boxer polls until it succeeds.
 
 ```toml
 start = ["npm run dev"]
@@ -106,17 +115,11 @@ ready = "curl -sf http://127.0.0.1:3000/ >/dev/null"
 ready_timeout = "120s"     # the default is 60s
 ```
 
-`start` runs once per running VM, after `setup`. A `boxer down` and a later start run them again —
-the marker lives in the guest's memory-backed `/tmp` precisely so that a stopped VM has no
-processes and knows it.
+`start` runs once per running VM, after `setup`, so it can depend on what `setup` installed. A
+stopped VM has no processes, so the next start runs `start` again.
 
-Running after `setup` is the whole point, and it is why boxer does not use smolvm's own
-persistent workload (`machine create --init`) for this: that launches when the machine starts,
-which is before `setup` has installed anything, so the ordinary `start = ["npm run dev"]` against
-a worktree that `setup` populates would die immediately and never be relaunched.
-
-When `ready` never passes, the services' own output is in `/tmp/boxer-start.log` in the guest, and
-boxer quotes the tail of it in the error rather than making you go and look.
+When `ready` never passes, the services' output is in `/tmp/boxer-start.log` in the guest, and
+boxer quotes its tail in the error.
 
 ## Ports
 
@@ -125,40 +128,37 @@ boxer quotes the tail of it in the error rather than making you go and look.
 ports = ["auto:3000"]
 ```
 
-`auto:` asks the host for a free port and forwards it to 3000 in the guest. Use it in any
-`boxer.toml` you commit: a fixed host port collides the moment a second worktree starts, which is
-exactly what happens when an orchestrator opens three tasks at once.
+`auto:` takes a free host port and forwards it to 3000 in the guest. Use it in any `boxer.toml` you
+commit: a fixed host port collides as soon as a second worktree starts.
 
 <Callout type="warn">
-**The server has to bind `0.0.0.0` in the guest, not `127.0.0.1`.** A forward arrives on the
-guest's interface, and a process listening only on loopback never sees it. The symptom is a
-forward that exists, a server that is running, and a browser that gets nothing.
+**The server must bind `0.0.0.0` in the guest, not `127.0.0.1`.** A forward arrives on the guest's
+network interface, so a server listening only on loopback never sees it. A `ready` probe inside the
+guest can still pass against `127.0.0.1`, so it will not catch this.
+</Callout>
 
 ```toml
 start = ["npm run dev -- -H 0.0.0.0"]     # next
 start = ["vite --host 0.0.0.0"]           # vite
 ```
 
-A `ready` probe run inside the guest may still pass against `127.0.0.1`, so it is not the check
-that catches this.
-</Callout>
-
-`boxer status` prints what the guest port actually landed on:
+`boxer status` prints where each guest port landed:
 
 ```console
 $ boxer status
-sb-7f2a91 running · node:24-bookworm-slim · 3000 → 61234
+boxer: swift-crab (sb-7e1852e4a3c3) running, image node:24-bookworm-slim, mounted /Users/me/src/myapp -> /workspace
+  port:      guest 3000 -> http://127.0.0.1:61234
 ```
 
 <Callout type="warn">
-A dev server reached through a forwarded port sees a different origin than it expects. Next.js
-refuses its own dev chunks in that case; add `allowedDevOrigins: ['127.0.0.1', 'localhost', '*.localhost']`
-to `next.config.ts` (the last one covers [`[urls]`](/docs/guides/urls) names). Other frameworks
-have the same knob under different names.
+A dev server reached through a forwarded port sees an unexpected origin. Next.js then refuses its
+own dev chunks; add `allowedDevOrigins: ['127.0.0.1', 'localhost', '*.localhost']` to
+`next.config.ts` (`*.localhost` covers [`[urls]`](/docs/guides/urls) names). Other frameworks have
+an equivalent setting.
 </Callout>
 
-Give each worktree's server a stable name instead of a port with [`[urls]`](/docs/guides/urls),
-and agents find it with `boxer url`.
+To give each worktree's server a stable name instead of a port, use [`[urls]`](/docs/guides/urls);
+agents find it with `boxer url`.
 
 ## Environment variables and secrets
 
@@ -170,8 +170,9 @@ env_passthrough = ["CI"]          # read from the host at run time
 secrets = ["NPM_TOKEN"]           # same, and never written anywhere
 ```
 
-`env` is configuration and is captured in the snapshot. Anything you would not want in a snapshot
-belongs in `env_passthrough` or `secrets`, which are read from the host on each run.
+`env` is captured in the pack. Anything that should not be in a snapshot belongs in
+`env_passthrough` or `secrets`, which are read from the host on each run. `env_passthrough`
+defaults to `["CI"]`.
 
 ## Networking
 
@@ -181,6 +182,6 @@ mode = "allowlist"
 allow_hosts = ["registry.npmjs.org"]
 ```
 
-`on` allows everything, `off` allows nothing, `allowlist` allows what you name. The allowlist is
-the useful default for a build: dependencies resolve, and a command that decides to phone somewhere
-else does not.
+`on` allows everything, `off` allows nothing, and `allowlist` (the default) allows the image
+registry plus the hosts you name. Only smolvm enforces the allowlist; see
+[Backends](/docs/concepts/backends).

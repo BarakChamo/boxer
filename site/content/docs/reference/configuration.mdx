@@ -1,16 +1,24 @@
 ---
 title: boxer.toml
-description: Every key, what it does, and what it defaults to.
+description: Every boxer.toml key, its default, and the BOXER_* variables and devcontainer.json fields that set it.
 ---
 
-boxer reads, lowest priority first: `.devcontainer/devcontainer.json` if the repository has one,
-`~/.config/boxer/boxer.toml`, the repository root's `boxer.toml`, the worktree's, and then
-`BOXER_*` environment variables. `boxer doctor` prints every resolved value with the file or
-variable it came from.
+## Where boxer reads it
 
-A misspelled key is an error. Silently ignoring `mod = "off"` would silently change what is
-enforced, which is the one failure a sandbox tool cannot have. An unknown top-level *table* is only
-a warning, so a repository that adopts a newer boxer's feature still loads in an older binary.
+Lowest priority first:
+
+1. `.devcontainer/devcontainer.json`, else `.devcontainer.json` ([mapping](#devcontainerjson))
+2. `$XDG_CONFIG_HOME/boxer/boxer.toml`, else `~/.config/boxer/boxer.toml`
+3. `boxer.toml` at the repository root
+4. `boxer.toml` at the worktree root
+5. [`BOXER_*` environment variables](#environment-variables)
+
+`boxer doctor` prints every resolved value and the file or variable it came from.
+
+An unknown key is an error, so a typo cannot silently weaken enforcement. An unknown top-level
+*table* is a warning, so a repository written for a newer boxer still loads in an older one.
+
+The code blocks below show defaults unless a comment says `example`.
 
 ## Scope
 
@@ -19,55 +27,36 @@ isolation               = "worktree"   # repo | worktree | session | subagent
 on_missing_id           = "degrade"    # degrade | fail
 require_worktree        = "warn"       # off | warn | require
 require_linked_worktree = false
-```
 
-`isolation` is what a sandbox is keyed to. `worktree` gives each git worktree its own VM, which is
-what makes parallel agent work work. `session` and `subagent` narrow it to an agent session id,
-for harnesses that hand one out; `repo` collapses every worktree onto one VM.
-
-`on_missing_id` decides what happens when `session` or `subagent` isolation is configured and the
-harness supplied no id: `degrade` falls back to the worktree, `fail` refuses rather than quietly
-sandboxing at the wrong granularity.
-
-`require_worktree` is `warn` by default: boxer runs in a plain repository and says it would rather
-be in a worktree. `require` refuses, with cause `WORKTREE_REQUIRED`.
-
-`require_linked_worktree` goes further and demands a *linked* worktree, one made by
-`git worktree add`, rather than the main checkout. It is for a repository whose agents are always
-supposed to be working in a cut worktree, where sharing the main checkout's sandbox would mean two
-tasks in one VM.
-
-```toml
 [worktree]
-manage = "off"        # off | detect
+manage = "off"                         # off | detect
 ```
 
-`detect` lets a session in the main checkout share the repository's sandbox, with a warning, until
-it moves into a linked worktree.
+| Key | Meaning |
+| --- | --- |
+| `isolation` | What a sandbox is keyed to. `worktree`: one per git worktree. `repo`: one for all worktrees. `session` / `subagent`: one per agent session or subagent id, for harnesses that supply one |
+| `on_missing_id` | When `session`/`subagent` isolation gets no id: `degrade` falls back to the worktree, `fail` refuses |
+| `require_worktree` | `warn` runs in a plain repository with a warning. `require` refuses with cause `WORKTREE_REQUIRED`. `off` says nothing |
+| `require_linked_worktree` | `true` refuses the main checkout; only a worktree made by `git worktree add` is accepted |
+| `worktree.manage` | `detect`: a session in the main checkout shares the repository's sandbox, with a warning, until it moves into a linked worktree |
+
+See [scopes and packs](/docs/concepts/scopes-and-packs).
 
 ## Integration
 
 ```toml
-integration = "outside"   # outside | inside
-mode        = "rewrite"   # rewrite | tool | off
-enforcement = "both"      # hook | shim | both | audit
-on_sandbox_unavailable = "fail"   # fail | passthrough
+integration            = "outside"   # outside | inside
+mode                   = "rewrite"   # rewrite | tool | off
+enforcement            = "both"      # hook | shim | both | audit
+on_sandbox_unavailable = "fail"      # fail | passthrough
 ```
 
-`integration` is where the harness runs. `outside` runs it on the host and sandboxes the commands
-it issues. `inside` runs the harness itself in the guest, where there is nothing to intercept.
-
-`mode` is how a command reaches the guest: `rewrite` turns it into `boxer run` transparently,
-`tool` denies the shell and leaves `boxer_run` as the way through, `off` keeps boxer installed and
-inert.
-
-`enforcement` is which mechanisms are live. `audit` records what would have happened and blocks
-nothing, which is how you find out what an agent actually runs before you start refusing it
-anything.
-
-`on_sandbox_unavailable` is the one that matters when smolvm cannot provision. `fail` refuses the
-command. `passthrough` lets it run on the host — a real hole, and boxer will not take it silently:
-the caller has to ask for it.
+| Key | Meaning |
+| --- | --- |
+| `integration` | `outside`: the harness runs on the host and its commands run in the sandbox. `inside`: the harness itself runs in the guest ([guide](/docs/guides/inside)) |
+| `mode` | `rewrite`: intercepted commands become `boxer run` transparently. `tool`: the shell is denied and `boxer_run` is the way through. `off`: installed but inert |
+| `enforcement` | Which mechanisms are live. `both`: hooks where the harness has them, shims elsewhere. `audit`: record what would happen, block nothing ([guide](/docs/guides/enforcement)) |
+| `on_sandbox_unavailable` | When the sandbox cannot be provisioned. `fail` refuses the command. `passthrough` runs it on the host, unsandboxed |
 
 ## What gets sandboxed
 
@@ -78,42 +67,31 @@ intercept   = ["npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno",
 passthrough = ["git", "gh", "ssh", "boxer", "smolvm"]
 ```
 
-Those are the defaults, not a suggestion. `git`, `gh` and `ssh` stay on the host because they need
-your credentials and your real repository; putting them in the guest breaks more than it protects.
+| Key | Meaning |
+| --- | --- |
+| `intercept` | Programs whose commands run in the sandbox |
+| `passthrough` | Programs that always run on the host. `git`, `gh` and `ssh` need your credentials and the real repository |
 
-Both lists are repository policy, so neither is settable from the environment.
+Neither list can be set from the environment.
 
 <Callout type="warn">
-**The default list is written for hooks, not for shims.** Under `enforcement = "shim"` every entry
-becomes a real file on `PATH`, and `node`, `python`, `python3` and `deno` are in the defaults. A
-`node` shim shadows the interpreter of a node-based harness, which then goes through the sandbox
-before it can load its own modules and dies at startup.
-
-Switching to shim enforcement means narrowing the list to build tools first:
-
-```toml
-enforcement = "shim"
-intercept   = ["npm", "npx", "pnpm", "yarn", "bun", "make", "cargo", "go"]
-```
-
-`enforcement = "both"`, the default, runs hooks where a harness has them and shims elsewhere. See
-[Enforcement](/docs/guides/enforcement).
+Under `enforcement = "shim"` every `intercept` entry becomes a file on `PATH`. A `node` or `python`
+shim shadows the interpreter of a harness written in that language, and the harness fails at
+startup. Narrow the list to build tools first, for example
+`intercept = ["npm", "npx", "pnpm", "yarn", "bun", "make", "cargo", "go"]`.
 </Callout>
 
-## The backend
+## Backend
 
 ```toml
 backend = "smolvm"        # smolvm | container | docker | podman
 ```
 
-`smolvm` is the default and gives **one kernel per sandbox**. Apple's `container` gives a kernel
-per sandbox too, on Virtualization.framework, from ordinary OCI images — macOS 26 and Apple
-Silicon only. `docker` and `podman` give a container: faster to start, available where there is no
-hypervisor — but **one kernel shared by every sandbox on the machine**, which is a materially
-weaker boundary.
+`smolvm` and Apple `container` (macOS 26, Apple Silicon) give each sandbox its own kernel. `docker`
+and `podman` give a container that shares the host kernel with every other sandbox. See
+[backends](/docs/concepts/backends).
 
-What each one can do, generated from the backends themselves rather than written by hand
-(`go test ./internal/vm -run CapabilityMatrix`):
+Capabilities, generated from the backends (`go test ./internal/vm -run CapabilityMatrix`):
 
 | backend | boundary | worktree mount | egress allowlist | secrets off argv | proves ownership | env cache | fork | egress log |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -122,176 +100,168 @@ What each one can do, generated from the backends themselves rather than written
 | `docker` | namespace | yes | — | yes | yes | — | — | — |
 | `podman` | namespace | yes | — | yes | yes | — | — | — |
 
-They are not interchangeable. Neither a container runtime nor Apple `container` has a per-host
-egress policy, so
-`network.mode = "allowlist"` — boxer's default — is **refused** rather than quietly replaced with
-an open network. Packs, forks, egress reporting and disk accounting are refused too, each naming
-the backend that has them. `boxer doctor` prints the whole table, so you learn at setup rather
-than three commands later.
+A backend without a capability refuses the setting that needs it, naming the backend that has it.
+In particular, `network.mode = "allowlist"` (the default) is refused on every backend except
+`smolvm`; set `network.mode` explicitly to use another. `boxer doctor` prints this table.
 
-`BOXER_BACKEND` overrides it, which is how the smoke suite runs the same cells on each.
-
-## The guest
+## Guest
 
 ```toml
-image     = ""            # any OCI ref, a local tar, a rootfs dir, or "-"
-smolfile  = ""            # a smolvm Smolfile instead of an image
+image     = ""            # OCI ref, ./archive.tar, a rootfs directory, or "-" for stdin
+smolfile  = ""            # a smolvm Smolfile, used instead of image
 cpus      = 4
-memory    = "4G"
+memory    = "4G"          # 4G, 4096M, or 4096 (MiB)
 mount_at  = "/workspace"
-mounts    = ["~/.npm:/root/.npm"]     # host:guest[:ro]
-user      = ""            # run setup, start and every command as this guest user
+mounts    = []            # example: ["~/.npm:/root/.npm"], host:guest[:ro]
+user      = ""            # name or uid[:gid]
 ```
 
-An empty `image` is inferred from the lockfile — `package-lock.json` gets node,
-`requirements.txt` gets python — falling back to `debian:bookworm-slim`. Every inferred image is
-a **slim** variant, because a microVM boots by attaching the image's filesystem and image size is
-start-up time: `node:24-bookworm` takes 8.2s to start on an M4 against `node:24-bookworm-slim`'s
-1.9s. A slim image has no build toolchain, so a dependency that compiles from source needs one
-line of `image_setup` — which is snapshotted into the pack and paid once, not per start.
+| Key | Meaning |
+| --- | --- |
+| `image` | The guest image. A path starting `./`, `../`, `/` or `~/`, or `-`, is local and not pulled. Empty: inferred from the lockfile (below) |
+| `smolfile` | A smolvm Smolfile. Takes precedence over `image` |
+| `cpus`, `memory` | Guest allocation |
+| `mount_at` | Where the worktree is mounted in the guest. `boxer run` from a subdirectory runs in the matching subdirectory. `integration = "inside"` always mounts at the worktree's host path |
+| `mounts` | Extra host directories. The worktree is always mounted |
+| `user` | Guest user for `setup`, `start` and every command. Empty: the image's `USER`. `image_setup` always runs as root |
 
-`mount_at` is where the worktree lands in the guest. boxer maps the caller's working directory
-into it, so `boxer run` from a subdirectory runs in the matching subdirectory of the mount. Set it
-to the worktree's own host path when absolute paths have to resolve on both sides; `integration =
-"inside"` does that unconditionally, because there the harness is in the guest and the paths it
-prints are read on the host.
+Inferred images, by first lockfile found:
 
-`user` is a name or `uid[:gid]`; empty means the image's own `USER`. boxer checks that the user can
-write the worktree when the sandbox starts, and fixes it when it cannot: on smolvm, which mounts
-the worktree owned by your host uid, the user is given that uid; on rootless podman on Linux, which
-maps you to the container's root, the sandbox is recreated once with `--userns=keep-id` so the user
-is you. Files the user writes are owned by you on the host either way. It applies to `setup`,
-`start`, and every command. `image_setup` always runs as root, because it changes the image —
-installing packages is root's job even in an image whose tools run as someone else.
-devcontainer's `remoteUser` lands here.
+| Lockfile | Image |
+| --- | --- |
+| `bun.lock`, `bun.lockb` | `oven/bun:1-slim` |
+| `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock` | `node:24-bookworm-slim` |
+| `uv.lock`, `requirements.txt`, `pyproject.toml` | `python:3.12-slim-bookworm` |
+| `Cargo.lock` | `rust:1-slim-bookworm` |
+| `go.sum`, `go.mod` | `golang:1-alpine` |
+| none | `debian:bookworm-slim` |
+
+With `integration = "inside"` and no image, the default is `mirror.gcr.io/library/node:24-bookworm-slim`.
+
+Inferred images are slim because image size is start-up time (`node:24-bookworm` 8.2s against
+`node:24-bookworm-slim`'s 1.9s on an M4). A dependency that compiles from source needs a toolchain
+added in `image_setup`.
+
+When `user` cannot write the worktree, boxer fixes it at start: on smolvm the user is given your
+host uid; on rootless podman on Linux the sandbox is recreated once with `--userns=keep-id`. Files
+it writes are owned by you on the host.
 
 ## Preparing the worktree before the sandbox starts
 
 ```toml
 [prep]
-commands = ["npm ci $BOXER_TARGET_FLAGS"]  # on the HOST, in the worktree, once per worktree
-target   = "auto"                          # auto | none | linux/arm64/musl
+commands = []             # example: ["npm ci $BOXER_TARGET_FLAGS"]
+target   = "auto"         # auto | none | os/cpu/libc, e.g. "linux/arm64/musl"
 
 [cache]
-enabled  = true                            # mount the host's package caches, read-only
-managers = ["auto"]                        # or npm, pnpm, yarn, bun, uv, poetry, cargo, go
+enabled  = true
+managers = ["auto"]       # or any of npm, pnpm, yarn, bun, uv, poetry, cargo, go
 ```
 
-`[prep]` is devcontainer's `initializeCommand`: commands that run **on the host**, in the
-worktree, before the sandbox exists. A dependency install is roughly twice as fast there, and
-boxer derives the guest's platform from the image and offers it as `$BOXER_TARGET_FLAGS`
-(`--os=linux --cpu=arm64 --libc=musl`) plus `$BOXER_TARGET_OS`, `$BOXER_TARGET_CPU`,
-`$BOXER_TARGET_LIBC`. The flags are offered, never spliced into your command.
+| Key | Meaning |
+| --- | --- |
+| `prep.commands` | Run **on the host**, in the worktree, once per worktree, before the sandbox exists. devcontainer's `initializeCommand` |
+| `prep.target` | The guest platform offered to `prep.commands`. `auto` derives it from the image; `none` offers nothing |
+| `cache.enabled` | Mount the host's package caches into the guest, read-only |
+| `cache.managers` | Which caches. `auto` detects them from lockfiles |
+
+`prep.commands` get `$BOXER_TARGET_FLAGS` (`--os=linux --cpu=arm64 --libc=musl`) and
+`$BOXER_TARGET_OS`, `$BOXER_TARGET_CPU`, `$BOXER_TARGET_LIBC`. The flags are offered, never added to
+your command.
 
 <Callout type="warn">
-This is only safe for packages that ship **prebuilt** platform binaries. Anything that compiles at
-install time — node-gyp, cgo — builds for your Mac whatever the flags say, and fails much later
-inside the guest as `invalid ELF header`. `boxer doctor` warns by name when it finds one. When in
-doubt use `setup`, which runs in the guest and is always right.
+`[prep]` is only safe for packages that ship prebuilt platform binaries. Anything that compiles at
+install time (node-gyp, cgo) builds for the host and fails in the guest with `invalid ELF header`.
+`boxer doctor` names such packages. Use `setup` when unsure.
 </Callout>
 
-`[cache]` needs no configuration and carries no such risk: the install still runs in the guest, so
-every binary is still chosen for the guest's platform, and only the download is saved.
+`[cache]` cannot change a result: the install still runs in the guest, so only the download is
+saved. See [environment](/docs/guides/environment).
 
 ## Setup and services
 
 ```toml
-image_setup   = ["npm i -g typescript"]   # once per image, captured in the pack
-setup         = ["npm ci"]                # once per worktree, lands in your files
-start         = ["npm run dev"]           # every time the VM starts, detached
-ready         = "curl -sf http://127.0.0.1:3000/"
+image_setup   = []        # example: ["npm i -g typescript"]
+setup         = []        # example: ["npm ci"]
+start         = []        # example: ["npm run dev"]
+ready         = ""        # example: "curl -sf http://127.0.0.1:3000/"
 ready_timeout = "60s"
 ```
 
-The `image_setup`/`setup` split is the same line `devcontainer.json` draws between
-`onCreateCommand` and `postCreateCommand`, and getting it wrong is the most common configuration
-mistake. A pack carries the guest's filesystem; the worktree is mounted from the host. Put
-`npm install` in `image_setup` and the second worktree inherits a pack with a marker saying the
-work is done and no `node_modules` to show for it. Dependency installs belong in `setup`.
+| Key | Runs | Meaning |
+| --- | --- | --- |
+| `image_setup` | In the guest, as root, once per image; captured in the pack | Change the image: packages, global tools |
+| `setup` | In the guest, once per worktree | Prepare the worktree: dependency installs |
+| `start` | In the guest, detached, every time the sandbox starts, after `setup` | Services. Not supervised |
+| `ready` | Polled until it exits 0 | Readiness probe before the sandbox is reported up |
+| `ready_timeout` | | How long to poll `ready`. Exceeded: cause `NOT_READY` |
 
-`ready` is polled until it exits zero, because a server takes a variable time to accept
-connections and a fixed sleep is always wrong. When it never passes, the services' own output is
-in `/tmp/boxer-start.log` in the guest and boxer quotes the tail of it in the error.
+Dependency installs belong in `setup`, not `image_setup`: a pack carries the guest filesystem, and
+the worktree is mounted from the host. See [environment](/docs/guides/environment). When `ready`
+never passes, the services' output is in `/tmp/boxer-start.log` in the guest, and boxer quotes its
+tail in the error.
 
 ## Environment
 
 ```toml
-[env]
-NODE_ENV = "development"
+env_passthrough = ["CI"]
+secrets         = []      # example: ["NPM_TOKEN"]
 
-env_passthrough = ["CI"]        # read from the host at run time
-secrets         = ["NPM_TOKEN"] # same, and never written to a pack or an event
+[env]                     # example
+NODE_ENV = "development"
 ```
 
-`env` is the project's configuration and is baked into the pack. Anything you would not want in a
-snapshot belongs in `env_passthrough` or `secrets`.
+| Key | Meaning |
+| --- | --- |
+| `env` | Set in the guest for every command. Baked into the pack |
+| `env_passthrough` | Host variables read at run time. Not baked into the pack |
+| `secrets` | Like `env_passthrough`, and never written to a pack or an event |
 
-Both are forwarded by **name**, through smolvm's `--secret-env`: boxer tells the guest which host
-variable to read, and the value never appears in an argument vector where `ps` would show it to
-every other process on the machine. They reach `setup` and `image_setup` too, because a build
-that needs a registry token needs it while installing.
+`env_passthrough` and `secrets` are forwarded by name, so values never appear in an argument vector.
+They reach `setup` and `image_setup` too.
 
 ## Network
 
 ```toml
 [network]
 mode        = "allowlist"   # on | off | allowlist
-allow_hosts = ["registry.npmjs.org"]
-ports       = ["auto:3000"]
+allow_hosts = []            # example: ["registry.npmjs.org"]
+ports       = []            # example: ["auto:3000"]
+dns         = ""            # "" | "off" | an address
 ```
 
-`allowlist` is the default, and the default list is empty: the registry hosts needed to pull the
-image are always allowed, and nothing else is until you name it. Dependencies resolve once you add
-the registry; a build step that decides to phone somewhere else does not.
-
-`auto:` asks the host for a free port and forwards it to the guest port. Use it in any `boxer.toml`
-you commit — a fixed host port collides the moment a second worktree starts, which is exactly what
-an orchestrator does. `boxer status` prints where the forward landed.
+| Key | Meaning |
+| --- | --- |
+| `network.mode` | `allowlist`: only `allow_hosts` plus the registry hosts needed to pull the image. `on`: open. `off`: no network. `allowlist` needs `smolvm` |
+| `network.allow_hosts` | Hosts the guest may reach under `allowlist` |
+| `network.ports` | Forwards, `host:guest`. `auto:<guest>` picks a free host port, so worktrees do not collide; `boxer status` shows where it landed |
+| `network.dns` | Guest resolver. Empty: the host's caching resolver. `off`: smolvm's default public resolvers. An address: used as given |
 
 ## URLs
 
 ```toml
 [urls]
-enabled = false                    # name forwarded ports through portless
-name    = ""                       # the base name; default: the repository's directory
-names   = { "3000" = "web" }      # per guest port; one unlabelled port needs none
+enabled  = false
+provider = "portless"     # the only provider
+name     = ""             # base name; empty: the repository's directory name
+names    = {}             # example: { "3000" = "web" }
 ```
 
-`auto:` stops worktrees colliding on a host port by giving each one a different port, which means
-nobody knows where a worktree's dev server is without asking. With `[urls]` on, each forwarded
-port also gets a stable name through [portless](https://github.com/vercel-labs/portless), a local
-reverse proxy that routes by hostname:
-
-| worktree | URL |
+| Key | Meaning |
 | --- | --- |
-| the main checkout | `https://myapp.localhost:1355` |
-| a linked worktree on `fix-ui` | `https://fix-ui.myapp.localhost:1355` |
-| a detached worktree, or one whose name is taken | `https://swift-crab.myapp.localhost:1355` |
+| `urls.enabled` | Give each forwarded port a stable name through [portless](https://github.com/vercel-labs/portless), e.g. `https://fix-ui.myapp.localhost:1355` |
+| `urls.provider` | What serves the names. Only `portless` |
+| `urls.name` | Base hostname, before any worktree prefix |
+| `urls.names` | Labels per guest port. With several ports, each is `<label>.<name>`; an unlabelled port uses its number. One port needs no label |
 
-The branch prefix is portless's own naming; boxer asks portless for it rather than guessing. The
-last row is boxer's: portless gives a detached worktree — which is what most orchestrators create —
-no prefix, so it would collide with the main checkout, and two branches ending in the same segment
-(`feat/login`, `fix/login`) would collide with each other. boxer uses the sandbox's own two-word
-name there instead, and never takes a name that another sandbox, or a person, already registered.
-
-Several ports are named `<label>.<repo>`: the label from `names`, from a devcontainer's
-`portsAttributes.label`, or the port number.
-
-A URL is registered when the sandbox starts and removed when it is deleted — by `down`, `gc`, or
-`down --all`. `boxer status` shows it (`urls` in `--json`), the brief tells the agent to use it,
-and `gc` removes any route whose sandbox disappeared without boxer deleting it.
-
-It needs portless installed (`npm install -g portless`). boxer starts its proxy on port 1355 when it
-is not running — never on 443, which needs sudo and would stop a hook to ask for a password. If
-portless is missing, boxer says so once and everything else works as it would with `[urls]` off.
-`BOXER_URLS=1` turns it on from the environment.
+Requires `npm install -g portless`. Without it, boxer warns once and behaves as if `[urls]` were
+off. See [URLs](/docs/guides/urls) for naming rules and lifecycle.
 
 ## Tasks
 
 ```toml
-[tasks]
+[tasks]                   # example
 test  = "npm test"
-build = "npm run build"
 
 [tasks.e2e]
 cmd         = "npm run e2e"
@@ -301,67 +271,62 @@ timeout     = "10m"
 env         = { HEADLESS = "1" }
 ```
 
-A task is a command string, or a table with `cmd` plus any of `description`, `junit`, `timeout`
-and `env`. A misspelled key inside the table is an error, like every other key in `boxer.toml`.
-
-`boxer run --task test`. An unknown name is refused with the list of real ones. See
-[Tasks](/docs/guides/tasks).
+A task is a command string, or a table with `cmd` (required) and any of `description`, `junit`,
+`timeout` (a Go duration) and `env`. Unknown keys are errors. Run with `boxer run --task <name>`;
+an unknown name is refused with cause `NO_SUCH_TASK`. See [tasks](/docs/guides/tasks).
 
 ## Test results
 
 ```toml
 [results]
-auto                  = ["junit.xml", "reports/*.xml"]
+auto                  = []      # example: ["junit.xml", "reports/*.xml"]
 fail_on_test_failures = false
 ```
 
-Where every run in this repository should look for JUnit XML, and whether failing tests turn a
-green exit into 1. Patterns are worktree-relative. See
-[Test results and capsules](/docs/guides/results).
+| Key | Meaning |
+| --- | --- |
+| `results.auto` | Worktree-relative JUnit XML paths or globs to summarise after every run |
+| `results.fail_on_test_failures` | Exit 1 when the command passed but a test failed |
+
+See [test results and capsules](/docs/guides/results).
 
 ## Lifecycle and housekeeping
 
 ```toml
-create_on      = ["session_start", "run", "mcp"]  # + subagent_start
-destroy_on     = []                               # session_end | subagent_stop | never
-reuse_existing = true
+create_on             = ["session_start", "run", "mcp"]
+destroy_on            = []
+reuse_existing        = true
 warm_on_session_start = false
-
-auto_reclaim     = true
-reclaim_every    = "6h"
-idle_timeout     = "2h"
-min_free_gb      = 5
-packs_keep_last  = 5
+auto_reclaim          = true
+reclaim_every         = "6h"
+idle_timeout          = "2h"
+min_free_gb           = 5
+packs_keep_last       = 5
 ```
 
-`create_on` is which signals provision a sandbox. `destroy_on` is empty by default: a sandbox
-outlives the session that created it, because the next session in the same worktree wants it warm
-and `gc` will take it when it is genuinely idle.
-
-`reuse_existing` is why a second session in a worktree attaches to the sandbox that is already
-there instead of making another. Turning it off means every create signal builds a new machine,
-which is almost never what you want and is occasionally what an eval needs.
-
-`auto_reclaim` lets an ordinary command sweep what boxer no longer needs, at most once per
-`reclaim_every`. `min_free_gb` is the disk margin boxer refuses to spend on its own cache: below
-it, packing is skipped and the image pulled instead, because a full disk breaks every VM on the
-host rather than only boxer's. `packs_keep_last` bounds the cache by count as well as age, for an
-environment that changes often enough to leave a pack per version.
-
-`warm_on_session_start` makes the session-start hook provision in the background and return at
-once, so a session never waits on a VM.
+| Key | Meaning |
+| --- | --- |
+| `create_on` | Signals that provision a sandbox: `session_start`, `subagent_start`, `run`, `mcp` |
+| `destroy_on` | Signals that delete it: `session_end`, `subagent_stop`, `never`. Empty: a sandbox outlives its session, and `gc` reclaims it when idle |
+| `reuse_existing` | A new session attaches to the scope's existing sandbox. `false` builds a new one per create signal |
+| `warm_on_session_start` | The session-start hook provisions in the background and returns at once |
+| `auto_reclaim` | Ordinary commands run the `gc` sweep, at most once per `reclaim_every` |
+| `reclaim_every` | Minimum interval between automatic sweeps |
+| `idle_timeout` | A sandbox or pack unused this long is reclaimable. `"never"` disables the idle rule |
+| `min_free_gb` | Free-disk margin. Below it, boxer skips writing a pack and pulls the image instead |
+| `packs_keep_last` | Keep at most this many packs regardless of age. `0` keeps all the idle rule allows |
 
 ## Per-harness overrides
 
 ```toml
-[harness.kimi]
+[harness.kimi]            # example
 mode        = "tool"
 enforcement = "hook"
 isolation   = "session"
 ```
 
-Those three keys, and no others. A harness's capabilities differ; the rest of the configuration is
-the repository's and does not.
+`[harness.<name>]` accepts only `mode`, `enforcement` and `isolation`. Everything else is
+repository-wide.
 
 ## Telemetry
 
@@ -369,83 +334,95 @@ the repository's and does not.
 [telemetry]
 enabled         = false
 sink            = "none"    # none | file | stderr | otel
-path            = ""        # default: $XDG_STATE_HOME/boxer/events.jsonl
+path            = ""        # file sink; empty: $XDG_STATE_HOME/boxer/events.jsonl
 record_commands = false
 endpoint        = ""        # otel only
 ```
 
-Off by default: with no `[telemetry]` table, boxer writes no log, no metrics and nothing to the
-network. `enabled = true` with no sink named means `file`, because that is what the setting meant;
-`path` then defaults to `$XDG_STATE_HOME/boxer/events.jsonl`. Nothing leaves the machine unless you build with `-tags otel` and set an `endpoint`. See
-[Events](/docs/reference/events).
+| Key | Meaning |
+| --- | --- |
+| `telemetry.enabled` | Off by default: no log, no metrics, no network. `true` with `sink = "none"` means `file` |
+| `telemetry.sink` | Where events go |
+| `telemetry.path` | File sink path. Empty: `$XDG_STATE_HOME/boxer/events.jsonl`, else `~/.local/state/boxer/events.jsonl` |
+| `telemetry.record_commands` | Keep command lines in events; otherwise they are redacted |
+| `telemetry.endpoint` | OTLP endpoint. Only in a binary built with `-tags otel` |
+
+See [events](/docs/reference/events).
 
 ## Environment variables
 
-Fifteen scalar settings are also readable from the environment, for harnesses that offer no other
-way to configure a subprocess. Lists are not: they are repository policy.
+Eighteen scalar settings can be set from the environment, for harnesses that offer no other way to
+configure a subprocess. Lists cannot.
 
-```
-BOXER_ISOLATION            BOXER_MODE          BOXER_IMAGE      BOXER_CPUS
-BOXER_ON_MISSING_ID        BOXER_INTEGRATION   BOXER_SMOLFILE   BOXER_MEMORY
-BOXER_REQUIRE_WORKTREE     BOXER_ENFORCEMENT   BOXER_MOUNT_AT   BOXER_NETWORK_MODE
-BOXER_ON_SANDBOX_UNAVAILABLE   BOXER_WORKTREE_MANAGE   BOXER_TELEMETRY_SINK
-BOXER_WARM_ON_SESSION_START   BOXER_BACKEND   BOXER_URLS
-```
+| Variable | Key |
+| --- | --- |
+| `BOXER_BACKEND` | `backend` |
+| `BOXER_ISOLATION` | `isolation` |
+| `BOXER_ON_MISSING_ID` | `on_missing_id` |
+| `BOXER_REQUIRE_WORKTREE` | `require_worktree` |
+| `BOXER_WORKTREE_MANAGE` | `worktree.manage` |
+| `BOXER_INTEGRATION` | `integration` |
+| `BOXER_MODE` | `mode` |
+| `BOXER_ENFORCEMENT` | `enforcement` |
+| `BOXER_ON_SANDBOX_UNAVAILABLE` | `on_sandbox_unavailable` |
+| `BOXER_IMAGE` | `image` |
+| `BOXER_SMOLFILE` | `smolfile` |
+| `BOXER_MOUNT_AT` | `mount_at` |
+| `BOXER_CPUS` | `cpus` |
+| `BOXER_MEMORY` | `memory` |
+| `BOXER_NETWORK_MODE` | `network.mode` |
+| `BOXER_URLS` | `urls.enabled` (a boolean) |
+| `BOXER_TELEMETRY_SINK` | `telemetry.sink`; any value but `none` also sets `telemetry.enabled` |
+| `BOXER_WARM_ON_SESSION_START` | `warm_on_session_start` (a boolean) |
 
-`doctor` names the variable rather than reporting "env", so a surprising value can be traced to the
-thing that set it.
+`boxer doctor` names the variable as the source of a value.
 
 ## devcontainer.json
 
-When the repository has one, boxer reads it first and everything in `boxer.toml` overrides it.
+boxer reads `.devcontainer/devcontainer.json` (or `.devcontainer.json`) first; any key set in
+`boxer.toml` overrides it.
 
 | devcontainer.json | boxer.toml |
 | --- | --- |
 | `image` | `image` |
-| `initializeCommand` | `prep.commands` — runs on the host, as the specification says |
+| `initializeCommand` | `prep.commands` (runs on the host, as the specification says) |
 | `onCreateCommand` | `image_setup` |
 | `updateContentCommand`, then `postCreateCommand` | `setup` |
 | `postStartCommand` | `start` |
 | `workspaceFolder` | `mount_at` |
-| `forwardPorts` | `network.ports` as `auto:<port>` — a free host port per worktree |
+| `forwardPorts` | `network.ports` as `auto:<port>` |
 | `portsAttributes.<port>.requireLocalPort` | keeps that port fixed: `<port>:<port>` |
 | `portsAttributes.<port>.label` | `urls.names` |
 | `appPort` | `network.ports`, fixed, as Docker's `-p` is |
 | `containerEnv`, `remoteEnv` | `env` (`remoteEnv` wins where both name a variable) |
-| `mounts` | `mounts` (bind mounts only; a Docker volume has nothing to bind) |
+| `mounts` | `mounts` (bind mounts only) |
 | `remoteUser`, else `containerUser` | `user` |
-| `hostRequirements.cpus`, `.memory` | `cpus`, `memory` — raised to the minimum, never lowered |
+| `hostRequirements.cpus`, `.memory` | `cpus`, `memory`, raised to the minimum, never lowered |
 
-**Variables are resolved on the host**, in every string: `${localWorkspaceFolder}` and its
-`Basename` (this worktree), `${containerWorkspaceFolder}` and its `Basename` (the mount), and
-`${localEnv:NAME}` or `${localEnv:NAME:default}`. `${containerEnv:NAME}` resolves inside
-`remoteEnv` when `containerEnv` defines the name. Anything boxer cannot know on the host —
-another `${containerEnv:…}`, `${devcontainerId}` — is named in a warning, and an `env` value or a
-mount that depends on one is dropped rather than passed on literally, because a mount of a
-directory called `${localWorkspaceFolder}` looks configured and is empty.
+A command given as an object of named commands runs them in name order.
 
-**Refused by name** — a warning, and the setting has no effect:
+**Variables are resolved on the host**, in every string: `${localWorkspaceFolder}` and
+`${localWorkspaceFolderBasename}` (this worktree), `${containerWorkspaceFolder}` and
+`${containerWorkspaceFolderBasename}` (the mount), and `${localEnv:NAME}` or
+`${localEnv:NAME:default}`. `${containerEnv:NAME}` resolves inside `remoteEnv` when `containerEnv`
+defines the name. Anything else unresolvable on the host (another `${containerEnv:…}`,
+`${devcontainerId}`) produces a warning, and the `env` value or mount that uses it is dropped.
+
+**Refused by name**, with a warning; the setting has no effect:
 
 | key | why |
 | --- | --- |
-| `features`, `build`, `dockerFile` | they need an image build, which boxer does not do |
+| `features`, `build`, `dockerFile` | need an image build, which boxer does not do |
 | `dockerComposeFile` | several containers; boxer runs one guest per worktree |
-| `runArgs`, `privileged`, `capAdd`, `securityOpt` | they change the sandbox's own boundary, which a repository file does not get to do |
+| `runArgs`, `privileged`, `capAdd`, `securityOpt` | would change the sandbox's own boundary |
 | `workspaceMount` | boxer always mounts the worktree, at `mount_at` |
 | `overrideCommand: false` | boxer never runs the image's own command; put it in `start` |
 | `postAttachCommand` | nothing attaches to a sandbox |
 | `init` | the guest already reaps what it starts |
 | `hostRequirements.gpu` (unless `"optional"`) | no backend passes a GPU through |
 
-**Read and deliberately ignored**, because they describe an editor rather than an environment:
-`name`, `customizations`, `shutdownAction`, `userEnvProbe`, `otherPortsAttributes`, and the
-`portsAttributes` fields other than `label` and `requireLocalPort`. `waitFor` has no equivalent:
-boxer's `ready` is a probe of the thing itself, not a choice of lifecycle phase, and is the better
-answer to the question `waitFor` asks. `hostRequirements.storage` is not checked; `min_free_gb`
-covers the disk. `updateRemoteUserUID` is always on, which is the specification's default: boxer makes the
-`user` able to write the worktree, as described under [the guest](#the-guest) — verified on
-smolvm on macOS and on rootless podman on Fedora.
-
-`boxer.toml` overrides a key only where you set one, so the two files coexist rather than
-competing. `boxer doctor` says which file each value
-came from, so a value you did not write is traceable to the file that did.
+**Ignored**, because they describe an editor rather than an environment: `name`,
+`customizations`, `shutdownAction`, `userEnvProbe`, `otherPortsAttributes`, and `portsAttributes`
+fields other than `label` and `requireLocalPort`. `waitFor` has no equivalent; use `ready`.
+`hostRequirements.storage` is not checked; `min_free_gb` covers disk. `updateRemoteUserUID` is
+always on: boxer makes `user` able to write the worktree, as described under [guest](#guest).

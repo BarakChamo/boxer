@@ -1,9 +1,8 @@
 # Examples
 
-Working configurations for common projects. Each directory is either a **complete project** you
-can run as it is, or a **config** to drop into an existing one; the table says which. Every
-`boxer.toml` and `devcontainer.json` here is parsed by the test suite, so none of them can drift
-out of date with the binary. Every one except `monorepo` has also been run on a real sandbox.
+Working configurations for common projects. Each directory is either a runnable project or a
+config to drop into an existing one. The test suite parses every `boxer.toml` and
+`devcontainer.json` here, and every example except `monorepo` has been run on a real sandbox.
 
 | example | kind | shows |
 | --- | --- | --- |
@@ -16,8 +15,7 @@ out of date with the binary. Every one except `monorepo` has also been run on a 
 | [`host-prep`](host-prep) | config | installing on the host with `[prep]` and `$BOXER_TARGET_FLAGS`, and when not to |
 | [`docker-backend`](docker-backend) | config | the same project on docker or podman, and what that gives up |
 
-To run a runnable one, it needs to be its own git repository, because boxer keys a sandbox to a
-worktree:
+A runnable example must be its own git repository, because boxer keys a sandbox to a worktree:
 
 ```sh
 cp -R examples/go-api /tmp/go-api && cd /tmp/go-api
@@ -25,14 +23,13 @@ git init -q && git add -A && git commit -qm init
 boxer up && curl -sk "$(boxer url)"
 ```
 
-What every example has in common, because every one of these tripped someone:
+Every example follows these rules:
 
-- **Servers bind `0.0.0.0`**, never `127.0.0.1`: a forwarded port arrives on the guest's interface.
-- **Ports are `auto:`**, never fixed, in anything committed: a fixed host port makes the second
+- Servers bind `0.0.0.0`, not `127.0.0.1`: a forwarded port arrives on the guest's interface.
+- Ports are `auto:`, never fixed, in anything committed: a fixed host port makes the second
   worktree fail to start.
-- **`ready` is a real probe** of the server, so `boxer up` means "answering", not "launched".
-- **The allowlist names the package registry** and nothing else; the image registry is allowed
-  automatically.
+- `ready` probes the server, so `boxer up` returns when it answers, not when it was launched.
+- The allowlist names only the package registry; the image registry is allowed automatically.
 
-The configuration reference is `site/content/docs/reference/configuration.mdx`, and the guides
-behind these are under `site/content/docs/guides/`.
+Configuration reference: `site/content/docs/reference/configuration.mdx`. Guides:
+`site/content/docs/guides/`.

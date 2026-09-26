@@ -1,37 +1,34 @@
 ---
 title: Troubleshooting
-description: The failures that are worth recognising on sight.
+description: Common failures, what causes them, and how to fix them.
 ---
 
-Start with `boxer doctor`. It resolves the same configuration a real command would and prints what
-it found, including the setups that look right and will not hold.
+Start with `boxer doctor`. It resolves the same configuration a real command would and reports
+setups that look right but will not hold.
 
-## My command ran on the host
+## A command ran on the host
 
 Check, in order:
 
-1. `boxer doctor` — is an integration installed for this harness, and does it say enforcement is
-   in effect?
-2. Is the program on `intercept`? Nothing else is sandboxed.
-3. Does the harness run commands through a **login shell**? `zsh -lc` rebuilds `PATH` and demotes
-   shims. `doctor` reports this; use hooks or tool mode instead.
-4. Are you in a **linked worktree with Codex**? Codex reads project config from the main
-   repository. `boxer install codex` writes both; a hand-installed `.codex/` in the worktree alone
-   is never read.
+1. **No integration in effect.** `boxer doctor` shows whether one is installed for this harness
+   and enforcing. If not, `boxer install <harness>`.
+2. **The program is not on `intercept`.** Only listed programs are sandboxed. Add it.
+3. **The harness uses a login shell.** `zsh -lc` rebuilds `PATH` and puts system binaries ahead
+   of shims; `doctor` reports this. Use hooks or tool mode ([enforcement](/docs/guides/enforcement)).
+4. **Codex in a linked worktree.** Codex reads project config from the main repository, so a
+   `.codex/` in the worktree alone is never read. `boxer install codex` writes both.
 
 ## The sandbox will not start
 
-`read checkpoint footer: I/O error` means a truncated environment pack, which is what an
-interrupted `pack create` leaves behind. boxer detects and rebuilds these, but `boxer up --rebuild`
-forces it.
-
-`exit 137` during setup is the kernel's out-of-memory killer. Raise `memory` in `boxer.toml` or run
-fewer sandboxes at once.
+- **`read checkpoint footer: I/O error`.** A truncated environment pack, left by an interrupted
+  `pack create`. boxer usually detects and rebuilds it; `boxer up --rebuild` forces it.
+- **`exit 137` during setup.** The out-of-memory killer. Raise `memory` in `boxer.toml` or run
+  fewer sandboxes at once.
 
 ## A download or install fails inside the sandbox
 
-The default `network.mode` is `allowlist`, and inside the guest a refused connection looks like an
-ordinary DNS or connect error with no policy in it. boxer asks smolvm what it refused and names it:
+**Cause:** the default `network.mode` is `allowlist`, and a refused connection looks like an
+ordinary DNS or connect error in the guest. boxer names the refused host after the command:
 
 ```console
 $ boxer run -c 'npm ci'
@@ -40,56 +37,44 @@ boxer: the egress allowlist refused registry.npmjs.org during this command
 boxer: fix: add it to network.allow_hosts in boxer.toml, or set network.mode = "on"
 ```
 
-A failed run names only what was refused while it ran. `boxer doctor` prints everything the
-machine still remembers, under `denied:`, which is the list to read when you are not sure which
-command was responsible.
+**Fix:** do what the `fix:` line says. If you are not sure which command was refused, `boxer doctor`
+lists every host the machine refused under `denied:`.
 
-## Setup ran but my dependencies are missing
+## Setup ran but dependencies are missing
 
-`image_setup` is captured in the image snapshot; `setup` lands in the worktree. Dependency installs
-belong in `setup`. In `image_setup` they leave a marker saying the work is done and a worktree with
-nothing in it.
+**Cause:** the install is in `image_setup`, which is captured in the image, not in the worktree.
+**Fix:** move dependency installs to `setup`. See [environment](/docs/guides/environment).
 
 ## The dev server does not answer
 
-- `ready` may be passing before the server really is. Its own output is in `/tmp/boxer-start.log`
-  in the guest, and boxer quotes the tail in the error. A service that dies is not restarted: boxer launches
-  the `start` list once per running VM and does not supervise it, so the next command fails and
-  says so.
-- The server may be bound to `127.0.0.1` inside the guest. A forwarded port arrives on the guest's
-  interface, so a loopback-only listener never sees it, while a `ready` probe run inside the guest
-  still passes. Bind `0.0.0.0`.
-- A second dev server takes down the first. If an agent cannot reach the one you gave it, it will
-  often start its own — check what address you told it about: a host-forwarded port is meaningless
-  from *inside* the guest, where the server is simply on `127.0.0.1:<guest port>`.
-- A URL from `[urls]` refuses the connection. The portless proxy is not running. boxer starts it
-  whenever it runs a command and finds it down, so any `boxer run` brings it back; by hand,
-  `portless proxy start --port 1355`.
-- A URL answers 404. The name is not registered — the sandbox was created before `[urls]` was on,
-  or its route was removed by hand. `boxer down && boxer up` registers it again; `boxer status`
-  prints the name it has.
-- `boxer: warning: urls.enabled is set but portless is not installed`. `npm install -g portless`.
-  Nothing else changes: ports are still forwarded and `status` still prints them.
-
-- Next.js refuses its own dev chunks when reached through a forwarded port. Add
-  `allowedDevOrigins: ['127.0.0.1', 'localhost']`. Through a `[urls]` name it is
-  `allowedDevOrigins: ['*.localhost']`: Next.js 15.5 serves the page, the chunks and hot reload
-  through portless, but logs "Cross origin request detected" for any hostname below `localhost`
-  and says a future major version will refuse it. That one entry covers every worktree's name,
-  including two-label ones like `fix-ui.myapp.localhost`; checked against 15.5.4 with the warning
-  present without it and absent with it.
+- **`boxer up` passed but the server is not ready.** `ready` is too weak a probe. The server's
+  output is in `/tmp/boxer-start.log` in the guest, and boxer quotes its tail in the error. boxer
+  starts `start` once per boot and does not restart a service that dies.
+- **The forwarded port does not answer.** The server is bound to `127.0.0.1` in the guest.
+  A `ready` probe inside the guest still passes. Bind `0.0.0.0`.
+- **An agent started a second server.** It could not reach the one you told it about. Inside the
+  guest the server is at `127.0.0.1:<guest port>`; a host-forwarded port means nothing there.
+- **A `[urls]` name refuses the connection.** The portless proxy is down. Any `boxer` command
+  restarts it; by hand, `portless proxy start --port 1355`.
+- **A `[urls]` name answers 404.** The name is not registered: the sandbox predates `[urls]`, or its
+  route was removed by hand. `boxer down && boxer up`; `boxer status` prints the name.
+- **`boxer: warning: urls.enabled is set but portless is not installed`.** `npm install -g
+  portless`. Ports are still forwarded meanwhile.
+- **Next.js refuses or warns about its dev chunks.** Add `allowedDevOrigins: ['127.0.0.1',
+  'localhost']` for a forwarded port, and `'*.localhost'` for a `[urls]` name. See
+  [URLs](/docs/guides/urls#nextjs).
 
 ## An interactive harness hangs
 
-Read what it is showing. Interactive agents block on dialogs that headless ones never see:
-permission prompts, a bypass-permissions confirmation, a skill-approval prompt. Grant tools in
-project settings and include every tool the agent needs, `Skill` among them.
+**Cause:** it is waiting on a dialog headless runs never show: a permission prompt, a
+bypass-permissions confirmation, or a skill approval. **Fix:** read the pane, and grant every tool
+the agent needs in project settings, `Skill` included.
 
-## Everything is slow the first time
+## The first run is slow
 
-The image has to be pulled and `image_setup` has to run. After that a pack carries the result and
-starts are fast. If the second run is also slow, the pack key changed — `image_setup`, `env`,
-`mounts`, `start` and `ready` are all part of it.
+**Cause:** the image is pulled and `image_setup` runs. Later starts reuse the pack. If the second
+run is also slow, the pack key changed: `image_setup`, `env`, `mounts`, `start` and `ready` are all
+part of it.
 
 ## Disk is full
 
@@ -98,4 +83,4 @@ boxer ls --resources
 boxer gc --all
 ```
 
-`boxer doctor` prints what boxer costs on disk.
+`boxer doctor` prints what boxer uses on disk.

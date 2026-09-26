@@ -1,14 +1,15 @@
 # Installing on the host with [prep]
 
-The slow part of a first start is installing dependencies through the guest's mount. `[prep]` runs
-that install on the host instead — devcontainer's `initializeCommand` — with the guest's platform
-passed in, so the binaries npm fetches are the Linux ones.
+`[prep]` runs `npm ci` on the host (like devcontainer's `initializeCommand`) instead of through the
+guest's mount, with the guest's platform passed in `$BOXER_TARGET_FLAGS` so npm fetches the Linux
+binaries. Drop `boxer.toml` into a Next.js project with a lockfile.
 
 ```sh
 boxer up
-boxer run -- node -e "console.log(require.resolve('@next/swc-linux-arm64-musl'))"   # proves it
+# on Apple Silicon: the guest-platform binary was installed
+boxer run -- node -e "console.log(require.resolve('@next/swc-linux-arm64-musl'))"
 ```
 
-It is opt-in for a reason: it is only correct for dependencies that download a prebuilt binary.
-Read the comments in `boxer.toml` before using it on a project with native modules, and run
-`boxer doctor`, which lists the packages it would get wrong.
+Only correct for packages that download a prebuilt binary. A package that compiles at install time
+(node-gyp) builds for the host and fails in the guest; `boxer doctor` lists any in your lockfile.
+For such a project, install in the guest with `setup` instead.

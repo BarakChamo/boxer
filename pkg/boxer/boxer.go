@@ -6,6 +6,7 @@
 package boxer
 
 import (
+	"os"
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
@@ -13,7 +14,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
-// Machine is one smolvm machine as boxer sees it; Labels carry the boxer.* keys.
+// Machine is one sandbox, on any backend, as boxer sees it; Labels carry the boxer.* keys.
 type Machine = vm.Machine
 
 // Scope is the resolved sandbox identity: Key is the machine name, Root the mounted worktree.
@@ -71,14 +72,20 @@ func (b *Box) Down() error { return b.env.Down() }
 // Status returns the machine and whether it exists.
 func (b *Box) Status() (Machine, bool, error) { return b.env.Exists() }
 
-// List returns every boxer-owned machine on the host.
-func List() ([]Machine, error) { return vm.Owned(vm.Host("")) }
+// List returns every boxer-owned machine on the backend the CLI would use from the process's
+// working directory: the one boxer.toml names, else BOXER_BACKEND, else smolvm.
+func List() ([]Machine, error) { return vm.Owned(host()) }
 
 // Stop halts a machine by name; stopping a stopped machine is not an error.
-func Stop(name string) error { return vm.Host("").Stop(name) }
+func Stop(name string) error { return host().Stop(name) }
 
 // Delete removes a machine by name.
-func Delete(name string) error { return vm.Host("").Delete(name) }
+func Delete(name string) error { return host().Delete(name) }
+
+func host() vm.Backend {
+	cwd, _ := os.Getwd()
+	return vm.Host(box.HostBackend(cwd))
+}
 
 // LastUsed returns when the scope last ran a command, or the zero time when unknown.
 func LastUsed(name string) time.Time { return box.LastUsed(name) }

@@ -1,13 +1,12 @@
 ---
 title: Orchestrators
-description: Tools that cut a worktree per task, and what boxer does about it.
+description: "Set up boxer for tools that create a worktree per task: T3 Code, Paperclip, herdr, Conductor, Multica, OpenHands."
 ---
 
-An orchestrator opens a worktree for each task and starts a harness in it. Since boxer keys a
-sandbox to the worktree, that is already the right shape: the sandbox appears with the worktree
-and goes away with it.
-
-What differs is how the harness gets launched, and therefore which integration level applies.
+An orchestrator opens a worktree for each task and starts a harness in it. boxer keys a sandbox
+to the worktree, so each task gets its own sandbox, removed with the worktree. What differs per
+orchestrator is how it launches the harness, and so which
+[integration level](/docs/guides/enforcement) applies.
 
 ## Warm the sandbox first
 
@@ -16,19 +15,18 @@ boxer install git
 ```
 
 This writes a `post-checkout` hook (honouring `core.hooksPath`) that runs `boxer up --detach` in
-every worktree `git worktree add` creates, so the VM is warm before any harness opens it.
+every worktree `git worktree add` creates, so the VM is booting before any harness opens it.
 
-Any orchestrator that creates a worktree and launches into it wants this. The failure without it
-is not a slow start but a broken session: T3 Code creates the worktree and starts the harness in
-the same step, and its provider fails with `turn/setPermissionMode failed` while a cold VM boots
-(reproduced three times, 32 to 39 seconds). With the hook, the same cell passes.
+Use it with any orchestrator that creates a worktree and launches into it at once. Without it, T3
+Code's provider fails with `turn/setPermissionMode failed` while a cold VM boots (32 to 39
+seconds).
 
-`boxer install all` leaves git configuration alone, so this one is opt-in and separate.
+`boxer install all` does not touch git configuration, so run this separately.
 
 ## T3 Code
 
 Cuts a worktree and runs Claude Code in it. The project layer is inherited, so
-`boxer install claude-code` — committed — is the whole integration.
+a committed `boxer install claude-code` is the whole integration.
 
 ```sh
 boxer install claude-code
@@ -36,36 +34,33 @@ git add .claude .mcp.json && git commit -m 'boxer'
 boxer install git                                    # warm each new worktree
 ```
 
-The commit matters: an orchestrator cuts its worktree from a branch, so the integration has to be
-in the branch to be inherited.
+Commit the files: the orchestrator creates its worktree from a branch, so the integration must be
+in that branch.
 
 ## Paperclip
 
-Launches its harness over ACP with an environment of its own. The project layer is inherited the
-same way, but boxer's trace variable is not, so `boxer doctor` inside the task worktree is how you
-confirm it took.
+Launches its harness over ACP with its own environment. The committed project layer is inherited
+as with T3 Code, but boxer's trace variable is not, so run `boxer doctor` in the task worktree to
+confirm the integration is active.
 
 ## herdr
 
-Drives a harness interactively in a terminal pane, which makes two things matter that do not
-elsewhere:
+Drives a harness interactively in a terminal pane:
 
-- The harness is started by herdr, so there is no command line to put `--permission-mode` on.
-  Grants have to live in project settings, and they must include `Skill` — boxer installs one, and
-  using a skill is its own permission. A pane sitting on `Use skill "boxer"?` looks exactly like a
-  hang.
-- `terminal.default_shell` can point at `boxer shim install --shell`'s wrapper, which puts every
-  pane's shell in the sandbox. This works for a person typing in a pane. herdr will not attach its
-  own agent to such a pane — it identifies a pane by its foreground process, which is then `boxer`
-  rather than a shell.
+- herdr starts the harness, so there is no command line to add `--permission-mode` to. Grant
+  permissions in project settings, and include `Skill`: boxer installs a skill, and using one needs
+  its own permission. A pane waiting on `Use skill "boxer"?` looks like a hang.
+- `terminal.default_shell` can point at `boxer-bash` (from `boxer shim install --shell`), which
+  puts every pane's shell in the sandbox. This works for a person typing in a pane, but herdr will
+  not attach its own agent to such a pane: it identifies a pane by its foreground process, which is
+  then `boxer`, not a shell.
 
 ## Conductor
 
-Conductor runs each harness's real binary against an ordinary git worktree, so there are two ways
-in and the cheap one probably already works.
+Conductor runs each harness's real binary against an ordinary git worktree.
 
-**Try the project layer first.** If Conductor inherits it like every other tool that uses real
-worktrees, the ordinary install is the whole integration:
+**Try the project layer first.** If Conductor inherits it, as other tools using real worktrees do,
+the ordinary install is the whole integration:
 
 ```sh
 boxer install claude-code
@@ -78,20 +73,19 @@ git add .claude .mcp.json && git commit -m 'boxer'
 boxer install conductor        # writes .conductor/settings.toml
 ```
 
-That writes a managed block pointing `claude_code_executable_path` and friends at harness shims,
-so Conductor spawns the shim, the shim runs `boxer shell <harness>`, and the harness itself runs
-in the VM.
+That writes a managed block pointing `claude_code_executable_path` and the other harness paths at
+harness shims. Conductor spawns the shim, the shim runs `boxer shell <harness>`, and the harness
+runs [in the VM](/docs/guides/inside).
 
 <Callout>
-Conductor's local workspaces are GUI-only: it is a native app, not an Electron one, and its CLI
-drives cloud workspaces, which run on Conductor's infrastructure where boxer has nothing to
-sandbox. Verification is a ten-minute manual check rather than an automated one.
+Conductor's local workspaces are GUI-only, and its CLI drives cloud workspaces where boxer has
+nothing to sandbox, so this integration is verified by hand, not by the evals.
 </Callout>
 
 ## Multica
 
-Multica runs a daemon that cuts a worktree per issue. The integration is the inside path: point
-its runtime profile at a boxer harness shim.
+Multica runs a daemon that creates a worktree per issue. Point its runtime profile at a boxer
+harness shim, so the harness runs in the VM:
 
 ```sh
 boxer shim install --harness claude ~/.boxer/shims
@@ -99,21 +93,18 @@ multica runtime profile create --command-name claude
 multica runtime profile set-path claude ~/.boxer/shims/claude
 ```
 
-Prefer the profile over `MULTICA_CLAUDE_PATH`: it is per-installation configuration rather than
-per-process environment, so it survives a daemon restart and applies to every task the daemon
-runs. Start the daemon from a shell with `boxer` on `PATH`.
+Prefer the profile over `MULTICA_CLAUDE_PATH`: it survives a daemon restart and applies to every
+task. Start the daemon from a shell with `boxer` on `PATH`.
 
 <Callout type="warn">
-Multica is the one orchestrator boxer has **not** verified end to end. Its daemon needs a
-configured server, which the evaluation host did not have, so its cell is a checklist that reports
-itself as skipped rather than a run that passed. The steps above follow from what the binary
-reads; treat them as untested until you have run them.
+**Untested.** Multica's daemon needs a configured server, which the evaluation host did not have,
+so its eval cell reports as skipped. The steps above follow from what the binary reads.
 </Callout>
 
 ## OpenHands
 
-OpenHands lets you set the shell its terminal uses, which is the shell-substitution level: the
-agent's entire terminal is the sandbox, with no boxer integration inside the harness.
+OpenHands lets you set its terminal's shell, so the agent's whole terminal can be the sandbox
+with no boxer integration in the harness:
 
 ```sh
 boxer shim install --shell ~/.boxer/shims     # writes boxer-bash

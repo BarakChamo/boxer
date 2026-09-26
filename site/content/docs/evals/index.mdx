@@ -1,15 +1,12 @@
 ---
 title: Why there are evaluations
-description: What boxer claims, and how those claims are checked.
+description: What boxer claims, and the evaluation tiers that check each claim.
 ---
 
-boxer's claims are behavioural: *this harness's commands run in the sandbox*, *this level of
-integration holds*, *a worktree's sandbox is its own*, *an agent finds its own server*. None of that
-can be established by unit tests, because the thing being tested is a real coding agent's behaviour
-against a real runtime.
-
-So there are evaluation tiers, and the results are published with the conditions that produced
-them.
+boxer's claims are about behaviour: *this harness's commands run in the sandbox*, *this integration
+level holds*, *a worktree's sandbox is its own*, *an agent finds its own server*. Unit tests cannot
+establish these, because they depend on a real coding agent running against a real runtime. The
+evaluation tiers test them, and every result is published with the conditions it was measured under.
 
 | Tier | What it asks | Cost |
 | --- | --- | --- |
@@ -21,6 +18,9 @@ them.
 | `sdlc` | Twelve development lifecycles in parallel worktrees | ~$0.30 |
 | `matrix` | The same workload at every integration level | ~$2 |
 
+An integration level is how boxer routes a harness's commands into the sandbox (hook rewrite, shims,
+running inside the guest, ...); see [Enforcement](/docs/guides/enforcement).
+
 ```sh
 make smoke          # one backend; BOXER_BACKEND=docker make smoke for another
 make eval-t1        # no credentials needed
@@ -28,8 +28,8 @@ make eval-matrix    # needs an AI Gateway key
 ```
 
 <Cards>
-  <Card title="How boxer is evaluated" href="/docs/evals/strategy" description="The layers, the oracle, the rules, and what they have caught." />
+  <Card title="How boxer is evaluated" href="/docs/evals/strategy" description="The layers, the oracle, the rules, and the bugs they caught." />
   <Card title="Support, measured" href="/docs/evals/results" description="The latest results, by level, harness and backend." />
   <Card title="The matrix tier" href="/docs/evals/matrix" description="The workload, the thirteen claims, and how a cell is scored." />
-  <Card title="Benchmarks" href="/docs/evals/benchmarks" description="What boxer costs, and the numbers that did not survive." />
+  <Card title="Benchmarks" href="/docs/evals/benchmarks" description="What boxer costs, and the numbers that were withdrawn." />
 </Cards>

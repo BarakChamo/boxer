@@ -1,11 +1,12 @@
 ---
 title: JSON output
-description: The language-agnostic API, for anything that watches sandboxes.
+description: The JSON each boxer command prints, its exit codes, and its error shape.
 ---
 
-`--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks` and `logs` prints exactly one
-JSON document on stdout — an object or an array, indented, with snake_case fields. Human output is
-unchanged without the flag.
+`--json` (or `BOXER_OUTPUT=json`) prints exactly one indented JSON document on stdout, with
+snake_case fields, on: `ls`, `status`, `down`, `stop`, `rm`, `gc`, `doctor`, `brief`, `tasks`,
+`logs`, `backends`, `integrations`, `fork`, `fork ls`, `pack ls` and `capsule inspect`.
+`watch --json` prints one object per line ([below](#watching)).
 
 Fields are added, never repurposed or removed.
 
@@ -42,18 +43,14 @@ Fields are added, never repurposed or removed.
 
 Exit codes: `0` running, `3` stopped, `4` absent, `1` refused.
 
-`ports` maps guest port to the host port it landed on, which is the only way to know where an
-`auto:` forward went. `urls` maps it to its stable name when [`[urls]`](/docs/reference/configuration#urls)
-is on, and is absent otherwise; prefer it, because it does not change when the sandbox restarts.
-`ls --json` carries `urls` on each row too. `events` appears when the file telemetry sink is on: the last five events
-for this scope, so a dashboard gets state and recent history in one call.
-
-`name` is the scope key said out loud. It is derived from the key, so nothing stores it and every
-boxer agrees on it; `--scope` accepts either form.
-
-`last_run` is what the last command in this scope did, when one has been recorded. It is what
-`boxer capsule new` captures, and it carries a bounded tail of both streams in `stdout_tail` and
-`stderr_tail`.
+| Field | Meaning |
+| --- | --- |
+| `name` | The two-word form of `scope`, derived from it. `--scope` accepts either |
+| `ports` | Guest port to the host port it landed on. The only way to find an `auto:` forward |
+| `urls` | Guest port to its stable name, when [`[urls]`](/docs/reference/configuration#urls) is on; absent otherwise. Prefer it: it survives restarts |
+| `resources` | The [`resources` object](#boxer-ls---json), when the sandbox exists |
+| `events` | The last five events for this scope, when the file telemetry sink is on |
+| `last_run` | The last command recorded in this scope; what `boxer capsule new` captures. Also carries `scope`, `image`, `pack`, `config_files`, and bounded `stdout_tail` / `stderr_tail` |
 
 ## `boxer ls --json`
 
@@ -72,14 +69,30 @@ An array, one object per sandbox:
   "last_used": "2026-09-20T14:31:09Z",
   "harness": "claude-code",
   "session": "01J9X…",
-  "agent": ""
+  "agent": "",
+  "backend": "smolvm"
 }
 ```
 
-`harness`, `session` and `agent` appear only when the harness said, which is what turns a list of
-hashes into something a person can act on.
+| Field | Present |
+| --- | --- |
+| `harness`, `session`, `agent` | When the harness supplied them |
+| `backend` | Always; the runtime it lives on, so `ls -A` can mix them |
+| `ports`, `urls` | When it forwards ports |
+| `git` | Unless `--no-git` |
+| `resources` | With `--resources` |
 
-`--resources` adds a `resources` object per sandbox:
+`git` is the state of the worktree the sandbox serves:
+
+```json
+"git": { "exists": true, "branch": "fix-ui", "dirty": true, "changed": 3, "ahead": 1, "behind": 0,
+         "pr": { "number": 42, "state": "OPEN", "url": "https://github.com/…/pull/42" } }
+```
+
+`exists: false` means the worktree is gone and the sandbox is waiting for `gc` or `rm --gone`.
+`detached: true` marks a detached `HEAD`. `pr` appears only with `--pr`.
+
+`resources`:
 
 | Field | |
 | --- | --- |
@@ -91,55 +104,76 @@ hashes into something a person can act on.
 | `disk_bytes` | the machine's data directory |
 | `measured_all` | false when something could not be read |
 
-Measuring runs `ps` and walks a directory per machine, so a plain listing does not pay for it. A
-measurement that fails is reported in the row rather than failing the command, because a listing
-that dies over a resource number is worse than one that is honest about what it could not read.
+A measurement that fails is reported in the row; the command does not fail.
 
-Each row also carries `backend` (the runtime it lives on, so `ls -A` can mix them), `ports` and
-`urls` when it forwards any, and `git`, the state of the worktree it serves:
+`boxer fork ls --json` prints the same row shape for this scope's children. `boxer fork --json`
+prints an array of the new children's names.
 
-```json
-"git": { "exists": true, "branch": "fix-ui", "dirty": true, "changed": 3, "ahead": 1, "behind": 0,
-         "pr": { "number": 42, "state": "OPEN", "url": "https://github.com/…/pull/42" } }
-```
+## `boxer down|stop|rm --json`
 
-`exists: false` means the worktree is gone and the sandbox is waiting for `gc` or `rm --gone`.
-`pr` is present only with `--pr`; `--no-git` omits `git` entirely.
+`{ "scope": …, "removed": true|false }`. `down` prints one object; `down --all`,
+`down --scope`, `stop` and `rm` print an array, one per sandbox acted on.
+
+## `boxer gc --json`
+
+An array of decisions. A sandbox row is the `ls` row plus `reason`, `deleted` and, on failure,
+`error`. A pack row has `pack` (its path), `bytes`, `reason` and `deleted`, and empty sandbox
+fields. Under `--dry-run`, `deleted` is `false`.
 
 ## `boxer backends --json`
 
 One object per backend: `name`, `configured`, `installed`, `binary`, `version`, `reachable`,
-`sandboxes`, `capabilities` (the same table `boxer doctor` prints), `problems` (misconfigurations
-found on real machines, in words), and with `--probe`, `probe: { ok, seconds, error }`. Exit 1 when
-the configured backend is missing or not answering, or a probe failed.
+`sandboxes`, `capabilities` (the table `boxer doctor` prints), `problems` (known
+misconfigurations, in words), and with `--probe`, `probe: { ok, seconds, error }`. Exit 1 when the
+configured backend is missing or not answering, or a probe failed.
 
 ## `boxer integrations --json`
 
-One object per integration: `name`, `kind` (`harness`, `orchestrator`, `tool`), `cli` (its path when
-on PATH), `project` and `user` (`installed`, `partial`, `no`, `n/a`), `skill` (`yes`, `no`),
-`stale` (installed files another boxer release wrote) and `fix` (the command that wires it in).
+One object per integration:
+
+| Field | Values |
+| --- | --- |
+| `name` | |
+| `kind` | `harness`, `orchestrator`, `tool` |
+| `cli` | its path, when on `PATH` |
+| `project`, `user` | `installed`, `partial`, `no`, `n/a` |
+| `skill` | `yes`, `no` |
+| `stale` | installed files written by another boxer release |
+| `fix` | the command that wires it in |
+
 "Installed" is decided by asking boxer's own installer which files it would write, so this and
-`boxer install` cannot disagree.
+`boxer install` agree.
 
-## `boxer stop|rm --json`
+## `boxer brief --json` and `boxer tasks --json`
 
-An array of `{ "scope": …, "removed": true|false }`, one per sandbox acted on.
+`brief`: `brief` (the prose), `scope`, `isolation`, `mount_at`, `mode`, `enforcement`,
+`intercept`, `passthrough`, `tasks` (name to command line), `task_details` (for table-form tasks),
+`ports` (as configured) and `urls` (whether `[urls]` is on).
 
+`tasks`: an array of `{ name, command, description, junit, timeout }`; empty fields are omitted.
+
+## `boxer pack ls --json`
+
+An array of `{ name, path, bytes, saved_at }`.
+
+## `boxer logs --json`
+
+An array of events, in the [event shape](/docs/reference/events#shape).
 
 ## `boxer doctor --json`
 
-The resolved configuration and everything boxer checked: `settings` with the file or environment
-variable each came from, `scope`, `git`, `shims`, `signals`, `storage`, `drift` and `warnings`.
+The resolved configuration and everything boxer checked: `version`, `backend` (capabilities),
+`config_files`, `settings` (each `{ key, value, source }`), `scope`, `git`, `image`,
+`image_reason`, `sandbox`, `shims`, `signals`, `storage`, `drift` and `warnings`.
 
-`warnings` is the field worth watching. It carries the setups that look right and do not hold — a
-login shell that demotes the shims, an installed file that has drifted from this binary's copy.
+`warnings` lists setups that look right and do not hold, such as a login shell that demotes the
+shims, or an installed file that has drifted from this binary's copy.
 
-`denied_hosts` appears when the sandbox exists, `network.mode` is `allowlist`, and smolvm
-recorded a refused outbound connection — a blocked name lookup or a blocked connection, both of
-which `doctor` reduces to the host you would add to the allowlist. It is the one diagnosis the
-guest cannot give you itself: inside the VM a blocked host is an ordinary DNS or connect error
-with no policy in it. `doctor` reports everything the machine remembers; a failed
-[run](/docs/guides/troubleshooting) reports only what was refused while that command ran.
+`denied_hosts` appears when the sandbox exists, `network.mode` is `allowlist`, and smolvm recorded a
+refused outbound connection or name lookup. Each entry is a host you would add to `allow_hosts`.
+Inside the guest a blocked host looks like an ordinary DNS or connect error. `doctor` reports
+everything the machine remembers; a failed [run](/docs/guides/troubleshooting) reports only what
+was refused during that command.
 
 ## Exit codes
 
@@ -160,15 +194,17 @@ stderr, exiting 1:
 ```json
 {
   "error": {
-    "reason": "not inside a git worktree",
-    "cause": "NO_WORKTREE",
-    "fix": "run boxer from inside a repository, or set require_worktree = \"off\""
+    "reason": "not inside a git repository",
+    "cause": "NO_REPOSITORY",
+    "fix": "cd into a git worktree, or `git init`"
   }
 }
 ```
 
-`cause` is a stable identifier; `reason` and `fix` are for people. The same shape renders three
-ways — prose on stderr, this object under `--json`, and the text of a failed MCP tool call.
+`cause` is a stable identifier; `reason` and `fix` are for people. The object also
+carries `scope` (`key`, `name`, `isolation`, `worktree`, `degraded`), empty when no scope was
+resolved. The same refusal appears as
+prose on stderr, this object under `--json`, and the text of a failed MCP tool call.
 
 | `cause` | When |
 | --- | --- |
@@ -176,10 +212,17 @@ ways — prose on stderr, this object under `--json`, and the text of a failed M
 | `WORKTREE_REQUIRED` | `require_worktree = "require"` and this is not a worktree |
 | `SCOPE_UNRESOLVED` | the scope could not be determined |
 | `NO_SANDBOX` | the command needs a sandbox that does not exist |
-| `CREATE_FAILED` / `START_FAILED` | smolvm refused |
+| `NO_SUCH_SCOPE` | `--scope` named a sandbox that does not exist |
+| `CREATE_FAILED` / `START_FAILED` | the backend refused |
+| `PREP_FAILED` | a `prep.commands` line exited non-zero |
 | `SETUP_FAILED` | a `setup` or `image_setup` line exited non-zero |
 | `HARNESS_INSTALL_FAILED` | inside mode could not install the harness in the guest |
 | `NO_SUCH_TASK` | `--task` named a task `boxer.toml` does not declare |
+| `NO_SUCH_PACK` | `pack use` named a pack that was never saved |
+| `NOT_FORKABLE` | `fork` on a sandbox not prepared with `fork --prepare` |
+| `NO_RUN_RECORD` | `capsule new` with no recorded run in this scope |
+| `DIRTY_WORKTREE` | `capsule replay` on a worktree with uncommitted changes, without `--allow-dirty` |
+| `CAPSULE_DRIFT` | `capsule replay` where `HEAD` differs from the capsule's, without `--allow-drift` |
 | `NO_IMAGE` | no image configured and none could be inferred |
 | `NO_FREE_PORT` | an `auto:` forward found no free host port |
 | `NOT_READY` | `ready` never passed within `ready_timeout` |
@@ -192,10 +235,9 @@ ways — prose on stderr, this object under `--json`, and the text of a failed M
 boxer watch --json [--interval 1s]
 ```
 
-One JSON object per line rather than an array, because a stream has no end and a consumer has to
-read it as it arrives. Two kinds of line share the stream.
+One JSON object per line. Two kinds of line share the stream.
 
-A **state change**, noticed by comparing successive listings:
+A **state change**, found by comparing successive listings:
 
 ```json
 {
@@ -205,24 +247,24 @@ A **state change**, noticed by comparing successive listings:
 }
 ```
 
-`change` is `present` for what already existed when the watch started, `created` for a new
-sandbox, `gone` for one that has been deleted, and otherwise the machine's new state as smolvm
-reports it (`running`, `stopped`). `sandbox` is the object `ls --json` prints, without
-`resources`.
+`change` is `present` for what existed when the watch started, `created` for a new sandbox, `gone`
+for a deleted one, and otherwise the backend's new state (`running`, `stopped`). `sandbox` is the
+`ls --json` row without `backend`, `ports`, `git` or `resources`.
 
-An **event**, when the file telemetry sink is on: the
-[event shape](/docs/reference/events#shape), passed through unchanged. A state change says a VM
-started; an event says what it was asked to do, and an interface wants both in one stream. With
-telemetry off, the stream carries state changes only.
+An **event**, when the file telemetry sink is on:
 
-Tell the two apart by key: a state change has `change` and `sandbox`, an event has `event`. Ignore
-a line shape you do not recognise rather than failing on it — lines are added, never repurposed.
+```json
+{ "time": "2026-09-20T14:31:10Z", "change": "event", "event": { "…": "the event shape" } }
+```
 
-`--interval` is how often boxer looks for state changes, one second by default. Events are read as
-they are written. `watch` runs until interrupted; it exits 1 and prints on stderr if it cannot
-reach smolvm.
+`event` is the [event shape](/docs/reference/events#shape), unchanged. With telemetry off, the
+stream carries state changes only. Tell the two apart by `sandbox` or `event`, and ignore a line
+shape you do not recognise.
+
+`--interval` is how often boxer compares listings; default `1s`. Events are read as they are
+written. `watch` runs until interrupted, and exits 1 with a message on stderr if it cannot reach
+the backend.
 
 <Callout>
-`boxer watch` is not part of the 1.0 stability promise. The commands listed at the top of this
-page are; a dashboard built on `watch` is building on a surface that may change.
+`boxer watch` is not covered by the 1.0 stability promise; the other commands on this page are.
 </Callout>

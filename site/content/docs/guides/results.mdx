@@ -1,11 +1,11 @@
 ---
 title: Test results and capsules
-description: Turning a failed run into an answer, and then into something you can hand to someone else.
+description: Summarise JUnit results after a run, and save a failure as a capsule someone else can replay.
 ---
 
-A failed command leaves a log. A log is not an answer to "which tests failed?", and it is not
-something another person can run. boxer has two small things for that, and they cost nothing
-when unused.
+boxer can summarise a run's JUnit reports, so you see which tests failed without reading the log,
+and save the last run as a **capsule**: a file that someone else can replay to check whether the
+failure still happens. Neither does anything unless you use it.
 
 ## Which tests failed
 
@@ -16,16 +16,16 @@ boxer run --junit junit.xml -- npm test
 ```
 
 ```console
-boxer: tests 128 passed, 3 failed, 1 error, 2 skipped (1 file)
+boxer: tests 128 passed, 3 failed, 1 error, 2 skipped (1 file(s))
+boxer:   FAIL api/AuthTest.refresh
 boxer:   FAIL cart/CheckoutTest.applies_discount
 boxer:   FAIL cart/CheckoutTest.rejects_expired
-boxer:   ERR  api/AuthTest.refresh
 ```
 
-Parsing happens on the host, reading the file the guest just wrote. That works because the
-worktree is mounted rather than copied: there is one set of files, so there is nothing to fetch.
+Failed and errored tests are both listed as `FAIL`, sorted, up to ten. boxer reads the report on
+the host: the worktree is mounted, not copied, so the file the guest wrote is already there.
 
-Three ways to say where the reports are, in order of precedence:
+Three ways to say where the reports are, highest precedence first:
 
 ```sh
 boxer run --junit junit.xml,reports/*.xml -- npm test   # this run
@@ -41,29 +41,27 @@ auto = ["junit.xml", "reports/*.xml"]   # every run in this repository
 fail_on_test_failures = true
 ```
 
-Patterns are worktree-relative and use `filepath.Glob`, so `*` works and `**` does not.
+Patterns are relative to the worktree. `*` matches; `**` does not recurse.
 
-Two rules worth knowing, because both are ways this feature could lie to you:
+Two rules:
 
-**Counts come from the cases, not the attributes.** Frameworks disagree about what `tests=` and
-`failures=` on `<testsuite>` mean, and the attributes are the part that goes stale. boxer counts
-`<testcase>` elements and their `<failure>`, `<error>` and `<skipped>` children.
-
-**A report older than the run is ignored.** Otherwise a command that crashed before writing
-anything would inherit yesterday's green.
+- **Counts come from the test cases, not the attributes.** boxer counts `<testcase>` elements and
+  their `<failure>`, `<error>` and `<skipped>` children, and ignores `tests=` and `failures=` on
+  `<testsuite>`, which frameworks fill in inconsistently.
+- **A report older than the run is ignored**, so a command that crashed before writing one does
+  not report the previous run's results.
 
 ### Failing on test failures
 
-By default the command's exit code is the run's exit code, and the summary is narration.
-`--fail-on-test-failures`, or `results.fail_on_test_failures`, turns a green exit into 1 when the
-report has failures or errors. It never replaces a non-zero exit code with a different one: the
-command's own status is the more specific answer.
+By default the run's exit code is the command's, and the summary is informational.
+`--fail-on-test-failures`, or `results.fail_on_test_failures`, turns exit 0 into 1 when the report
+has failures or errors. A non-zero exit code is never replaced.
 
 ## Capsules
 
-Every run leaves a record for its sandbox — the command, the directory, the exit code, the image,
-the pack, HEAD, whether the tree was dirty, the tail of both streams, and the test summary if
-there was one. `boxer status --json` shows it as `last_run`, and it is what a capsule is made of.
+Every run leaves a record for its sandbox: the command, directory, exit code, image, pack, HEAD,
+whether the tree was dirty, the tail of stdout and stderr, and the test summary if there was one.
+`boxer status --json` shows it as `last_run`. `boxer capsule new` turns it into a file.
 
 ```console
 $ boxer run -c 'npm test'            # it fails
@@ -73,10 +71,9 @@ boxer: wrote capsule.toml — exit 1 from "npm test"
 boxer: replay it with `boxer capsule replay capsule.toml`
 ```
 
-`capsule.toml` is a manifest: what ran, against which commit, under which image and which parts
-of the configuration, and what outcome counts as having reproduced the failure. When the tree was
-dirty it is written beside a `capsule.patch`, because the failure you want to keep is usually in
-the uncommitted half. Commit it, attach it to an issue, or throw it away.
+`capsule.toml` records what ran, against which commit, under which image and configuration, and
+what outcome counts as reproducing the failure. If the tree was dirty, the uncommitted changes are
+written beside it as `capsule.patch`. Commit it, attach it to an issue, or delete it.
 
 ```sh
 boxer capsule inspect capsule.toml
@@ -89,16 +86,14 @@ A replay overlays the captured configuration onto the current one and runs the c
 boxer: reproduced — exit 1, as recorded
 ```
 
-Exit 0 means the failure reproduced and exit 1 means it did not, which is the opposite of the
-usual convention and is deliberate. A capsule is a question — *does this still fail?* — not a
-test.
+**Exit 0 means the failure reproduced**, and exit 1 means it did not. This is the reverse of a
+test: replay answers "does this still fail?".
 
-Replay refuses a tree it cannot describe: uncommitted changes (`--allow-dirty`) or a HEAD that is
-not the captured one (`--allow-drift`). A captured patch is never applied unless you ask with
-`--apply-patch`, because silently mutating someone's worktree is not a thing a replay should do.
+Replay refuses, with exit 1, a worktree with uncommitted changes (override with `--allow-dirty`) or
+a HEAD other than the captured one (`--allow-drift`). A captured patch is applied only with
+`--apply-patch`.
 
 ### What a capsule is not
 
-It does not preserve a machine. A prepared guest is a
-[named pack](/docs/concepts/scopes-and-packs); the environment a capsule needs is described, not
-carried. That is what makes it a file you can commit.
+It does not contain a machine. A capsule describes the environment; to keep a prepared guest, use a
+[named pack](/docs/concepts/scopes-and-packs).

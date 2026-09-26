@@ -14,9 +14,9 @@ boxer url                                                # https://myapp.localho
 In a second worktree (`git worktree add ../myapp-fix-ui -b fix-ui`), `boxer up` gives
 `https://fix-ui.myapp.localhost:1355`, and the two never share `node_modules`, a port or a `.next`.
 
-What each line is for is in the comments. The two that trip people:
+`boxer.toml` comments explain each line. Two are required:
 
-- **`-H 0.0.0.0`** on `next dev`. Bound to loopback, the forwarded port reaches nothing.
-- **`allowedDevOrigins`** in `next.config.ts`. `*.localhost` covers every worktree's name.
+- `-H 0.0.0.0` on `next dev`. Bound to loopback, the forwarded port reaches nothing.
+- `allowedDevOrigins` in `next.config.ts`. `*.localhost` covers every worktree's name.
 
 Using a devcontainer instead? See [`../nextjs-devcontainer`](../nextjs-devcontainer).

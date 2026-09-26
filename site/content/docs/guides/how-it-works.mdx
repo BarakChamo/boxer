@@ -1,67 +1,52 @@
 ---
 title: How it works
-description: Scopes, the first command, and the five ways a command reaches the guest.
+description: Scopes, what the first command does, and the ways a command reaches the guest.
 ---
 
-This page is the whole mechanism in one read. [Scopes and
-packs](/docs/concepts/scopes-and-packs) goes deeper on the two parts that carry the most weight,
-and the [glossary](/docs/reference/glossary) defines the terms used here as terms of art.
+This page covers the whole mechanism. [Scopes and packs](/docs/concepts/scopes-and-packs) goes
+deeper on those two, and the [glossary](/docs/reference/glossary) defines every term.
 
 ## Scope: one VM per worktree
 
-A **scope** is what boxer keys a sandbox to. By default it is the git worktree — a checkout made
-by `git worktree add`, or the main checkout itself — resolved from the current directory. Two
-worktrees of the same repository get two VMs; two directories inside one worktree share one.
+A **scope** is what boxer keys a sandbox to. By default it is the git worktree (a checkout made by
+`git worktree add`, or the main checkout) that contains the current directory. Two worktrees of the
+same repository get two VMs; two directories in one worktree share one.
 
-This is the design decision everything else follows from. Agents work in worktrees — orchestrators
-like Conductor, T3 and Paperclip cut one per task — so keying to the worktree means each task gets
-its own machine without anyone arranging it.
+Orchestrators such as Conductor, T3 Code and Paperclip cut a worktree per task, so each task gets
+its own VM with no extra setup.
 
 ```toml
 isolation = "worktree"   # default. also: session, subagent, repo
 ```
 
-`session` and `subagent` key the VM to an agent session id instead, for harnesses that hand one
-out. `repo` collapses every worktree onto one VM, which is occasionally what you want and usually
-not.
+`session` and `subagent` key the VM to an agent session id instead, for harnesses that supply one;
+without an id boxer falls back to the next wider scope. `repo` puts every worktree of the
+repository on one VM.
 
 ## What the first command does
 
 1. Resolve the scope from the working directory.
-2. Read `boxer.toml` — from the worktree, then the repository root, then `~/.config/boxer/`.
+2. Read `boxer.toml` from the worktree, then the repository root, then `~/.config/boxer/`. The
+   first one that sets a key wins.
 3. Create the VM: image, CPUs, memory, and the worktree mounted at `mount_at` (`/workspace`).
 4. Run `image_setup` if this image has not had it, then `setup` if this worktree has not.
 5. Start anything in `start`, and wait for `ready`.
 6. Run the command.
 
-Steps 4 and 5 are skipped when their markers say they are done, which is what makes the second
-command fast.
-
-## The two setup lists
-
-The split matters and is easy to get wrong.
-
-```toml
-image_setup = ["npm i -g some-cli"]      # per image. Travels in the snapshot.
-setup       = ["npm install"]            # per worktree. Lands in your files.
-```
-
-`image_setup` runs once per image and is captured in the environment pack, so every later VM from
-that pack starts with the work already done. `setup` lands in the worktree, which the pack cannot
-carry, so it runs once per worktree.
-
-Putting `npm install` in `image_setup` produces a pack with a marker saying the work is done and a
-worktree with no `node_modules` — a confusing failure worth avoiding.
+Steps 4 and 5 are skipped when their markers say they are done, which is why later commands are
+fast. [The guest environment](/docs/guides/environment#dependencies) explains the difference
+between `image_setup`, `setup` and `[prep]`, and which to use.
 
 ## Environment packs
 
-After a VM's `image_setup` succeeds, boxer snapshots it with `smolvm pack create`. The pack is
-keyed on the image plus a hash of everything that shaped it: `image_setup`, `env`, `mounts`,
-`start`, `ready`. Change any of them and the key changes, so the next VM builds a fresh pack
-instead of inheriting a stale one.
+On smolvm, after `image_setup` succeeds, boxer snapshots the VM into an **environment pack**. Later
+VMs with the same environment start from the pack instead of repeating `image_setup`. The pack is
+keyed on the image plus `image_setup`, `env`, `mounts`, `start` and `ready`; change any of them and
+the next VM builds a new pack. Other backends have no packs and run `image_setup` in each new
+sandbox.
 
-`boxer up --rebuild` drops the pack and starts again, for when something outside the setup list
-moved — a base image tag, a dependency resolved at install time.
+`boxer up --rebuild` drops the pack and starts again, for when something outside those keys
+changed, such as a moved base image tag.
 
 ## How a command reaches the guest
 
@@ -70,18 +55,20 @@ moved — a base image tag, a dependency resolved at install time.
 | MCP + skill | the agent chooses `boxer_run` | no |
 | Hooks | boxer rewrites the command before it runs | yes |
 | Plugin | same, in-process (OpenCode) | yes |
-| PATH shims | a file named `npm` that re-runs itself in the guest | yes, where PATH holds |
+| PATH shims | a file named `npm` that re-runs itself in the guest | yes, where `PATH` holds |
 | Inside | the harness runs in the VM | by construction |
 
-`mode` decides how the hook behaves:
+`mode` sets how the hook behaves:
 
-- `rewrite` — the agent types `npm test`, boxer turns it into `boxer run -c 'npm test'`. Transparent.
-- `tool` — the shell is denied and `boxer_run` is the only way through, for harnesses that can
-  block a command but not rewrite one.
-- `off` — boxer stays installed and does nothing.
+- `rewrite` (default): the agent types `npm test`, and boxer turns it into `boxer run -c 'npm test'`.
+- `tool`: the shell is denied and `boxer_run` is the only way through, for harnesses that can block
+  a command but not rewrite one.
+- `off`: boxer stays installed and does nothing.
 
-## What is not sandboxed, on purpose
+Hooks and shims act only on commands whose first word is on `intercept` (`npm`, `node`, `python`,
+`go`, `make` and others by default). [Enforcement](/docs/guides/enforcement) covers each level.
 
-`git`, `gh` and `ssh` run on the host by default. They need your credentials and your real
-repository, and putting them in the guest breaks more than it protects. `passthrough` is the list;
-`intercept` is its opposite.
+## What runs on the host
+
+`git`, `gh`, `ssh`, `boxer` and `smolvm` run on the host by default. They need your credentials and
+the real repository. `passthrough` is that list; `intercept` is its opposite.

@@ -206,12 +206,13 @@ func (e *Env) Image() (string, string) {
 // performance decision with a real trade-off behind it.
 //
 // A microVM boots by attaching the image's filesystem, so image size is start-up time, paid on
-// every `boxer up` and every recreate. Measured on an M4, `boxer up` with the pack already built:
+// every `boxer up` and every recreate. Measured on an M4, `boxer up` with the pack already built
+// (bench/DEVSERVER.md has the method and the first-pack-build times):
 //
-//	node:24-bookworm        8.2s   (and 26s to build the pack the first time)
-//	node:24-bookworm-slim   1.9s
-//	node:24-alpine          1.1s
-//	alpine:3.21             0.4s
+//	node:24-bookworm        9.5s
+//	node:24-bookworm-slim   2.5s
+//	node:24-alpine          1.7s
+//	alpine:3.21             0.6s
 //
 // The fat variants were costing 6 seconds of start-up for compilers and manpages almost no
 // project uses. The trade is that a slim image has no build toolchain: a dependency that compiles

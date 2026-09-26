@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
@@ -526,5 +527,33 @@ func TestSandboxesAreNamedAsWellAsHashed(t *testing.T) {
 	}
 	if code, out := call(t, nil, "down", "--scope", name); code != 0 || !strings.Contains(out, "removed") {
 		t.Fatalf("down --scope <name>: %d %s", code, out)
+	}
+}
+
+// gc --all ignores idle_timeout; it does not treat every sandbox as idle. It once did, so a running
+// sandbox that had ever run a command was deleted from under the agent using it.
+func TestGCAllKeepsRunningSandboxes(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if err := client.Create(vm.CreateSpec{Name: "sb-busy", Labels: map[string]string{"boxer.scope": "sb-busy", "boxer.root": t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Start("sb-busy"); err != nil {
+		t.Fatal(err)
+	}
+	stamp := filepath.Join(box.LastUsedDir(), "sb-busy")
+	if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stamp, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	_ = os.Chtimes(stamp, old, old)
+	if code, out := call(t, nil, "gc", "--all"); code != 0 {
+		t.Fatalf("gc --all: %d %s", code, out)
+	}
+	if _, ok, _ := client.Status("sb-busy"); !ok {
+		t.Fatal("gc --all deleted a running sandbox")
 	}
 }

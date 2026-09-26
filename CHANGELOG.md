@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`boxer gc --all` deleted running sandboxes.** It made every sandbox count as idle, so any running
+  sandbox that had ever run a command was deleted, including one an agent was using. `--all` now
+  switches the idle rule off and takes only stopped sandboxes, as its help text always said.
+- **The Go API's `List`, `Stop` and `Delete` ignored `backend` in `boxer.toml`.** They always used
+  `BOXER_BACKEND` or smolvm, so a docker-configured caller saw nothing. They now pick the backend the
+  same way the CLI does.
+- `boxer help` listed `boxer ls` twice and left out `gc --all`.
+- The install page listed a Homebrew tap and an npm package that are not published. It now gives
+  the npm tarball attached to the release.
 - **The first `boxer shell` on a host killed the dev server.** Caching a harness install as a pack
   stops the machine, which empties the guest's `/tmp` and ends every `start` service; boxer
   restarted the machine and not the services. `boxer pack save` did the same. Services now come

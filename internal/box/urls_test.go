@@ -481,3 +481,21 @@ func TestUserThatCannotWriteTheWorktree(t *testing.T) {
 		})
 	}
 }
+
+func TestHostBackendReadsTheCheckoutsConfig(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	if got := HostBackend(dir); got != "smolvm" {
+		t.Fatalf("no backend configured: got %q, want the default", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("backend = \"podman\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := HostBackend(dir); got != "podman" {
+		t.Fatalf("got %q, want podman", got)
+	}
+	t.Setenv("BOXER_BACKEND", "docker")
+	if got := HostBackend(t.TempDir()); got != "docker" {
+		t.Fatalf("outside a repository: got %q, want BOXER_BACKEND's docker", got)
+	}
+}

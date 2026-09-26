@@ -59,7 +59,7 @@ still not run: this machine's Linux has no `/dev/kvm` for smolvm, and its `docke
 compatibility shim rather than a daemon.
 
 **What was run before this release, 2026-09-25.** The smoke suite on all four backends, three
-times over the day and once more on the final binary. The scripted-model matrix (t1, 71 cells)
+times over the day and once more on the final binary. The scripted-model matrix (t1, 69 cells)
 three times: 68/0/1, 67/1/1 and 68/0/1 — the one failure a herdr pane that inherited the
 running Claude Code session's `CLAUDE_CODE_CHILD_SESSION` marker and did not recur; the skip is
 multica, which needs a server configured on the host. Live adherence scenarios across eight
