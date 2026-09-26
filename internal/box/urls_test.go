@@ -2,6 +2,8 @@ package box
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -13,6 +15,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vm"
+	"github.com/BarakChamo/boxer/internal/vmtest"
 )
 
 // fakePortless behaves like portless 0.15 where boxer depends on it: `get` prefixes the name with
@@ -441,5 +444,40 @@ func TestGuestShellKeepsTheImagePath(t *testing.T) {
 	}
 	if arg != "a  b" {
 		t.Fatalf("the command was re-split: %q", arg)
+	}
+}
+
+// A `user` that cannot write the worktree is fixed according to who owns it: given that uid when
+// the owner is an ordinary user (smolvm's host-uid mount), refused with the reason when the owner
+// is root on a backend with no user mapping to offer, and refused plainly when it cannot be read.
+func TestUserThatCannotWriteTheWorktree(t *testing.T) {
+	for _, tc := range []struct {
+		owner, cause, want string
+	}{
+		{"501", "", ""},
+		{"0", "UNSUPPORTED", "maps you to the container's root"},
+		{"unknown", "SETUP_FAILED", "its owner could not be read"},
+	} {
+		t.Run(tc.owner, func(t *testing.T) {
+			vmtest.Install(t)
+			t.Setenv("FAKE_USER_OWNER", tc.owner)
+			dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"user = \"node\"\n")
+			e, err := Resolve(dir, "", scope.Identity{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.Stderr = io.Discard
+			_, err = e.Ensure(true, false)
+			if tc.cause == "" {
+				if err != nil {
+					t.Fatalf("an ordinary owner is fixed by giving the user its uid: %v", err)
+				}
+				return
+			}
+			var be *Error
+			if !errors.As(err, &be) || be.Cause != tc.cause || !strings.Contains(be.Reason, tc.want) {
+				t.Fatalf("want %s containing %q, got %v", tc.cause, tc.want, err)
+			}
+		})
 	}
 }

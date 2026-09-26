@@ -29,10 +29,14 @@ scorecards are `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md
 | inside | 10/10 | 6/10 | Claude Code, Codex, OpenCode, Kimi Code, fx |
 | orchestrator | 6/6 | 6/6 | T3 Code, Paperclip, herdr |
 
-The inside gap did not hold up for four of the five harnesses. Re-run in isolation, alternating the
-modes, twice each: URLs mode 19 of 20, default 20 of 20. The one miss in those re-runs was fx's
-`add-a-page` cell losing its dev server — which fx also did in an earlier run with no URLs involved.
-It is recorded as open rather than explained.
+The inside gap was a boxer bug, and it had nothing to do with URLs. The first time a harness runs
+inside a sandbox on a host, boxer caches the install as a pack — and packing stops the machine,
+which empties the guest's `/tmp` and ends every service `start` launched. boxer restarted the
+machine and not the services, so the dev server was simply gone. It showed only on a host's first
+round of inside cells, and the URLs-mode runs happened to go first. Found when the eval's autopsy
+reported the server's log missing from a sandbox that was still running; fixed by restarting the
+services after the snapshot; verified by clearing the pack cache and running the inside cells cold,
+once in each mode: 10 of 10 and 10 of 10.
 
 Every level is carried by at least two harnesses, except shell substitution — OpenHands is the only
 harness whose terminal shell is configurable, and a second witness would have to be invented rather
@@ -48,8 +52,14 @@ The smoke suite, with no model, on the release binary:
 | docker | 76 | 9 |
 | podman | 76 | 9 |
 | Apple `container` | 76 | 9 |
+| podman on Linux | 68 | 10 |
 
-The skips are forks, named packs and the egress log, which only smolvm has. The scripted-model
+The skips are forks, named packs and the egress log, which only smolvm has. The Linux row is boxer
+running natively on Fedora CoreOS with rootless podman and SELinux enforcing; its tenth skip is the
+URL cells, because portless was not installed there. The first Linux run failed nearly every cell —
+SELinux, then rootless podman's user mapping — and both were fixed before this one. Every runnable
+example also served HTTP 200 there. These rows are checked against the recorded runs in
+`docs/smoke-results.jsonl`, so the page cannot quietly fall behind them. The scripted-model
 matrix (t1) passed all 68 runnable cells on two of three runs; the third missed one, a herdr pane
 that inherited the environment of the session running the evaluation, and it did not recur. The
 one skip is Multica, which needs a server configured on the host.
@@ -84,10 +94,9 @@ debugging port to drive, and its CLI drives cloud workspaces where boxer has not
 
 **fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
 and it resolves commands past a PATH shim, so outside the guest there is nothing for boxer to hold
-onto. Inside there is, and it passes — but it is the least stable inside harness measured: its
-`add-a-page` cell lost its dev server in two of three runs with `[urls]` on and none of three
-without, and an earlier run without URLs lost its `prove-and-install` server the same way. The
-agent in those runs did not touch the server or the URL variables, so the cause is not established.
+onto. Inside there is, and it passes. It looked like the least stable inside harness for a while;
+it was the one most often installing for the first time, which is when boxer's harness cache
+stopped the dev server — see above.
 
 ## Reading a run
 

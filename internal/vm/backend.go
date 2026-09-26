@@ -115,11 +115,6 @@ type Caps struct {
 	// the mark on its own side instead; see owned.go. Declared rather than derived, because
 	// "has labels" is not a method.
 	ProvesOwnership bool `json:"proves_ownership"`
-	// MountOwnedByHost is whether the worktree appears in the guest owned by the host's uid, with
-	// no mapping. smolvm's does (501:755 on a Mac), so a guest user with any other uid cannot write
-	// to it; docker, podman and Apple's container map ownership and it does not arise. Declared,
-	// because it is a property of the mount, and found by writing as `node`, not by reading.
-	MountOwnedByHost bool `json:"mount_owned_by_host"`
 }
 
 // Declarer supplies the facts CapsOf cannot derive. Optional: a backend shaped like smolvm needs
@@ -129,7 +124,7 @@ type Declarer interface{ Declare() Caps }
 // CapsOf reports what b can do, by asking the type system and then letting b correct the rest.
 func CapsOf(b Backend) Caps {
 	c := Caps{Backend: b.Name(), Boundary: "kernel", HostMounts: true, Allowlist: true,
-		SecretEnv: true, ProvesOwnership: true, MountOwnedByHost: true}
+		SecretEnv: true, ProvesOwnership: true}
 	if d, ok := b.(Declarer); ok {
 		got := d.Declare()
 		got.Backend = c.Backend

@@ -123,7 +123,9 @@ mkdir -p sub; check "subdir maps into mount"  '[ "$(cd sub && boxer run -c pwd)"
 check "guest write visible on host" 'boxer run -c "echo hi > g.txt" && [ "$(cat g.txt)" = "hi" ]'
 check "setup ran once"           'boxer run -- true; [ "$(boxer run -c "cat /var/lib/boxer-smoke/marker")" = "ready" ]'
 needs allowlist "egress blocked by default allowlist" && check "egress blocked by default allowlist" '[ "$(boxer run -c "wget -q -T 3 -O- http://example.com >/dev/null 2>&1 && echo LEAK || echo blocked")" = "blocked" ]'
-check "warm run under 1s"        '[ "$( { /usr/bin/time -p boxer run -- true; } 2>&1 | awk "/real/{print (\$2 < 1.0)}")" = "1" ]'
+# Timed with python rather than /usr/bin/time, which Fedora CoreOS and other minimal Linux hosts do
+# not ship: there this cell failed for a missing timer, not a slow boxer.
+check "warm run under 1s"        '[ "$(python3 -c "import subprocess,time;t=time.monotonic();subprocess.run([\"boxer\",\"run\",\"--\",\"true\"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);print(int(time.monotonic()-t<1.0))")" = 1 ]'
 
 echo "# isolation = repo shares one VM across worktrees"
 mkrepo "$WORK/r" "$BASE
@@ -428,4 +430,11 @@ boxer down >/dev/null 2>&1 || true
 echo
 if [ "$skipped" -gt 0 ]; then echo "passed $pass, failed $fail, skipped $skipped (capabilities this backend lacks)"; else
 echo "passed $pass, failed $fail"; fi
+# BOXER_SMOKE_RECORD=<file> appends this run as one JSON line. The published tables are checked
+# against the latest line per backend and host (TestPublishedNumbersMatchTheEvidence), so a number
+# in the docs is a number a run produced rather than one somebody typed.
+if [ -n "${BOXER_SMOKE_RECORD:-}" ]; then
+  printf '{"backend":"%s","host":"%s","passed":%d,"failed":%d,"skipped":%d,"version":"%s","date":"%s"}\n' \
+    "$BACKEND" "$(uname -s | tr A-Z a-z)" "$pass" "$fail" "$skipped" "$(boxer version 2>/dev/null | awk '{print $2}')" "$(date -u +%Y-%m-%d)" >> "$BOXER_SMOKE_RECORD"
+fi
 [ "$fail" = 0 ]

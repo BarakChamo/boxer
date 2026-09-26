@@ -220,6 +220,12 @@ case "$verb" in
     # The mount-readiness probe. The fake ignores -w and runs in boxer's own directory, so it
     # answers for the guest instead: its mount is always the live worktree.
     case "$*" in *"boxer-mount-probe"*) exit 0;; esac
+    # The user-write probe, likewise, and it must never reach the host: past it is an edit to
+    # /etc/passwd, and the fake runs guest commands on the host.
+    # FAKE_USER_OWNER makes the probe report that the user cannot write, and that the worktree is
+    # owned by this uid, so each branch of boxer's answer can be tested.
+    case "$*" in *"boxer-user-probe"*) [ -n "$FAKE_USER_OWNER" ] && { echo "$FAKE_USER_OWNER"; exit 1; }; exit 0;; esac
+    case "$*" in *"/etc/passwd"*) exit 0;; esac
     exec "$@" ;;
   "machine egress-events")
     # Egress denials are the only record of why an allowlisted guest could not reach a host: the

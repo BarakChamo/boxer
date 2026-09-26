@@ -70,25 +70,13 @@ native manifests today's loaders read, so the levels above install everywhere no
 
 ## Where each harness is verified
 
-Every row below was run, not reasoned about: T1 is the real harness CLI against a scripted model
-and a real VM, T2 is the same cells against live models, and adherence measures whether a live
-model follows the brief when the prompt never mentions boxer. Full matrices, dates, costs and
-every skip reason: [docs/status.md](docs/status.md).
-
-| Harness | Outside | Inside | Verified at |
-| --- | --- | --- | --- |
-| Claude Code | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
-| Codex | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
-| Gemini CLI | rewrite, tool | `shell`, ACP | T1; its live tier needs your own `GEMINI_API_KEY`, because Gemini CLI speaks only the Gemini API and the gateway the other harnesses share does not serve it |
-| OpenCode | rewrite, tool | `shell`, ACP | T1, T2 live, adherence |
-| pi | rewrite, tool | `shell` (no ACP server) | T1, T2 live, adherence |
-| Grok | rewrite (recommended), tool | `shell`, ACP | T1, T2 live, adherence |
-| Kimi | tool; shims for the rest | `shell`, ACP | T1, T2 live, adherence |
-| GitHub Copilot CLI | rewrite, tool (user-level hooks) | `shell` (row present, not run) | T1, T2 live |
-| DSH | tool, through the Claude Code hook bridge | — | T1, T2 live |
-
-Orchestrators — OpenHands, Paperclip, T3 Code, herdr, Conductor, Multica — have their own verified
-paths in [docs/orchestrators.md](docs/orchestrators.md).
+Claude Code, Codex, Gemini CLI, OpenCode, pi, Grok, Kimi, GitHub Copilot CLI and DSH, outside the
+sandbox through hooks and inside it as the guest's own process; and the orchestrators OpenHands,
+Paperclip, T3 Code, herdr, Conductor and Multica. Nothing is listed because the code exists: every
+combination was run, and the results — by integration level, by harness and by backend, with dates,
+costs and every skip reason — are on the site's
+[Support, measured](site/content/docs/evals/results.mdx) page. It is the one copy; this file does
+not repeat it, because a second table is the one that goes stale.
 
 ## When a run fails
 

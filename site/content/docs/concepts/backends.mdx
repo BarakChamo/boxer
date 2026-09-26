@@ -101,6 +101,17 @@ Each of these looked fine and was not. `boxer backends` checks for the ones it c
   added again moments earlier — what an orchestrator does when it reuses a task name. boxer proves
   the mount by writing through it before running anything, and recreates the sandbox once if it
   never passes.
+- **SELinux denies an unlabelled bind mount** on Fedora, RHEL and CoreOS: the guest sees
+  `Permission denied` on `/workspace`. When boxer runs on a Linux host with SELinux enforcing, it
+  adds the shared relabel (`:z`) to every mount on docker and podman, which relabels the worktree
+  and the package caches as container-shared on the host. It never does this on macOS.
+- **Rootless podman maps you to the container's root**, so a non-root `user` — a devcontainer's
+  `remoteUser`, say — sees the worktree as root's and cannot write it. boxer notices, reads that
+  user's uid from the image, and recreates the sandbox once with `--userns=keep-id` so the user is
+  you; files it writes are owned by you on the host.
+- **podman's storage can start failing with `input/output error` on overlay mounts** after heavy
+  use, from the Mac client and inside the VM alike. `podman machine stop && podman machine start`
+  cleared it without losing anything; `boxer backends --probe` shows it.
 - **A runtime's own errors look like exit codes.** "No such container" exits 1, "OCI runtime exec
   failed" 127. boxer reads the runtime's message and reports an error, so a command that never ran
   is not recorded as having failed.

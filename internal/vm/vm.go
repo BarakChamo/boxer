@@ -167,6 +167,9 @@ type CreateSpec struct {
 	// DNS is the resolver the guest should use. Empty means boxer picks the host's (see dns.go);
 	// "off" leaves smolvm's public-resolver default alone.
 	DNS string
+	// KeepID is "uid:gid": map the host user to that user in the guest. Only rootless podman needs
+	// it and only podman honours it (--userns=keep-id); every other backend ignores it.
+	KeepID string
 }
 
 // Create defines the machine. It does not start it.

@@ -103,7 +103,8 @@ run, so the `bash` shim was bypassed and the work ran on the host — the known 
 and the reason the matrix scores it separately. The URLs run's rewrite miss is Grok starting its
 own dev server instead of using the one it was given.
 
-The inside difference was the one worth chasing, and it did not hold up. Four inside cells lost
+The inside difference was the one worth chasing, and it was a boxer bug rather than a URLs effect
+— see "Resolved, 2026-09-26" below. Four inside cells lost
 their dev server in the URLs run and none in the control, so the inside cells were run again, alone,
 alternating the two modes, twice each: URLs mode 19 of 20, default 20 of 20. Every failure in both
 passes is `inside/fx/add-a-page` or its dev server — 2 of 3 URLs-mode runs of that cell against
@@ -113,6 +114,17 @@ evidence points at fx and the dev server's own stability in the guest rather tha
 not proof, and it is recorded here as open rather than closed.
 
 Reports: `eval-matrix-report.md` (default) and `eval-matrix-urls-report.md`.
+
+**Resolved, 2026-09-26.** Three more rounds of the inside cells, with the eval now recording a dead
+sandbox's state, failed only in the first round and reported the same thing each time: the
+sandbox was running, and the dev server's log in the guest's `/tmp` did not exist. `/tmp` is
+memory-backed, so the machine had been restarted under the server. The first time a harness runs
+inside on a host, boxer caches the install as a pack, and packing a smolvm machine means stopping
+it; boxer started it again and never restarted the `start` services. That is why only first
+rounds failed, why the URLs runs (which went first) looked worse, and why fx — installing for the
+first time most often — looked flaky. `boxer pack save` had the same defect. Fixed by restarting the
+services after any snapshot; proven with a test that fails without the fix; verified by clearing
+the pack cache and running the inside cells cold in both modes: 10 of 10 each.
 
 ## Results, 2026-09-20
 

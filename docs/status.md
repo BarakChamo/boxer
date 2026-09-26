@@ -47,6 +47,17 @@ platform triple offered as `$BOXER_TARGET_FLAGS`. Verified end to end — an Alp
 for packages that ship prebuilt binaries; anything compiling at install time builds for the host
 and fails later inside the guest, so `boxer doctor` warns by name and `setup` stays the default.
 
+**Linux, for the first time.** boxer had never run on a Linux host. It now has: natively on Fedora
+CoreOS (aarch64, the podman machine's own OS) with rootless podman and SELinux enforcing, where
+the smoke suite passes **68 with 10 skipped** and every runnable example serves HTTP 200. The
+first run there failed nearly every cell, for two reasons no Mac run could have shown: SELinux
+denies an unlabelled bind mount, and rootless podman maps you to the container's root so a
+non-root guest user cannot write the worktree. Both are fixed — the mount is relabelled when
+SELinux is enforcing, and a user that cannot write the worktree is given the right uid, or on
+rootless podman the sandbox is recreated with `--userns=keep-id`. smolvm and docker on Linux are
+still not run: this machine's Linux has no `/dev/kvm` for smolvm, and its `docker` is podman's
+compatibility shim rather than a daemon.
+
 **What was run before this release, 2026-09-25.** The smoke suite on all four backends, three
 times over the day and once more on the final binary. The scripted-model matrix (t1, 71 cells)
 three times: 68/0/1, 67/1/1 and 68/0/1 — the one failure a herdr pane that inherited the
@@ -55,8 +66,10 @@ multica, which needs a server configured on the host. Live adherence scenarios a
 harnesses and four models: `prep` 32/32; `server` 24, 21 and then 25 of 32 once the brief pointed
 agents at `boxer url` — every miss either a single model on a harness where the others passed, or
 Grok, which never shows the brief to the model. The same two scenarios on docker: 8/8 and 7/8. The
-full Next.js matrix twice, with and without URLs: 99.4% and 98.7%, with the inside gap between them
-re-run in isolation and not reproduced for four of five harnesses; see eval-matrix.md.
+full Next.js matrix twice, with and without URLs: 99.4% and 98.7%. The inside gap between them
+was traced on 2026-09-26 to boxer stopping the machine to cache a harness install and not
+restarting the dev server — first runs only, nothing to do with URLs — fixed, and verified cold at
+10 of 10 in both modes; see eval-matrix.md.
 
 Nine defects were found by those runs rather than by reading, and each is in the changelog with the
 evidence that closed it: the `/dev/null` TTY exit code, a runtime's own failures read as exit
@@ -178,6 +191,10 @@ Copilot runs at t2 with no Copilot seat: its BYOK provider variables point it at
 Skips, all of them explained: Gemini CLI and its inside and ACP cells need `GEMINI_API_KEY`
 (the gateway has no Gemini-protocol endpoint), the six noncompliant cells are scripted and run at
 t1 only, and Multica needs an account (`multica setup`).
+
+The two tables below are the record of that 2026-09-18 run, kept for its timings and costs. They
+are not the current results: those are the site's `evals/results` page, the one copy the
+[documentation map](documentation-map.md) allows.
 
 | Harness | Outside rewrite | Outside tool | Inside shell | ACP | T2 live |
 | --- | --- | --- | --- | --- | --- |

@@ -186,15 +186,14 @@ a reader trusts most.
 - **`guides/environment.mdx` and `reference/configuration.mdx` overlap.** The `image_setup`/`setup`
   split is now written in four places. It is the top support burden, so repetition is defensible;
   four copies is one or two too many.
-- **Three support matrices.** `README.md`, `docs/status.md` and `evals/results.mdx` each carry one.
-  The README's is a summary and status.md's is the record, but the rule in this file says one copy.
+- ~~**Three support matrices.**~~ Closed 2026-09-26: `evals/results.mdx` is the one current copy;
+  the README links to it and `status.md` keeps its tables only as a dated record.
 - **Multica is documented from what its binary reads, not from a run.** Its cell reports itself
   skipped. The page says so.
-- **Linux hosts are under-served.** Every worked example is a Mac, and the Keychain and
-  `path_helper` discussions are macOS-only.
-- **`docs/status.md` is written by hand from generated reports.** It was a run behind the
-  scorecard in `docs/eval-matrix-report.md` until 2026-09-21. It should either be generated or
-  should cite the report rather than restating its numbers.
+- **Linux hosts are under-served.** Every worked example on the site is a Mac, and the Keychain and
+  `path_helper` discussions are macOS-only. (The examples themselves now run on Linux.)
+- **`docs/status.md` is written by hand from generated reports.** Its headline numbers are now
+  checked against the reports by a test (2026-09-26); its prose is not.
 - **`boxer watch` is documented but not covered by the stability contract**, while every page that
   mentions dashboards points at it. Either the contract grows to include it or the pages say so.
   They currently say so.
@@ -217,9 +216,18 @@ page was checked against them, and every example was run.
   the wrong fix; the `[prep]` tripwire flagging sharp, which is prebuilt; and the devcontainer
   example claiming no `boxer.toml` was needed, when boxer's default allowlist makes one necessary
   for any install.
-- **Still open:** `docs/status.md` restates numbers from the generated reports by hand; the three
-  support matrices are now four (`evals/results` gained a per-backend table); Linux hosts are still
-  under-served by the examples, every one of which was run on a Mac.
+- **Closed on 2026-09-26:** the published numbers are checked against their evidence by
+  `TestPublishedNumbersMatchTheEvidence` — the matrix reports, `docs/eval-adherence.jsonl`, and the
+  smoke runs now recorded in `docs/smoke-results.jsonl` — so a page that falls behind a run fails
+  the build. The README's support table, already stale, is gone in favour of a link, and
+  `status.md`'s tables are labelled as the dated record they are, leaving `evals/results` as the one
+  current copy. The examples and the smoke suite have been run on Linux.
+- **Closed on 2026-09-26, too:** the "fx inside cells are flaky with URLs on" finding, recorded as
+  open in four places, was a boxer bug — caching a harness install stopped the machine and killed
+  the dev server — and every page that called it unexplained now says what it was.
+- **Still open:** smolvm and docker on a Linux host are unrun (this machine's Linux VM has no
+  `/dev/kvm` and no docker daemon); `status.md`'s prose is still written by hand, though its
+  headline numbers are now checked.
 
 ## Deployment
 

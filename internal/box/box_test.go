@@ -1197,3 +1197,50 @@ func TestSetupFailureNamesTheRefusedHost(t *testing.T) {
 		t.Fatalf("reason %q fix %q", be.Reason, be.Fix)
 	}
 }
+
+// Packing the harness stops the machine, which empties the guest's /tmp and ends every service
+// `start` launched. The first `boxer shell` on a host used to leave the dev server dead; the
+// matrix saw inside cells lose their server on the first round only, which read as a flake for
+// three runs. Services come back after the pack.
+func TestPackHarnessRestartsServices(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\nstart = [\"echo serving\"]\nready = \"true\"\n")
+	e, err := Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	e.PackHarness()
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "'echo serving'"); n != 2 {
+		t.Fatalf("the service must be launched again after the pack stopped the machine, launched %d times:\n%s", n, b)
+	}
+}
+
+// `boxer pack save` stops the machine to snapshot it, which ended the dev server the same way.
+func TestSavePackRestartsServices(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"start = [\"echo serving\"]\nready = \"true\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.SavePack("keep"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if n := strings.Count(string(b), "'echo serving'"); n != 2 {
+		t.Fatalf("the service must be launched again after the snapshot, launched %d times:\n%s", n, b)
+	}
+}

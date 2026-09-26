@@ -10,3 +10,6 @@ var ClassifyAppleForTest = classifyApple
 
 // DecodeAppleForTest parses `container inspect` output without needing the runtime.
 func DecodeAppleForTest(out string) ([]Machine, error) { return Apple{Bin: "container"}.decode(out) }
+
+// WithSELinuxLabelForTest exposes the mount relabelling to the external tests.
+var WithSELinuxLabelForTest = withSELinuxLabel

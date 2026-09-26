@@ -73,8 +73,9 @@ These exist because every one of them was broken once, and the number it produce
   adherence. Only when every judged model fails, and at least two were judged, is it the harness.
 - **One variable at a time.** The matrix runs every cell on one model, so the integration level is
   the only thing that differs. Backends are benchmarked one at a time, alone on the host.
-- **A control for every comparison.** When the matrix scored inside cells lower with URLs on, the
-  inside cells were re-run, alone, alternating the two modes — and the gap mostly did not hold.
+- **A control for every comparison — and suspicion of the variable you changed.** When the matrix
+  scored inside cells lower with URLs on, the inside cells were re-run alternating the two modes,
+  and the gap mostly did not hold. The real variable was which run went *first*: see below.
 - **Repeat before claiming.** Three samples from a clean host, or the number is labelled a single
   sample. Three benchmark claims were withdrawn for skipping this.
 - **Prove the cause, not the symptom.** A fix is shown against a build with the old code: the old
@@ -98,6 +99,11 @@ Not hypotheticals — each of these passed the unit tests and shipped until a ti
 - **An agent that did everything right was told the wrong address.** Codex called `boxer_status`
   exactly as instructed and got a port, because the MCP server it launched had a different state
   directory from the one that registered the URL.
+- **A flake that was a boxer bug.** Inside cells lost their dev server — only on a host's first
+  round, which is when boxer caches a harness install by stopping the machine, and it never
+  restarted the services. It read as "URLs make inside cells flaky" for three runs, because the URLs
+  runs happened to go first. An autopsy that recorded the sandbox as running with its `/tmp` empty
+  is what found it.
 - **A reused worktree path skipped setup,** and on docker could see a stale mount — the shape an
   orchestrator produces every time it reuses a task name.
 - **Codex ran unsandboxed in linked worktrees**, reading project configuration from the main

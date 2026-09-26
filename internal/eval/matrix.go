@@ -579,6 +579,12 @@ func runMatrixCell(boxerBin, base string, cfg MatrixConfig, task SDLCTask, log i
 			why := ""
 			if out, e := env.boxer(judged, "run", "--", "tail", "-5", "/tmp/boxer-start.log"); e == nil {
 				why = "; its last words: " + strings.Join(strings.Fields(lastOf(out, 300)), " ")
+			} else if strings.Contains(out, "No such file") {
+				// The log lives in the guest's memory-backed /tmp. Gone means the machine was
+				// stopped and started under the server — how the harness pack's restart killed it.
+				why = "; the guest's /tmp was emptied, so the machine restarted under the server" + sandboxAutopsy(env, judged)
+			} else {
+				why = "; the sandbox did not answer (" + strings.Join(strings.Fields(lastOf(out, 160)), " ") + ")" + sandboxAutopsy(env, judged)
 			}
 			miss("the page renders", "the dev server stopped answering on %s (%v)%s", r.HostPort, err, why)
 		} else {
@@ -745,4 +751,23 @@ func evalURLsTOML() string {
 		return ""
 	}
 	return "\n[urls]\nenabled = true\nname = \"matrix\"\n"
+}
+
+// sandboxAutopsy records what a dead sandbox looked like from the host: its state, and how much
+// memory the host had, since several 8 GB guests on a 24 GB machine is the first suspect.
+func sandboxAutopsy(env *Env, dir string) string {
+	state := "unknown"
+	if out, err := env.boxer(dir, "status", "--json"); err == nil || out != "" {
+		var st struct {
+			State string `json:"state"`
+		}
+		if json.Unmarshal([]byte(out), &st) == nil && st.State != "" {
+			state = st.State
+		}
+	}
+	mem := ""
+	if b, err := exec.Command("memory_pressure", "-Q").Output(); err == nil {
+		mem = "; host " + strings.TrimSpace(lastOf(string(b), 80))
+	}
+	return "; sandbox state: " + state + mem
 }

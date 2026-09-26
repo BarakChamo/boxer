@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -175,7 +176,11 @@ func (d Docker) Create(s CreateSpec) error {
 	if s.MemoryMiB > 0 {
 		args = append(args, "-m", strconv.Itoa(s.MemoryMiB)+"m")
 	}
+	relabel := selinuxEnforcing()
 	for _, v := range s.Volumes {
+		if relabel {
+			v = withSELinuxLabel(v)
+		}
 		args = append(args, "-v", v)
 	}
 	for k, v := range s.Labels {
@@ -183,6 +188,14 @@ func (d Docker) Create(s CreateSpec) error {
 	}
 	for _, p := range s.Ports {
 		args = append(args, "-p", p)
+	}
+	if s.KeepID != "" && d.Bin == "podman" {
+		if uid, gid, ok := strings.Cut(s.KeepID, ":"); ok {
+			// keep-id also makes the mapped user the default for every process, which would run
+			// boxer's own steps — its markers under /var/lib/boxer — as that user and fail them.
+			// Root stays the default; only commands given `user` run as it.
+			args = append(args, "--userns=keep-id:uid="+uid+",gid="+gid, "--user", "0:0")
+		}
 	}
 	switch s.Network {
 	case "off":
@@ -392,4 +405,35 @@ func (d Docker) log(args []string) {
 	if d.Log != nil {
 		fmt.Fprintf(d.Log, "%s %s\n", d.Bin, strings.Join(args, " "))
 	}
+}
+
+// selinuxEnforcing reports whether boxer is running on a Linux host that enforces SELinux, where a
+// bind mount without a label is denied to the container outright. Found on Fedora with rootless
+// podman: `ls /workspace` in the guest was "Permission denied" and every sandbox failed to start.
+// Never on macOS: there the mount crosses into the runtime's VM over virtiofs, which needs no label.
+func selinuxEnforcing() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	b, err := os.ReadFile("/sys/fs/selinux/enforce")
+	return err == nil && strings.TrimSpace(string(b)) == "1"
+}
+
+// withSELinuxLabel adds the shared relabel option to a "host:guest[:opts]" mount. Shared (z) rather
+// than private (Z): several sandboxes mount the same host caches, and a private label on one would
+// deny it to the rest.
+func withSELinuxLabel(v string) string {
+	parts := strings.Split(v, ":")
+	switch len(parts) {
+	case 2:
+		return v + ":z"
+	case 3:
+		for _, o := range strings.Split(parts[2], ",") {
+			if o == "z" || o == "Z" {
+				return v
+			}
+		}
+		return v + ",z"
+	}
+	return v
 }

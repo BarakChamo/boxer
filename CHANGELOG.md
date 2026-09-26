@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The first `boxer shell` on a host killed the dev server.** Caching a harness install as a pack
+  stops the machine, which empties the guest's `/tmp` and ends every `start` service; boxer
+  restarted the machine and not the services. `boxer pack save` did the same. Services now come
+  back after any snapshot. This was the "inside cells are flaky with URLs on" finding: it only ever
+  happened on a host's first round, and the URLs runs went first. Found by an autopsy that saw the
+  sandbox running with its `/tmp` empty; verified by running the inside cells with a cold cache in
+  both modes, 10 of 10 each.
+- **boxer did not work on Linux with SELinux.** The first run of the smoke suite on a Linux host —
+  Fedora CoreOS, rootless podman — failed nearly every cell: SELinux denies a container an
+  unlabelled bind mount, so the guest saw `Permission denied` on `/workspace`. On a Linux host with
+  SELinux enforcing, boxer now adds the shared relabel (`:z`) to every docker and podman mount. It
+  never does on macOS, where the mount crosses into the runtime's VM over virtiofs.
+- **A non-root `user` could not write the worktree on rootless podman.** Rootless podman maps you to
+  the container's root, so `remoteUser: "node"` saw a root-owned worktree. boxer now checks, as the
+  user, whether it can write — rather than trusting a per-backend flag — and fixes what it finds:
+  on smolvm it gives the user the mount owner's uid, on rootless podman it recreates the sandbox
+  once with `--userns=keep-id` so the user is you. Files it writes are owned by you on the host.
+- **The smoke suite timed a warm run with `/usr/bin/time`,** which minimal Linux hosts do not ship,
+  so the cell failed for a missing timer. It uses python now.
 - **`setup`, `start` and `ready` lost the image's `PATH`.** They ran through a login shell, and
   Alpine's `/etc/profile` assigns `PATH` outright, so every directory an image added — golang's
   `/usr/local/go/bin`, a Rust toolchain, a venv — vanished: `go run .` in `start` failed with

@@ -1,0 +1,5 @@
+{"backend":"podman","host":"linux","passed":68,"failed":0,"skipped":10,"version":"v1.0.1-0.20260925170754-7bd69335997b+dirty","date":"2026-09-26"}
+{"backend":"smolvm","host":"darwin","passed":85,"failed":0,"skipped":0,"version":"v1.0.0-50-g7bd6933-dirty","date":"2026-09-26"}
+{"backend":"docker","host":"darwin","passed":76,"failed":0,"skipped":9,"version":"v1.0.0-50-g7bd6933-dirty","date":"2026-09-26"}
+{"backend":"podman","host":"darwin","passed":76,"failed":0,"skipped":9,"version":"v1.0.0-50-g7bd6933-dirty","date":"2026-09-26"}
+{"backend":"container","host":"darwin","passed":76,"failed":0,"skipped":9,"version":"v1.0.0-50-g7bd6933-dirty","date":"2026-09-26"}

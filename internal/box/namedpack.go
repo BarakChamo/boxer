@@ -106,8 +106,12 @@ func (e *Env) SavePack(name string) (string, error) {
 	if err == nil {
 		_, err = packer.PackFromVM(e.Scope.Key, stub)
 	}
-	if serr := e.VM.Start(e.Scope.Key); serr != nil && err == nil {
+	serr := e.VM.Start(e.Scope.Key)
+	if serr != nil && err == nil {
 		err = serr
+	}
+	if serr == nil {
+		e.resumeServices("saving the pack")
 	}
 	outcome := obs.OK
 	if err != nil {

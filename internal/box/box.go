@@ -65,6 +65,9 @@ type Env struct {
 	// FromPack names a saved pack (`boxer pack save`) this sandbox must be created from, instead
 	// of the automatic environment/harness/image ladder. It is set by `boxer pack use` only.
 	FromPack string
+	// keepID, when set, is the uid:gid the next create maps the host user to — rootless podman's
+	// answer to a guest user that cannot otherwise write the worktree. See matchUserUID.
+	keepID string
 	// seen is the last machine Exists looked at, so a second reader in the same command does not
 	// pay another smolvm start-up. See seenMachine; anything that changes the machine clears it.
 	seen *vm.Machine
@@ -395,6 +398,9 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 			return created, err
 		}
 	}
+	if err := e.matchUserUID(); err != nil {
+		return created, err
+	}
 	// URLs are registered alongside setup rather than after it: they depend only on the host
 	// ports, which are fixed once the machine exists, and three portless calls are otherwise a
 	// few hundred milliseconds added to every start. Output is held until the join so it cannot
@@ -407,9 +413,6 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 			var once sync.Once
 			defer once.Do(func() { <-done; _, _ = e.Stderr.Write(buf.Bytes()) })
 		}
-	}
-	if err := e.matchUserUID(); err != nil {
-		return created, err
 	}
 	// Two halves, in order. The image half changes the guest and is snapshotted; the worktree half
 	// prepares the files the host mounted, and a snapshot can never stand in for it.
@@ -534,6 +537,7 @@ func (e *Env) create() error {
 		AllowHosts: e.resolvable(hosts),
 		DNS:        e.Cfg.Network.DNS,
 		Ports:      ports,
+		KeepID:     e.keepID,
 	}
 	if err = e.VM.Create(spec); err != nil && from != "" && !vm.IsAlreadyExists(err) && !vm.IsLocked(err) {
 		// A pack can be truncated: an interrupted `pack create` leaves a file smaller than its
@@ -912,6 +916,7 @@ func (e *Env) PackHarness() {
 		fmt.Fprintf(e.Stderr, "boxer: harness cache failed: %v\n", err)
 	}
 	e.event(obs.Pack, outcome, time.Since(start), map[string]any{"kind": "harness", "image": image, "path": side})
+	e.resumeServices("caching")
 }
 
 // StalePacks lists packs no machine references (by its boxer.pack label), by two rules that catch
@@ -1237,24 +1242,78 @@ func (e *Env) awaitMount(tries int) error {
 		Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
 }
 
-// matchUserUID gives the configured guest user the host's uid, on a backend whose mount is owned
-// by the host uid with no mapping. Without it `user = "node"` on smolvm could read the worktree
+// matchUserUID makes sure the configured guest user can write the worktree, giving it the
+// mount owner's uid when it cannot. Without it `user = "node"` on smolvm could read the worktree
 // and write nothing to it: the mount is 501:755 and node is 1000, so setup's `npm install` failed
 // on the first file. devcontainer calls this updateRemoteUserUID and defaults it on, for exactly
 // this reason. It runs as root, once per VM — the marker lives in the guest and travels in a pack.
 func (e *Env) matchUserUID() error {
 	u := e.Cfg.User
-	if u == "" || u == "root" || u == "0" || strings.ContainsAny(u, ":") || !vm.CapsOf(e.VM).MountOwnedByHost {
+	if u == "" || u == "root" || u == "0" || strings.ContainsAny(u, ":") {
 		return nil
 	}
-	uid := os.Getuid()
 	if _, err := strconv.Atoi(u); err == nil {
 		return nil // a numeric user is already a uid; it is the caller's to choose
 	}
-	marker := fmt.Sprintf("/var/lib/boxer/uid-%s-%d", u, uid)
+	// Asked of the mount, not of the backend: whether the user can write it depends on how this
+	// runtime maps ownership on this host, which a capability flag guessed wrong. smolvm shows the
+	// worktree owned by the host uid; OrbStack maps it to whoever asks; rootless podman on Linux
+	// maps the host user to the container's root, so it looks root-owned inside.
+	marker := "/var/lib/boxer/uid-" + u
+	probe := fmt.Sprintf(`test -f %[2]s && exit 0
+su -s /bin/sh %[1]s -c 'p=.boxer-user-probe-$$; : > "$p" && rm -f "$p"' 2>/dev/null && exit 0
+stat -c %%u . 2>/dev/null || echo unknown`, u, marker)
+	out, code, err := vm.Output(e.VM, e.Scope.Key, e.MountAt(), "sh", "-c", probe)
+	if err != nil {
+		return e.fail(&Error{Reason: "could not check whether " + u + " can write the worktree: " + err.Error(), Cause: "SETUP_FAILED", Scope: e.Scope,
+			Fix: "boxer up --recreate"})
+	}
+	owner := strings.TrimSpace(out)
+	if code == 0 && owner == "" {
+		return nil // the user can already write it, or this sandbox was set up before
+	}
+	if owner == "0" && e.VM.Name() == "podman" && e.keepID == "" {
+		// Rootless podman maps the host user to the container's root. podman's own answer is
+		// keep-id, which maps it to a chosen user instead — but the uid has to be known when the
+		// container is created, and it lives in the image. So read it, and create the sandbox
+		// again with the mapping. Once: a second failure is refused below.
+		// ponytail: every new sandbox with a `user` pays this extra create (about a second on
+		// podman); remember the uid per image and user if that ever matters.
+		ids, _, ierr := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "id -u "+sh.Quote(u)+" && id -g "+sh.Quote(u))
+		f := strings.Fields(ids)
+		if ierr == nil && len(f) == 2 {
+			e.keepID = f[0] + ":" + f[1]
+			fmt.Fprintf(e.Stderr, "boxer: recreating the sandbox so %s (uid %s) owns the worktree, as rootless podman needs\n", u, f[0])
+			if err := e.deleteVM(); err != nil {
+				return err
+			}
+			if err := e.create(); err != nil {
+				return err
+			}
+			vm.RecordOwned(e.VM, e.Scope.Key)
+			if err := e.VM.Start(e.Scope.Key); err != nil {
+				return e.fail(&Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
+			}
+			if err := e.awaitMount(25); err != nil {
+				return err
+			}
+			return e.matchUserUID()
+		}
+	}
+	if owner == "0" {
+		return e.fail(&Error{
+			Reason: fmt.Sprintf("guest user %q cannot write the worktree: this runtime maps you to the container's root, so the "+
+				"worktree is root's inside it (rootless podman does this)", u),
+			Cause: "UNSUPPORTED", Scope: e.Scope,
+			Fix: "remove `user` (commands then run as the container's root, which is you on the host), or run podman rootful"})
+	}
+	uid, cerr := strconv.Atoi(owner)
+	if cerr != nil {
+		return e.fail(&Error{Reason: fmt.Sprintf("guest user %q cannot write the worktree, and its owner could not be read: %q", u, owner),
+			Cause: "SETUP_FAILED", Scope: e.Scope, Fix: "check that `user` names a user the image has, or remove `user`"})
+	}
 	// busybox has no usermod, so the passwd line is edited directly; the home directory follows.
 	script := fmt.Sprintf(`set -e
-test -f %[3]s && exit 0
 old=$(id -u %[1]s)
 if [ "$old" != "%[2]d" ]; then
   sed -i "s/^%[1]s:\([^:]*\):$old:/%[1]s:\1:%[2]d:/" /etc/passwd
@@ -1262,9 +1321,9 @@ if [ "$old" != "%[2]d" ]; then
   [ -n "$home" ] && [ -d "$home" ] && chown -R %[2]d "$home"
 fi
 mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker)
-	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", script)
+	out, code, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", script)
 	if err != nil || code != 0 {
-		return e.fail(&Error{Reason: fmt.Sprintf("could not give guest user %q the host's uid %d: %s", u, uid, firstNonEmpty(errText(err), strings.TrimSpace(out))),
+		return e.fail(&Error{Reason: fmt.Sprintf("could not give guest user %q the worktree owner's uid %d: %s", u, uid, firstNonEmpty(errText(err), strings.TrimSpace(out))),
 			Cause: "SETUP_FAILED", Scope: e.Scope, Fix: "check that `user` names a user the image has, or set user = \"root\""})
 	}
 	return nil
@@ -1771,6 +1830,22 @@ func DevServerNote(cfg config.Config) string {
 	}
 	return "Forwarded guest ports land on a different host port in each worktree: `boxer url` prints this worktree's " +
 		"address (`boxer status --json` has them all under `ports`) — do not assume localhost:<guest port>.\n"
+}
+
+// resumeServices brings back the services `start` launched, after a snapshot stopped and started
+// the machine. Stopping empties the guest's /tmp, where the start marker lives, so the services
+// are gone and nothing else would notice. Without this the first `boxer shell` on a host — which
+// caches the harness install — silently killed the dev server, and so did `boxer pack save`. The
+// matrix saw it as inside cells losing their server on the first round only, which read for three
+// runs as a flake that URLs caused. Failures are reported, never fatal: the snapshot itself worked.
+func (e *Env) resumeServices(after string) {
+	if err := e.startServices(); err != nil {
+		fmt.Fprintf(e.Stderr, "boxer: restarting services after %s: %v\n", after, err)
+		return
+	}
+	if err := e.waitReady(); err != nil {
+		fmt.Fprintf(e.Stderr, "boxer: services did not come back after %s: %v\n", after, err)
+	}
 }
 
 // minFree is the configured margin in bytes; 0 disables the check.

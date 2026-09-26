@@ -50,3 +50,18 @@ func TestARefusalNamesTheBackendTheFeatureAndTheFix(t *testing.T) {
 		}
 	}
 }
+
+// A bind mount on an SELinux-enforcing host needs the shared relabel, added once and alongside
+// whatever options the mount already has.
+func TestWithSELinuxLabel(t *testing.T) {
+	for in, want := range map[string]string{
+		"/src:/workspace":            "/src:/workspace:z",
+		"/home/u/.npm:/root/.npm:ro": "/home/u/.npm:/root/.npm:ro,z",
+		"/a:/b:ro,z":                 "/a:/b:ro,z",
+		"/a:/b:Z":                    "/a:/b:Z",
+	} {
+		if got := vm.WithSELinuxLabelForTest(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}

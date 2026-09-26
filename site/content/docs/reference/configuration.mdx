@@ -156,9 +156,11 @@ to the worktree's own host path when absolute paths have to resolve on both side
 "inside"` does that unconditionally, because there the harness is in the guest and the paths it
 prints are read on the host.
 
-`user` is a name or `uid[:gid]`; empty means the image's own `USER`. On smolvm a named user is
-given your host uid, because smolvm mounts the worktree owned by it and a user with any other uid
-could not write there. It applies to `setup`,
+`user` is a name or `uid[:gid]`; empty means the image's own `USER`. boxer checks that the user can
+write the worktree when the sandbox starts, and fixes it when it cannot: on smolvm, which mounts
+the worktree owned by your host uid, the user is given that uid; on rootless podman on Linux, which
+maps you to the container's root, the sandbox is recreated once with `--userns=keep-id` so the user
+is you. Files the user writes are owned by you on the host either way. It applies to `setup`,
 `start`, and every command. `image_setup` always runs as root, because it changes the image —
 installing packages is root's job even in an image whose tools run as someone else.
 devcontainer's `remoteUser` lands here.
@@ -440,10 +442,9 @@ directory called `${localWorkspaceFolder}` looks configured and is empty.
 `portsAttributes` fields other than `label` and `requireLocalPort`. `waitFor` has no equivalent:
 boxer's `ready` is a probe of the thing itself, not a choice of lifecycle phase, and is the better
 answer to the question `waitFor` asks. `hostRequirements.storage` is not checked; `min_free_gb`
-covers the disk. `updateRemoteUserUID` is always on, which is the specification's default: on
-smolvm, whose mount is owned by your host uid with no mapping, boxer gives the `user` your uid
-once per VM, so it can write the worktree. docker, podman and Apple's `container` map ownership
-themselves and need nothing. Linux, where rootless podman is the case this exists for, is untested.
+covers the disk. `updateRemoteUserUID` is always on, which is the specification's default: boxer makes the
+`user` able to write the worktree, as described under [the guest](#the-guest) — verified on
+smolvm on macOS and on rootless podman on Fedora.
 
 `boxer.toml` overrides a key only where you set one, so the two files coexist rather than
 competing. `boxer doctor` says which file each value
