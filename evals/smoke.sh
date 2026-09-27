@@ -292,7 +292,15 @@ mkrepo "$WORK/g" "$BASE"; (cd "$WORK/g" && boxer up >/dev/null); rm -rf "$WORK/g
 # Not `boxer gc | grep -q deleted`: grep -q exits at the first match, gc dies of SIGPIPE writing
 # its summary line, and pipefail then fails a check that actually passed.
 check "gc reaps orphan" 'boxer gc > "$WORK/gc.out" 2>&1; grep -q deleted "$WORK/gc.out"'
-check "gc reports what it freed" 'boxer gc --all --dry-run | grep -q "would reclaim"'
+# --all takes a stopped sandbox and leaves a running one: it once treated every sandbox as idle and
+# deleted the one an agent was using.
+mkrepo "$WORK/gs" "$BASE"; (cd "$WORK/gs" && boxer up >/dev/null && boxer stop "$(scopekey)" >/dev/null)
+mkrepo "$WORK/gr" "$BASE"; (cd "$WORK/gr" && boxer up >/dev/null && boxer run -- true >/dev/null)
+GS=$(cd "$WORK/gs" && scopekey); GR=$(cd "$WORK/gr" && scopekey)
+boxer gc --all --dry-run > "$WORK/gcall.out" 2>&1 || true
+check "gc --all reports the stopped sandbox" 'grep -q "would reclaim" "$WORK/gcall.out" && grep -q "$GS" "$WORK/gcall.out"'
+check "gc --all keeps a running sandbox" '! grep -q "$GR" "$WORK/gcall.out"'
+(cd "$WORK/gs" && boxer down >/dev/null 2>&1) || true; (cd "$WORK/gr" && boxer down >/dev/null 2>&1) || true
 check "doctor reports the footprint" 'cd "$WORK/p2" 2>/dev/null || mkrepo "$WORK/p2" "$BASE"; cd "$WORK/p2"; boxer doctor | grep -q "^storage:"'
 
 # The sweep itself, with the guard lifted: provisioning stamps the state directory and reaps the
@@ -363,6 +371,7 @@ if ! command -v portless >/dev/null 2>&1; then
   skip "three worktrees, three URLs" "portless on PATH"
 else
   U="$WORK/u"
+  PROXY_BEFORE=$( (lsof -nP -iTCP:1355 -sTCP:LISTEN 2>/dev/null || true) | wc -l | tr -d ' ')
   # node rather than busybox: alpine's busybox is built without the httpd applet.
   UT='image = "mirror.gcr.io/library/node:24-alpine"
 memory = "1G"
@@ -395,7 +404,24 @@ name = "boxersmoke"'
   check "urls: status finds it from another state dir" '[ "$(cd "$WORK/u-branch" && XDG_STATE_HOME="$OTHER" boxer status --json | python3 -c "import sys,json;print((json.load(sys.stdin).get(\"urls\") or {}).get(\"3000\",\"\"))")" = "$U2" ]'
   (cd "$WORK/u-branch" && XDG_STATE_HOME="$OTHER" boxer down >/dev/null 2>&1)
   check "urls: down removes only its own route"  '[ "$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$U2/")" != 200 ] && [ "$(curl -sk --max-time 10 "$U1/")" = u ]'
+  # docker, podman and Apple's container publish on every interface unless told otherwise.
+  HP=$(cd "$U" && boxer status --json | python3 -c "import sys,json;print((json.load(sys.stdin).get('ports') or {}).get('3000',''))")
+  LAN=$(ipconfig getifaddr en0 2>/dev/null || ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1 || true)
+  if [ -z "$LAN" ]; then
+    skip "a forwarded port is loopback only" "a non-loopback address on this host"
+  elif [ "$BACKEND" = podman ] && [ -e /etc/containers/podman-machine ]; then
+    # Inside podman's own VM, podman rebinds a loopback port to every interface so gvproxy can
+    # forward it to the Mac, where it binds loopback again. Only the Mac side is the real answer.
+    skip "a forwarded port is loopback only" "a host that is not podman's machine VM"
+  else
+    check "a forwarded port is loopback only" '[ -n "$HP" ] && [ "$(curl -s --max-time 3 "http://127.0.0.1:$HP/")" = u ] && ! curl -s --max-time 3 -o /dev/null "http://$LAN:$HP/"'
+  fi
   boxer down --all >/dev/null 2>&1 || true
+  if [ "$PROXY_BEFORE" = 0 ]; then
+    check "urls: the proxy boxer started stops with the last route" '! lsof -nP -iTCP:1355 -sTCP:LISTEN >/dev/null 2>&1'
+  else
+    skip "urls: the proxy boxer started stops with the last route" "no proxy already running before the suite"
+  fi
   check "urls: down --all leaves no route behind" '! portless list 2>/dev/null | grep -q boxersmoke && [ -z "$(ls "$STATE/urls" 2>/dev/null)" ]'
 fi
 

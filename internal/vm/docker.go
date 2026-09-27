@@ -187,7 +187,7 @@ func (d Docker) Create(s CreateSpec) error {
 		args = append(args, "--label", k+"="+v)
 	}
 	for _, p := range s.Ports {
-		args = append(args, "-p", p)
+		args = append(args, "-p", loopbackPort(p))
 	}
 	if s.KeepID != "" && d.Bin == "podman" {
 		if uid, gid, ok := strings.Cut(s.KeepID, ":"); ok {

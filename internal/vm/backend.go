@@ -276,3 +276,14 @@ func runtimeFailure(b Backend, code int, h *headWriter, prefixes map[int][]strin
 	}
 	return &Error{Backend: b.Name(), Verb: "exec", Code: code, Stderr: msg, Kind: classify(msg)}
 }
+
+// loopbackPort binds a "host:guest" publish to 127.0.0.1. docker, podman and Apple's container
+// publish on every interface by default, which puts a sandbox's dev server on the local network;
+// smolvm binds loopback, and the container backends now match it. A spec that already names an
+// address ("0.0.0.0:3000:3000") is the user's choice and passes through.
+func loopbackPort(p string) string {
+	if strings.Count(p, ":") == 1 {
+		return "127.0.0.1:" + p
+	}
+	return p
+}

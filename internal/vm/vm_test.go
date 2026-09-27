@@ -48,7 +48,9 @@ func TestLifecycleAgainstFake(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	s := string(b)
-	for _, want := range []string{"-I alpine", "-v /tmp/wt:/workspace", "--label boxer.scope=sb-x", "--allow-host registry-1.docker.io", "--cpus 2", "--mem 1024", "exec --name sb-x -i -e BOXER_INSIDE=1 -w /workspace --", "delete -n sb-x --force --cascade"} {
+	for _, want := range []string{"-I alpine", "-v /tmp/wt:/workspace", "--label boxer.scope=sb-x", "--allow-host registry-1.docker.io", "--cpus 2", "--mem 1024", "exec --name sb-x -i -e BOXER_INSIDE=1 -w /workspace --", "delete -n sb-x --force --cascade",
+		// A workload that never exits, not the image's CMD: see Create.
+		"-- sh -c while :; do sleep 3600; done"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("smolvm never invoked with %q\nlog:\n%s", want, s)
 		}

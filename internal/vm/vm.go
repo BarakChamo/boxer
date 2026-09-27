@@ -173,6 +173,9 @@ type CreateSpec struct {
 }
 
 // Create defines the machine. It does not start it.
+// idleWorkload is the machine's persistent workload: it does nothing, forever.
+const idleWorkload = "while :; do sleep 3600; done"
+
 func (c Client) Create(s CreateSpec) error {
 	args := []string{"machine", "create", "-n", s.Name}
 	switch {
@@ -222,6 +225,15 @@ func (c Client) Create(s CreateSpec) error {
 	// happen at all, so asking again is safe — there is no half-created machine to clean up. The
 	// budget is generous because a real create takes about half a second and several arriving
 	// together is the ordinary case for one-sandbox-per-worktree.
+	// Without a workload smolvm launches the image's own ENTRYPOINT/CMD as the first container,
+	// and execs join it until it exits: `node` or `python3` is a REPL that exits on its closed
+	// stdin, a moment after boot, and takes with it everything run in it — the `start` services
+	// and /tmp. On Linux that moment is after boxer has started them. A workload that never exits
+	// gives every exec one container from the first second, which is what a sandbox is. A
+	// Smolfile says for itself what runs.
+	if s.Smolfile == "" {
+		args = append(args, "--", "sh", "-c", idleWorkload)
+	}
 	_, err := c.retryWhileLocked(func() (string, error) { return c.output(args...) })
 	return err
 }

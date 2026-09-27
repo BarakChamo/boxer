@@ -47,16 +47,28 @@ platform triple offered as `$BOXER_TARGET_FLAGS`. Verified end to end — an Alp
 for packages that ship prebuilt binaries; anything compiling at install time builds for the host
 and fails later inside the guest, so `boxer doctor` warns by name and `setup` stays the default.
 
-**Linux, for the first time.** boxer had never run on a Linux host. It now has: natively on Fedora
-CoreOS (aarch64, the podman machine's own OS) with rootless podman and SELinux enforcing, where
-the smoke suite passes **68 with 10 skipped** and every runnable example serves HTTP 200. The
-first run there failed nearly every cell, for two reasons no Mac run could have shown: SELinux
-denies an unlabelled bind mount, and rootless podman maps you to the container's root so a
-non-root guest user cannot write the worktree. Both are fixed — the mount is relabelled when
-SELinux is enforcing, and a user that cannot write the worktree is given the right uid, or on
-rootless podman the sandbox is recreated with `--userns=keep-id`. smolvm and docker on Linux are
-still not run: this machine's Linux has no `/dev/kvm` for smolvm, and its `docker` is podman's
-compatibility shim rather than a daemon.
+**Linux, for the first time.** boxer had never run on a Linux host. It has now run on two: Fedora
+CoreOS (podman's own VM, SELinux enforcing) and Ubuntu LTS in a Lima VM, where smolvm runs on
+nested KVM and docker and rootless podman are installed natively. `scripts/linux-smoke.sh`
+reproduces the second from any M3-or-later Mac and deletes the VM afterwards. On the final build
+the smoke suite passes on every backend there: smolvm 88 of 88, docker and podman 79 with 9
+skipped by capability.
+
+Linux found five bugs no Mac run could have shown. SELinux denies an unlabelled bind mount (the
+mount is now relabelled when SELinux is enforcing). Rootless podman maps you to the container's
+root, so a non-root guest user cannot write the worktree (the sandbox is recreated with
+`--userns=keep-id`). smolvm launches the image's own `CMD` as the first container, and on Linux
+it exits after boxer has started the `start` services, taking them and `/tmp` with it (boxer now
+gives each machine an idle workload). smolvm's Linux file server cannot create a file in a group
+the host user is not in, so a devcontainer user with the right uid still got `EPERM` (the gid is
+now matched too). And worktrees started together could be handed `http://` URLs for an `https://`
+proxy (the proxy is now started and asked for names under a per-user lock).
+
+Measured on the way, and fixed: docker, podman and Apple `container` published forwarded ports on
+every interface, so a sandbox's dev server answered on the Mac's LAN address. They now bind
+`127.0.0.1`, as smolvm always did, and a smoke cell checks it on every backend. Inside podman's own
+VM that cell is skipped by name: podman machine rebinds loopback ports to every interface there so
+gvproxy can forward them, and binds loopback again on the Mac.
 
 **What was run before this release, 2026-09-25.** The smoke suite on all four backends, three
 times over the day and once more on the final binary. The scripted-model matrix (t1, 69 cells)

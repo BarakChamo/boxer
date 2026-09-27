@@ -210,3 +210,17 @@ that would have asked a person refuses instead and says what to pass.
 
 An agent is detected by `CLAUDECODE` (set by Claude Code), `BOXER_AGENT`, or by running inside a
 boxer guest; any other agent is detected by having no terminal.
+
+## Environment variables
+
+Variables that map to a `boxer.toml` key, such as `BOXER_BACKEND`, are listed in the
+[configuration reference](/docs/reference/configuration#environment-variables). These have no key:
+
+| Variable | Effect |
+| --- | --- |
+| `BOXER_SMOLVM` | Path to the `smolvm` binary; default `smolvm` on `PATH` |
+| `BOXER_PORTLESS` | Path to the `portless` binary; default `portless` on `PATH` |
+| `BOXER_PACKS` | Directory for environment packs; default `packs/` beside boxer's state directory |
+| `BOXER_TRACE=<path>` | Write the event log to that file, whatever `[telemetry]` says; see [events](/docs/reference/events) |
+| `BOXER_NO_RECLAIM=1` | Skip the background sweep that ordinary commands start when `auto_reclaim` is on |
+| `BOXER_INSIDE=1` | Set by boxer in every guest process, so a boxer in the guest does not wrap commands again |

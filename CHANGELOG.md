@@ -6,7 +6,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `scripts/linux-smoke.sh` runs the smoke suite on Linux from a Mac, in a throwaway Lima VM with
+  nested virtualization, against smolvm, docker and podman installed natively. smolvm on Linux had
+  never been run before; it needs `/dev/kvm`, which nested virtualization provides on Apple M3 and
+  later. The VM is deleted afterwards.
+- Smoke cells: a forwarded port answers on loopback and not on the host's LAN address; the proxy
+  boxer started stops with the last route; `gc --all` reports a stopped sandbox and keeps a running
+  one.
+
 ### Fixed
+- **smolvm on Linux lost every `start` service a moment after `boxer up`.** With no workload
+  given, smolvm launches the image's own `CMD` as the first container and execs join it; for
+  `node` or `python3` that is a REPL that exits on its closed stdin, taking the services and
+  `/tmp` with it. On macOS it exits before boxer starts anything; on Linux it exits after. boxer
+  now gives every smolvm machine an idle workload, so execs share one container from the start.
+  Found by the first smolvm run on Linux (Ubuntu, nested KVM), which passed 84 of 88 cells; with
+  this and the next fix, 88 of 88.
+- **A devcontainer user on smolvm on Linux could not create files in the worktree** although it had
+  the host's uid: smolvm's Linux file server runs as the host user and refuses a new file in a
+  group that user is not in, and the guest user's primary group was the image's. boxer now gives
+  the user the worktree owner's gid as well as its uid.
+- **docker, podman and Apple `container` put forwarded ports on the local network.** Their `-p`
+  publishes on every interface, so a sandbox's dev server answered on the Mac's LAN address.
+  Ports now bind `127.0.0.1`, as they already did on smolvm; a spec that names an address keeps it.
+  Measured before and after on all three.
+- **The portless proxy outlived every sandbox.** boxer started it and never stopped it. It now
+  stops a proxy it started once no route is left, and never touches one the user started.
+- **Worktrees started together could be given `http://` URLs for an `https://` proxy.** With no
+  proxy running, each `boxer up` started one and asked it for names while another was still
+  coming up, and portless answered with the wrong scheme. Found on Linux, where three worktrees
+  started at once got two `http://` names and one `https://`. Starting, registering on and
+  stopping the proxy now take a per-user lock, and boxer waits for the proxy to listen before
+  asking it for names.
+- **The first request to a new URL could get portless's 404.** A freshly started proxy loads its
+  routes asynchronously; boxer now waits (up to 3s) until the name is served before reporting it.
 - **`boxer gc --all` deleted running sandboxes.** It made every sandbox count as idle, so any running
   sandbox that had ever run a command was deleted, including one an agent was using. `--all` now
   switches the idle rule off and takes only stopped sandboxes, as its help text always said.
@@ -14,6 +48,8 @@ All notable changes to this project are documented here. The format follows
   `BOXER_BACKEND` or smolvm, so a docker-configured caller saw nothing. They now pick the backend the
   same way the CLI does.
 - `boxer help` listed `boxer ls` twice and left out `gc --all`.
+- `TestUnresolvableAllowlistHostsAreDropped` failed on networks whose resolver answers every name,
+  `.invalid` included; it now skips there and says why.
 - The install page listed a Homebrew tap and an npm package that are not published. It now gives
   the npm tarball attached to the release.
 - **The first `boxer shell` on a host killed the dev server.** Caching a harness install as a pack

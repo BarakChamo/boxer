@@ -40,20 +40,23 @@ harness whose terminal shell is configurable.
 
 ## On each backend
 
-The smoke suite, with no model, on the release binary:
+The smoke suite, with no model, on the final build (2026-09-27), each backend alone on its host:
 
 | backend | passed | skipped, by capability |
 | --- | ---: | ---: |
-| smolvm | 85 of 85 | 0 |
-| docker | 76 | 9 |
-| podman | 76 | 9 |
-| Apple `container` | 76 | 9 |
-| podman on Linux | 68 | 10 |
+| smolvm | 88 of 88 | 0 |
+| docker | 79 | 9 |
+| podman | 79 | 9 |
+| Apple `container` | 79 | 9 |
+| smolvm on Linux | 88 of 88 | 0 |
+| docker on Linux | 79 | 9 |
+| podman on Linux | 79 | 9 |
 
 - The skips are forks, named packs and the egress log, which only smolvm has.
-- The Linux row is boxer running natively on Fedora CoreOS with rootless podman and SELinux
-  enforcing. Its tenth skip is the URL cells, because portless was not installed there. Every
-  runnable example also served HTTP 200 there.
+- macOS rows: an M4 Mac. Linux rows: Ubuntu LTS in a Lima VM on the same Mac, with docker and
+  rootless podman installed natively and smolvm on nested KVM, run by `scripts/linux-smoke.sh`.
+- smolvm also passed 88 of 88 on macOS with smolvm 1.19.2, the current release; the table's macOS
+  run used 1.16.1. Linux used 1.19.2.
 - A test checks these rows against the recorded runs in `docs/smoke-results.jsonl`.
 
 The scripted-model matrix (t1) passed all 68 runnable cells on two of three runs. The third missed

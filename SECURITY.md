@@ -25,6 +25,10 @@ running with a network boxer said it would deny. A container escape on a shared-
 reaches every other sandbox on that machine; on a kernel-per-sandbox backend it reaches one guest.
 If containment is the reason you use boxer, keep the default backend.
 
+Forwarded ports (`network.ports`) and the portless proxy behind `[urls]` bind `127.0.0.1` on every
+backend, so a sandbox's servers are reachable from this machine and not from the local network. A
+port spec that names an address (`"0.0.0.0:3000:3000"`) is published where it says.
+
 It is **not** a defence against a malicious agent that can choose what to run on the host. Three
 paths deliberately stay on the host:
 

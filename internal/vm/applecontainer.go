@@ -169,7 +169,7 @@ func (a Apple) Create(s CreateSpec) error {
 	// dev server with no published port is the failure that looks most like success — the
 	// container is healthy and nothing answers.
 	for _, p := range s.Ports {
-		args = append(args, "-p", p)
+		args = append(args, "-p", loopbackPort(p))
 	}
 	if s.Network == "off" {
 		args = append(args, "--no-dns")

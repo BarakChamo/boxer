@@ -90,6 +90,22 @@ Treat a repository's boxer configuration like its `Makefile` or its `package.jso
 scripts. boxer never fetches configuration or content from the network, so what runs is what is
 in the checkout.
 
+## Forwarded ports and URLs
+
+A port in `network.ports` is a way in from the host to the guest. boxer binds it to `127.0.0.1`
+on every backend, so only processes on this machine can reach it, not the local network. docker,
+podman and Apple `container` publish on every interface by default; boxer passes the loopback
+address explicitly. To expose a port on purpose, name the address in the spec:
+`"0.0.0.0:3000:3000"`.
+
+The portless proxy behind [`[urls]`](/docs/guides/urls) also listens on loopback only (`127.0.0.1`
+and `::1`), unless someone started it with `portless proxy start --lan`. boxer starts it when
+needed and stops it once no route is left; a proxy you started yourself is never stopped.
+
+Anything on this machine can reach a forwarded port, including other users' processes and a
+browser tab that is sent to a `localhost` URL. A dev server in the sandbox should not be treated
+as private to the agent.
+
 ## Secrets
 
 ```toml

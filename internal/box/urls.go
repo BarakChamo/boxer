@@ -2,10 +2,12 @@ package box
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -305,7 +307,53 @@ func ensureProxy(dir string) error {
 	if out, err := portless(dir, "proxy", "start", "--port", port); err != nil {
 		return fmt.Errorf("portless proxy start: %v: %s", err, lastLine(out))
 	}
+	_ = os.WriteFile(proxyMarker(), nil, 0o644)
+	// Names asked for before the proxy listens come back with the wrong scheme.
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end) && !proxyDown(); time.Sleep(100 * time.Millisecond) {
+		if c, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 200*time.Millisecond); err == nil {
+			_ = c.Close()
+			break
+		}
+	}
 	return nil
+}
+
+// portlessDir is portless's own state directory. boxer keeps its two proxy files there rather than
+// in its state directory, because the proxy is per user and a harness may run boxer with a
+// different XDG_STATE_HOME.
+func portlessDir() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".portless")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
+}
+
+// proxyMarker records that boxer, not the user, started the proxy, so boxer may stop it.
+func proxyMarker() string { return filepath.Join(portlessDir(), "boxer-started") }
+
+// portlessLock serialises starting, registering on and stopping the proxy.
+func portlessLock() string { return filepath.Join(portlessDir(), "boxer.lock") }
+
+// stopIdleProxy stops a proxy boxer started once no route of anyone's is left. A proxy the user
+// started, or one still serving any route, is left alone.
+func stopIdleProxy() {
+	if _, err := os.Stat(proxyMarker()); err != nil {
+		return
+	}
+	unlock, err := lockFile(portlessLock())
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if len(portlessRoutesByPort()) > 0 {
+		return
+	}
+	if !proxyDown() {
+		if _, err := portless(os.TempDir(), "proxy", "stop"); err != nil {
+			return
+		}
+	}
+	_ = os.Remove(proxyMarker())
 }
 
 func lastLine(s string) string {
@@ -331,6 +379,12 @@ func (e *Env) publishURLs(m vm.Machine, w io.Writer) map[string]string {
 		fmt.Fprintf(w, "boxer: fix: npm install -g portless\n")
 		return nil
 	}
+	// Worktrees start together under an orchestrator, and each would start the proxy and ask it
+	// for names while another was still bringing it up: portless then answers http:// for a proxy
+	// that serves https. One at a time per user, as portless itself is.
+	if unlock, err := lockFile(portlessLock()); err == nil {
+		defer unlock()
+	}
 	if err := ensureProxy(e.Scope.Root); err != nil {
 		fmt.Fprintf(w, "boxer: warning: %v\n", err)
 	}
@@ -354,7 +408,48 @@ func (e *Env) publishURLs(m vm.Machine, w io.Writer) map[string]string {
 		out[guest] = u
 		fmt.Fprintf(w, "boxer: url: %s -> guest port %s\n", u, guest)
 	}
+	for _, u := range out {
+		awaitRoute(u, 3*time.Second)
+	}
 	return out
+}
+
+// awaitRoute waits until the proxy serves a newly registered name. portless reloads its route
+// table asynchronously, so for a moment after registration — always, when the proxy has just been
+// started — the name answers portless's own 404. Handing an agent that URL means its first request
+// fails. ponytail: an app whose / is itself a 404 costs the full wait once; a portless status
+// endpoint would end that.
+func awaitRoute(raw string, limit time.Duration) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return
+	}
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"https": "443", "http": "80"}[u.Scheme]
+	}
+	c := &http.Client{
+		Timeout: 500 * time.Millisecond,
+		Transport: &http.Transport{
+			// The proxy is on this host's loopback, whatever the name resolves to.
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort("127.0.0.1", port))
+			},
+			// Only a readiness probe of boxer's own local proxy, whose CA Go may not trust.
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: u.Hostname()}, //nolint:gosec // loopback readiness probe
+		},
+	}
+	defer c.CloseIdleConnections()
+	for end := time.Now().Add(limit); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		resp, err := c.Get(raw)
+		if err != nil {
+			return // nothing listening: no proxy to wait for, and the start already warned
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			return
+		}
+	}
 }
 
 // registerURL chooses and registers one name. The choice, in order: the name portless itself
@@ -433,6 +528,7 @@ func unpublishURLs(key string) {
 		}
 		_ = os.Remove(filepath.Join(urlsDir(), r.Name))
 	}
+	stopIdleProxy()
 }
 
 // removeRoutesTo removes every portless route that points at one of these host ports. They are a
@@ -462,6 +558,7 @@ func removeRoutesTo(ports map[string]string) {
 		}
 		_, _ = portless(os.TempDir(), "alias", "--remove", name)
 	}
+	stopIdleProxy()
 }
 
 // PruneURLs removes routes whose sandbox is not in live and whose host port nothing is listening

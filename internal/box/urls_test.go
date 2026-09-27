@@ -5,10 +5,14 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -411,6 +415,11 @@ func TestSetupMarkerDiesWithTheWorktree(t *testing.T) {
 // One retired hostname on the allowlist made smolvm refuse to create any sandbox that listed it.
 // A host that does not resolve is left out, by name; wildcards and addresses are not looked up.
 func TestUnresolvableAllowlistHostsAreDropped(t *testing.T) {
+	// Some networks answer every name, even under .invalid (RFC 6761), and then nothing is
+	// unresolvable. smolvm resolves through the same resolver, so it would not refuse either.
+	if addrs, err := net.LookupHost("no-such-host.invalid"); err == nil {
+		t.Skipf("this network's resolver answers for .invalid (%v); nothing here is unresolvable", addrs)
+	}
 	var w bytes.Buffer
 	e := &Env{Cfg: config.Defaults(), Stderr: &w}
 	got := e.resolvable([]string{"localhost", "no-such-host.invalid", "*.npmjs.org", "10.0.0.1", "localhost:8080"})
@@ -455,11 +464,13 @@ func TestUserThatCannotWriteTheWorktree(t *testing.T) {
 		owner, cause, want string
 	}{
 		{"501", "", ""},
+		// With the group: smolvm on Linux refuses a create whose group the host user is not in.
+		{"501 1000", "", ":501:1000:"},
 		{"0", "UNSUPPORTED", "maps you to the container's root"},
 		{"unknown", "SETUP_FAILED", "its owner could not be read"},
 	} {
 		t.Run(tc.owner, func(t *testing.T) {
-			vmtest.Install(t)
+			_, log := vmtest.Install(t)
 			t.Setenv("FAKE_USER_OWNER", tc.owner)
 			dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"user = \"node\"\n")
 			e, err := Resolve(dir, "", scope.Identity{})
@@ -471,6 +482,9 @@ func TestUserThatCannotWriteTheWorktree(t *testing.T) {
 			if tc.cause == "" {
 				if err != nil {
 					t.Fatalf("an ordinary owner is fixed by giving the user its uid: %v", err)
+				}
+				if b, _ := os.ReadFile(log); tc.want != "" && !strings.Contains(string(b), tc.want) {
+					t.Fatalf("the passwd edit does not set %s:\n%s", tc.want, b)
 				}
 				return
 			}
@@ -497,5 +511,67 @@ func TestHostBackendReadsTheCheckoutsConfig(t *testing.T) {
 	t.Setenv("BOXER_BACKEND", "docker")
 	if got := HostBackend(t.TempDir()); got != "docker" {
 		t.Fatalf("outside a repository: got %q, want BOXER_BACKEND's docker", got)
+	}
+}
+
+// boxer stops the proxy it started once no route is left, and never one the user started or one
+// still serving a route.
+func TestProxyStopsWhenBoxerStartedItAndNothingIsRouted(t *testing.T) {
+	state := installFakePortless(t)
+	home, _ := os.UserHomeDir()
+	pl := filepath.Join(home, ".portless")
+	stops := func() int {
+		b, _ := os.ReadFile(filepath.Join(state, ".calls"))
+		return strings.Count(string(b), "proxy stop")
+	}
+	if err := ensureProxy(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(proxyMarker()); err != nil {
+		t.Fatal("starting the proxy must record that boxer started it")
+	}
+	// Now running, as far as boxer can tell.
+	if err := os.MkdirAll(pl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(pl, "proxy.pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
+
+	_ = os.WriteFile(filepath.Join(pl, "routes.json"), []byte(`[{"hostname":"x.localhost","port":4000}]`), 0o644)
+	stopIdleProxy()
+	if stops() != 0 {
+		t.Fatal("stopped a proxy that still serves a route")
+	}
+	_ = os.WriteFile(filepath.Join(pl, "routes.json"), []byte(`[]`), 0o644)
+	stopIdleProxy()
+	if stops() != 1 {
+		t.Fatal("left an idle proxy boxer started running")
+	}
+	if _, err := os.Stat(proxyMarker()); !os.IsNotExist(err) {
+		t.Fatal("the marker must go with the proxy")
+	}
+	stopIdleProxy()
+	if stops() != 1 {
+		t.Fatal("stopped a proxy boxer did not start")
+	}
+}
+
+// A new name answers portless's 404 until the proxy reloads its routes; boxer waits that out,
+// returns at once when the name is served, and does not wait at all when nothing is listening.
+func TestAwaitRouteWaitsOutTheProxysReload(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) < 3 {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	awaitRoute(srv.URL, 5*time.Second)
+	if hits.Load() != 3 {
+		t.Fatalf("stopped after %d requests, want the first that was not a 404", hits.Load())
+	}
+	start := time.Now()
+	awaitRoute("http://nothing.localhost:1/", 5*time.Second)
+	if time.Since(start) > time.Second {
+		t.Fatal("waited for a proxy that is not there")
 	}
 }

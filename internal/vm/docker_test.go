@@ -245,3 +245,18 @@ func TestDockerWordingMapsOntoTheConditionItMeans(t *testing.T) {
 		}
 	}
 }
+
+// docker, podman and Apple's container publish on every interface unless told otherwise, which put
+// a sandbox's dev server on the local network. boxer binds loopback, as smolvm does.
+func TestPublishedPortsBindLoopback(t *testing.T) {
+	for in, want := range map[string]string{
+		"51043:3000":          "127.0.0.1:51043:3000",
+		"3000:3000":           "127.0.0.1:3000:3000",
+		"0.0.0.0:3000:3000":   "0.0.0.0:3000:3000",
+		"127.0.0.1:3000:3000": "127.0.0.1:3000:3000",
+	} {
+		if got := vm.LoopbackPortForTest(in); got != want {
+			t.Errorf("%s: got %s, want %s", in, got, want)
+		}
+	}
+}

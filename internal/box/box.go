@@ -1263,13 +1263,13 @@ func (e *Env) matchUserUID() error {
 	marker := "/var/lib/boxer/uid-" + u
 	probe := fmt.Sprintf(`test -f %[2]s && exit 0
 su -s /bin/sh %[1]s -c 'p=.boxer-user-probe-$$; : > "$p" && rm -f "$p"' 2>/dev/null && exit 0
-stat -c %%u . 2>/dev/null || echo unknown`, u, marker)
+stat -c '%%u %%g' . 2>/dev/null || echo unknown`, u, marker)
 	out, code, err := vm.Output(e.VM, e.Scope.Key, e.MountAt(), "sh", "-c", probe)
 	if err != nil {
 		return e.fail(&Error{Reason: "could not check whether " + u + " can write the worktree: " + err.Error(), Cause: "SETUP_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
 	}
-	owner := strings.TrimSpace(out)
+	owner, group, _ := strings.Cut(strings.TrimSpace(out), " ")
 	if code == 0 && owner == "" {
 		return nil // the user can already write it, or this sandbox was set up before
 	}
@@ -1313,15 +1313,22 @@ stat -c %%u . 2>/dev/null || echo unknown`, u, marker)
 		return e.fail(&Error{Reason: fmt.Sprintf("guest user %q cannot write the worktree, and its owner could not be read: %q", u, owner),
 			Cause: "SETUP_FAILED", Scope: e.Scope, Fix: "check that `user` names a user the image has, or remove `user`"})
 	}
+	// The group too: on Linux smolvm's file server runs as the host user and cannot give a new
+	// file a group it is not in, so a user whose primary group is the image's gets EPERM on
+	// every create even with the right uid. Kept as it is when the owner's group is unknown.
+	gid := "$oldg"
+	if g, gerr := strconv.Atoi(group); gerr == nil {
+		gid = strconv.Itoa(g)
+	}
 	// busybox has no usermod, so the passwd line is edited directly; the home directory follows.
 	script := fmt.Sprintf(`set -e
-old=$(id -u %[1]s)
-if [ "$old" != "%[2]d" ]; then
-  sed -i "s/^%[1]s:\([^:]*\):$old:/%[1]s:\1:%[2]d:/" /etc/passwd
+old=$(id -u %[1]s); oldg=$(id -g %[1]s)
+if [ "$old:$oldg" != "%[2]d:%[4]s" ]; then
+  sed -i "s/^%[1]s:\([^:]*\):$old:$oldg:/%[1]s:\1:%[2]d:%[4]s:/" /etc/passwd
   home=$(awk -F: '$1=="%[1]s"{print $6}' /etc/passwd)
-  [ -n "$home" ] && [ -d "$home" ] && chown -R %[2]d "$home"
+  [ -n "$home" ] && [ -d "$home" ] && chown -R %[2]d:%[4]s "$home"
 fi
-mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker)
+mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker, gid)
 	out, code, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", script)
 	if err != nil || code != 0 {
 		return e.fail(&Error{Reason: fmt.Sprintf("could not give guest user %q the worktree owner's uid %d: %s", u, uid, firstNonEmpty(errText(err), strings.TrimSpace(out))),

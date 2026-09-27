@@ -10,7 +10,8 @@
   from `evals/.env` (gitignored, `KEY=value` lines). One key runs every harness live:
   `AI_GATEWAY_API_KEY` (Vercel AI Gateway; Claude Code, Kimi and pi over Anthropic Messages,
   Codex over Responses, OpenCode, Grok and OpenHands over Chat Completions). Only Gemini CLI needs
-  its own `GEMINI_API_KEY`. `BOXER_EVAL_MODEL` overrides the per-harness cheap model. A missing
+  its own `GEMINI_API_KEY`. `BOXER_EVAL_MODEL` overrides the per-harness cheap model, and `BOXER_EVAL_PACE=<seconds>`
+  pauses that long before the next live cell after a provider rate-limits one. A missing
   credential skips its cells and names the variable. Run one cell at a time on a shared machine:
   `bin/boxer-eval --tier t2 --cell claude-code/rewrite/plugin`.
 - `--tier adherence` scenarios: `brief`, `recovery`, `multistep`, `task`, `prep` (host-side

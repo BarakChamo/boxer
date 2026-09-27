@@ -9,7 +9,9 @@ by default) and a git repository to work in.
 Supported hosts are macOS on Apple Silicon and Linux on x86-64 or arm64. Windows is not supported:
 boxer's worktree model depends on POSIX paths and mounts.
 
-smolvm needs hardware virtualisation: on Linux that means `/dev/kvm`. boxer cannot start a microVM
+smolvm needs hardware virtualisation: on Linux that means a `/dev/kvm` your user can open, usually
+through membership of the `kvm` group (`sudo usermod -aG kvm $USER`, then log in again). Inside a
+Linux VM, that VM needs nested virtualisation. boxer cannot start a microVM
 from inside another sandbox that blocks it, such as a harness's own seatbelt. See
 [Enforcement](/docs/guides/enforcement#harnesses-that-sandbox-themselves).
 

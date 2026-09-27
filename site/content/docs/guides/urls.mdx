@@ -81,8 +81,9 @@ home page, five of the eight harnesses found it by name on all four models tried
 
 A name is registered when the sandbox starts and removed when it is deleted by `down`, `rm`, `gc`
 or `down --all`. `gc` also removes a route whose sandbox disappeared some other way. If the portless
-proxy is not running, boxer starts it on port 1355 the next time it runs a command. It never uses
-443, which needs sudo.
+proxy is not running, boxer starts it on port 1355 (never 443, which needs sudo), and stops it
+again when the last route is removed. A proxy you started yourself is left running. The proxy
+listens on loopback only; see [forwarded ports and URLs](/docs/concepts/security#forwarded-ports-and-urls).
 
 Without portless installed, boxer warns once and everything else works: ports are still forwarded,
 and `boxer url` prints `http://127.0.0.1:<host port>`.

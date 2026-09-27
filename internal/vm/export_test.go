@@ -13,3 +13,6 @@ func DecodeAppleForTest(out string) ([]Machine, error) { return Apple{Bin: "cont
 
 // WithSELinuxLabelForTest exposes the mount relabelling to the external tests.
 var WithSELinuxLabelForTest = withSELinuxLabel
+
+// LoopbackPortForTest exposes how a publish spec is bound on the container backends.
+var LoopbackPortForTest = loopbackPort

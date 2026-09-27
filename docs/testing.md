@@ -106,7 +106,11 @@ External programs a test needs — portless, `npx`, `gh`, podman — are small s
 ```sh
 make smoke                          # real smolvm, no model
 BOXER_BACKEND=docker make smoke     # the same cells on another backend
+scripts/linux-smoke.sh              # from a Mac: smolvm, docker and podman on Linux, in a Lima VM
 ```
+
+`BOXER_SMOKE_RECORD=docs/smoke-results.jsonl` appends the run to the record the published tables
+are checked against.
 
 Every configuration path against a real sandbox: provision, setup, pack, run, ports, network
 modes, reclaim, test-result summaries, capsule replay, named packs, forking, devcontainer
