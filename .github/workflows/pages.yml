@@ -30,8 +30,7 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: site/package-lock.json
-      # The three actions/*-pages pins below were added without network access to check them
-      # against upstream. Confirm each SHA before relying on this workflow.
+      # Every action is pinned to the commit its tag resolved to on 2026-09-28.
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - name: Install
         working-directory: site
