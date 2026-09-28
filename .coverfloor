@@ -13,7 +13,8 @@
 # The coverage lost is not unverified: each driver is checked end to end by `make smoke` against a
 # real backend (BOXER_BACKEND=podman make smoke), which is a stronger test than a unit percentage,
 # and the parts that can be tested anywhere — decoding, error classification, capabilities, the
-# refusals — are covered unconditionally. Raise this floor again if the runtime-free share grows.
+# refusals — are covered unconditionally. Raised to 65 on 2026-09-28, when a fake `container` CLI
+# brought the Apple driver under test on every host: CI measured 67.6% on macOS, 78.7% on Linux.
 internal/box       82
 internal/bundle    87
 internal/config    66
@@ -29,6 +30,6 @@ internal/mcp       94
 internal/obs       81
 internal/scope     87
 internal/shim      67
-internal/vm        55
+internal/vm        65
 pkg/boxer          78
 cmd/boxer          78
