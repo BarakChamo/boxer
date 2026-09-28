@@ -126,9 +126,26 @@ jobs:
         run: npm ci --no-audit --no-fund
       # The site is the reference for the CLI and the configuration keys, so a build that
       # fails is a documentation outage rather than a cosmetic problem.
+      # Built exactly as the Pages workflow builds it, prefix included, so a change that would break
+      # the published site fails here, on the pull request, rather than on deploy.
       - name: Build
         working-directory: site
+        env:
+          BOXER_BASE_PATH: /boxer
         run: npm run build
+      - name: The export is complete
+        working-directory: site
+        run: |
+          test -f out/index.html
+          test -f out/docs/index.html
+          test -f out/llms.txt
+          test -s out/api/search
+          # Every root-relative link in the export must carry the Pages prefix.
+          if grep -rhoE '(href|src)="/[^"]*"' out --include=index.html | grep -v '"/boxer'; then
+            echo "links above are missing the /boxer prefix"; exit 1
+          fi
+      - name: Links and anchors
+        run: python3 scripts/check-doc-links.py
       - name: Types
         working-directory: site
         run: npm run types:check

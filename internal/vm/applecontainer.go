@@ -254,6 +254,9 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.Bin, args...)
+	// A timeout kills the CLI, but a process it left holding stdout would keep Wait blocked until
+	// that process exited; WaitDelay bounds the wait so the timeout actually returns.
+	cmd.WaitDelay = 2 * time.Second
 	head := &headWriter{w: o.Stderr}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.Stdin, o.Stdout, head
 	if err := cmd.Start(); err != nil {
