@@ -1,23 +1,25 @@
 ---
-title: Examples
-description: Working boxer.toml files for Next.js, Vite, Python, Go, monorepos, devcontainers and other backends.
+title: Start from an example
+description: Working boxer.toml files for Next.js, Vite, Python, Go, monorepos, devcontainers and other backends, and a Go program that embeds boxer.
 ---
 
 The repository's [`examples/`](https://github.com/BarakChamo/boxer/tree/main/examples) directory
-has a `boxer.toml` for each common setup. Each is either a **runnable** project or a **config** to
-drop into an existing one. The test suite parses every one, and every one except `monorepo` has
-been run on a real sandbox.
+has a `boxer.toml` for each common setup. Each is a **runnable** project, a **config** to drop into
+an existing one, or a **program** that uses boxer as a library. The test suite loads every
+`boxer.toml` and `devcontainer.json` there, and every `boxer.toml` except `monorepo`'s has been run
+on a real sandbox.
 
 | example | kind | shows |
 | --- | --- | --- |
 | `nextjs` | config | a Next.js dev server per worktree, `[urls]`, `allowedDevOrigins`, tasks |
-| `nextjs-devcontainer` | config | the same from `devcontainer.json`: users, port labels, variables |
+| `nextjs-devcontainer` | config | the same from `devcontainer.json` plus a short `boxer.toml`: users, port labels, variables |
 | `vite` | runnable | Vite with `--strictPort`, a name per worktree |
 | `python-fastapi` | runnable | uv: a tool in `image_setup`, the project in `setup` |
 | `go-api` | runnable | a Go service, tasks for test and vet |
 | `monorepo` | config | two services in one sandbox, named ports, JUnit-reporting tasks |
 | `host-prep` | config | installing on the host with `[prep]`, and when not to |
 | `docker-backend` | config | the same project on docker or podman, and what that gives up |
+| `go-embed` | program | `pkg/boxer` running one command in several worktrees at once |
 
 A runnable example must be its own git repository, because boxer keys a sandbox to a worktree:
 
@@ -27,7 +29,8 @@ git init -q && git add -A && git commit -qm init
 boxer up && curl -sk "$(boxer url)"
 ```
 
-The snippets below are trimmed; the files carry comments and more tasks.
+The snippets below are trimmed. The files carry comments and more tasks, and each directory's
+`README.md` lists its gotchas.
 
 ## Next.js
 
@@ -100,8 +103,8 @@ cmd = "go test ./..."
 description = "the Go tests"
 ```
 
-With module dependencies, add `go mod download` to `setup` and `"proxy.golang.org",
-"sum.golang.org"` to `allow_hosts`.
+With module dependencies, add `go mod download` to `setup` and `"proxy.golang.org"` and
+`"sum.golang.org"` to `allow_hosts`.
 
 ## From a devcontainer
 
@@ -117,12 +120,24 @@ allow_hosts = ["registry.npmjs.org"]
 enabled = true
 ```
 
+## Embedding boxer in Go
+
+`go-embed` opens a sandbox per worktree with `pkg/boxer`, runs one shell line in all of them at
+once, and prints each exit code. Run it from a boxer checkout:
+
+```sh
+go run ./examples/go-embed -- 'npm test' ~/code/app-wt1 ~/code/app-wt2
+```
+
+Each directory must be a git worktree, and each reads its own `boxer.toml`.
+[Building on boxer](/docs/guides/building-on-boxer) and the [Go reference](/docs/reference/go) cover
+the API.
+
 ## What every example has in common
 
-- **The server binds `0.0.0.0`**, never `127.0.0.1`: a forwarded port arrives on the guest's
-  interface.
-- **Ports are `auto:`** in anything committed: a fixed host port makes the second worktree fail.
-- **`ready` probes the server itself**, so `boxer up` means "answering", not "launched".
-- **The allowlist names the package registry**, and nothing else; the image registry is allowed
-  automatically. If an install fails because a host is missing, boxer's error names it and gives
-  the line to add.
+- **The server binds `0.0.0.0`.** A forwarded port arrives on the guest's interface, so a server
+  on `127.0.0.1` never sees it.
+- **Ports are `auto:`.** A fixed host port makes the second worktree fail to start.
+- **`ready` probes the server.** `boxer up` returns when the server answers.
+- **The allowlist names only the package registry.** The image registry is allowed
+  automatically, and a failed install names any host that is missing.

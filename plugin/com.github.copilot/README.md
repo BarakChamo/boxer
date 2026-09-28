@@ -11,9 +11,11 @@ boxer install copilot --user
 Copilot CLI's hooks live at user scope, `${COPILOT_HOME:-~/.copilot}/hooks/boxer.json`: repository
 hooks under `.github/hooks/` load only from a trusted working directory, which `-p` mode does not
 grant unless `COPILOT_ALLOW_ALL` is exactly `true`. The same install writes the skill to
-`~/.copilot/skills/boxer/SKILL.md` and the run tool into `~/.copilot/mcp-config.json`.
+`${COPILOT_HOME:-~/.copilot}/skills/boxer/` and merges the run tool into
+`${COPILOT_HOME:-~/.copilot}/mcp-config.json`. `boxer install copilot` without `--user` refuses,
+because Copilot has no project-level layer boxer can use.
 
-`boxer` must be on `PATH`; the hook calls it by name.
+`boxer` must be on `PATH`. The hook calls it by name.
 
 ## What the bundle does
 

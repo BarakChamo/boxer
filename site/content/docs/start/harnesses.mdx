@@ -17,6 +17,9 @@ boxer install codex --user    # user layer instead of the project one (claude-co
 that harness reads. Apart from `--user`, the files land in the repository, so a worktree and a clone
 carry the integration with them. It also prints notes for any step it cannot do for you.
 
+To install only the skill, or the plugin package through `npx plugins`, see
+[Skills and plugins](/docs/guides/skills-and-plugins). Neither enforces on its own.
+
 **Commit what it writes.** A worktree is cut from a branch, so an integration that is not in the
 branch is not in the worktree, and an orchestrator's task there runs unsandboxed.
 
@@ -45,6 +48,8 @@ but will not hold.
 
 Some harnesses need one more step, which `boxer install` prints as a note:
 
+- **Claude Code**: approve the `boxer` MCP server from `.mcp.json` the first time you open the
+  repository. The hooks load without a prompt once the folder is trusted.
 - **Codex**: add the MCP server to `.codex/config.toml`, and trust the project hooks (see below).
 - **Kimi**: its hooks live only in the user config; append the printed block to
   `~/.kimi-code/config.toml` and set `[harness.kimi] mode = "tool"` in `boxer.toml`.
@@ -59,8 +64,7 @@ once they are trusted. Under an orchestrator, or in `codex exec` without
 </Callout>
 
 **fx** has no hooks, its shell cannot be denied headlessly, and it resolves commands past a PATH
-shim, so `boxer install` has nothing to write. Run it inside the sandbox instead. Only one of its two
-evaluated cells scores 100%; see [Support, measured](/docs/evals/results).
+shim, so `boxer install` has nothing to write. Run it inside the sandbox instead.
 
 ```sh
 boxer shell fx
@@ -83,7 +87,7 @@ once.
    guest. Needs no harness support.
 5. **Inside mode.** The harness itself runs in the VM, so there is nothing on the host to intercept.
 
-[How it works](/docs/guides/how-it-works#how-a-command-reaches-the-guest) compares them, and
+[How it works](/docs/guides/how-it-works#how-a-command-reaches-the-sandbox) compares them, and
 [Enforcement](/docs/guides/enforcement) has the details.
 
 ## Running someone else's MCP server in the sandbox

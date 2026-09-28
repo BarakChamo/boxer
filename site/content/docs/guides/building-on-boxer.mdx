@@ -1,131 +1,137 @@
 ---
 title: Building on boxer
-description: Drive boxer from a program through the Go package, JSON output, or the CLI.
+description: Drive sandboxes from your own program with the Go package, the JSON output, or the CLI.
 ---
 
-Orchestrators, dashboards and new harness integrations can drive boxer through three entry
-points. Pick by what you are writing:
+Orchestrators, dashboards and harness integrations drive boxer through three interfaces. All three
+are covered by the 1.0 stability contract: fields and flags are added, never renamed or removed.
 
 | You are writing | Use |
 | --- | --- |
 | A Go program that owns sandbox lifecycle | [`pkg/boxer`](#go) |
-| Anything else that needs to read state | [`--json`](#json) |
-| An integration for a harness | [the CLI](#the-cli-as-an-interface) |
+| A program in any other language, or a script | [`--json`](#json) |
+| An integration for a new harness | [`boxer hook`, `boxer mcp`, `boxer brief`](#a-harness-integration) |
 
 ## Go
 
+```sh
+go get github.com/BarakChamo/boxer
+```
+
+`pkg/boxer` is the only importable package. It runs the same code as the CLI.
+
 ```go
 import "github.com/BarakChamo/boxer/pkg/boxer"
-```
 
-The only importable package; everything else is under `internal/`. It is a thin facade over the
-same code the CLI runs.
-
-<Callout>
-Experimental until 1.0, and covered by the stability contract from 1.0 onwards.
-</Callout>
-
-```go
-b, err := boxer.Open(cwd, boxer.Options{Harness: "claude-code", SessionID: sid})
+b, err := boxer.Open(dir, boxer.Options{Harness: "my-orchestrator", SessionID: sid})
 if err != nil {
-    var be *boxer.Error
-    if errors.As(err, &be) {
-        log.Fatalf("%s (%s): %s", be.Reason, be.Cause, be.Fix)
-    }
-    log.Fatal(err)
+	var be *boxer.Error
+	if errors.As(err, &be) {
+		log.Fatalf("%s (%s); fix: %s", be.Reason, be.Cause, be.Fix)
+	}
+	log.Fatal(err)
 }
-
 for _, w := range b.Warnings() {
-    log.Println("boxer:", w)   // main checkout, degraded isolation
+	log.Println("boxer:", w) // for example, running in the main checkout
 }
-
-if _, err := b.Ensure(true, false); err != nil {   // create if needed, then start
-    log.Fatal(err)
+if _, err := b.Ensure(true, false); err != nil { // create if needed, then start
+	log.Fatal(err)
 }
-
-code, err := b.Run(
-    []string{"sh", "-c", "npm test"},
-    boxer.RunOpts{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
-)
+code, err := b.Run([]string{"sh", "-c", "npm test"}, boxer.RunOpts{
+	Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+})
 ```
 
-`Options` carries the harness name and the identity (`SessionID`, `AgentID`). All may be empty.
-They matter when `isolation` keys the sandbox to something other than the worktree (see
-[scopes](/docs/concepts/scopes-and-packs)), and when a `[harness.<name>]` override should apply.
+`Run` returns the guest command's exit code. A non-nil error means the command did not run. With
+`on_sandbox_unavailable = "passthrough"`, `Run` returns `-1` and an error when the sandbox could not
+be provisioned, and your program decides whether to run on the host.
 
-### Handling refusals
+`Options` is optional. `Harness` selects a `[harness.<name>]` override in `boxer.toml`, and
+`SessionID` and `AgentID` matter only when [`isolation`](/docs/reference/configuration#scope) keys
+the sandbox to a session or subagent.
 
-Every refusal is a `*boxer.Error` with four fields: `Reason` and `Fix` for a person, `Cause` for a
-program, and `Scope` for context. Match on `Cause`, which is stable, not on the message.
+### A complete program
 
-`Run` returns `-1` with an error when `on_sandbox_unavailable = "passthrough"` and the sandbox
-could not be provisioned. Your caller decides whether to fall back to the host.
+[`examples/go-embed`](https://github.com/BarakChamo/boxer/tree/main/examples/go-embed) runs one
+shell line in several worktrees in parallel, each in its own sandbox, and reports every exit code:
 
-### Host-wide operations
+```sh
+go run ./examples/go-embed -- 'npm test' ~/code/app-wt1 ~/code/app-wt2
+```
+
+```
+/Users/me/code/app-wt1                   ok
+/Users/me/code/app-wt2                   exit 1
+    FAIL src/cart.test.ts
+```
+
+### Errors
+
+Every refusal is a `*boxer.Error`. `Reason` and `Fix` are for a person, `Cause` is for a program,
+and `Scope` says which sandbox. Match on `Cause`: the values are listed in
+[JSON output](/docs/reference/json#errors) and do not change.
+
+### Host-wide functions
 
 ```go
-machines, _ := boxer.List()          // every boxer-owned machine
-_ = boxer.Stop("sb-7e1852e4a3c3")
+machines, _ := boxer.List()        // every boxer sandbox on this directory's backend
+_ = boxer.Stop("sb-7e1852e4a3c3")  // stop; stopping a stopped sandbox is not an error
 _ = boxer.Delete("sb-7e1852e4a3c3")
 t := boxer.LastUsed("sb-7e1852e4a3c3")
 ```
 
-These take a machine name rather than a working directory, since the worktree may already be
-gone.
+These take a sandbox name, because the worktree may already be gone. The [Go
+reference](/docs/reference/go) lists every function and type.
 
 ## JSON
 
-For anything that is not Go. `--json` on `ls`, `status`, `down`, `gc`, `doctor`, `brief`, `tasks`,
-`logs`, `backends`, `integrations`, `stop`, `rm`, `pack ls`, `fork` and `capsule inspect` prints exactly one JSON document on stdout.
-Fields are added, never repurposed or removed. See [JSON output](/docs/reference/json) for the
-shapes.
+`--json` prints exactly one JSON document on stdout. It works on `ls`, `status`, `down`, `gc`,
+`doctor`, `brief`, `tasks`, `logs`, `backends`, `integrations`, `stop`, `rm`, `pack ls`, `fork` and
+`capsule inspect`. `BOXER_OUTPUT=json` does the same for a caller that cannot add a flag.
 
 ```sh
-boxer ls --json --resources     # every sandbox, with live cpu and memory
-boxer status --json             # this scope; exit 0 running, 3 stopped, 4 absent
-boxer doctor --json             # the resolved configuration and every check
+boxer status --json         # this worktree's sandbox; exit 0 running, 3 stopped, 4 absent
+boxer ls --json --resources # every sandbox, with CPU, memory and disk
+boxer doctor --json         # the resolved configuration and every check
 ```
 
-A health check can use the `status` exit code without parsing anything.
-
-### Watching instead of polling
+A health check can use the `status` exit code alone. To find sandboxes whose worktree has been
+deleted, read `git.exists` from `ls`:
 
 ```sh
-boxer watch --json
+boxer ls --json | python3 -c '
+import json, sys
+for s in json.load(sys.stdin):
+    if not s["git"]["exists"]:
+        print(s["name"], s["worktree"])'
 ```
 
-One JSON object per line for each state change (created, running, stopped, gone), as it
-happens.
+`boxer watch --json` prints one object per line for each state change (created, running, stopped,
+gone) as it happens, so a dashboard does not have to poll. [JSON output](/docs/reference/json) has
+every shape. Parse `--json` output, never a table: the human columns are not part of the contract.
 
-## The CLI as an interface
+## A harness integration
 
-A new harness integration needs four commands and no library:
+A new harness needs these commands and no library:
 
 ```sh
-boxer hook <harness>    # reads the harness's hook JSON on stdin, writes its dialect back
+boxer hook <harness>    # reads the harness's hook JSON on stdin, answers in its dialect
 boxer mcp               # boxer_run and boxer_status over stdio
-boxer brief --json      # the mount, mode, intercept list and tasks, for a prompt
-boxer run -c '<line>'   # the escape hatch: a shell line in the guest
+boxer brief --json      # the mount, mode, intercept list and tasks, for a system prompt
+boxer run -c '<line>'   # a shell line in the guest, with its exit code
 ```
 
-`boxer hook` speaks nine dialects. If your harness resembles one, add a row rather than writing a
-bridge; see
-[Adding a harness](https://github.com/BarakChamo/boxer/blob/main/docs/adding-a-harness.md).
-Otherwise, `boxer run` is a stdio pipe that returns the guest's exit code.
+`boxer hook` speaks nine dialects. If your harness resembles one, add a row to boxer's tables
+instead of writing a bridge: [Adding a
+harness](https://github.com/BarakChamo/boxer/blob/main/docs/adding-a-harness.md). If it has no hook
+API, `boxer run` is a stdio pipe you can put behind any shell tool.
 
-## Worth knowing before you build
+## Before you ship
 
-**Provisioning is idempotent.** `Ensure` and `boxer up` do nothing on a running sandbox, so call
-them freely rather than tracking state.
-
-**boxer strips its own shim directories from `PATH`** before starting anything, so boxer never
-resolves its own shim. If your tool manipulates `PATH` around boxer, do not undo this: a `uname`
-shim would call `boxer run -- uname` inside a boxer already working on the same sandbox, and the
-session deadlocks.
-
-**A sandbox costs about 700 MB of disk** and around a gigabyte resident, against a default 4 GB
-allocation. A tool that opens one per task should decide when to close them. `boxer gc` and
-`auto_reclaim` reclaim automatically; `boxer down --scope NAME` removes one.
-
-**Use `auto:` ports in anything you generate.** A fixed host port collides as soon as a second
-worktree starts.
+- `Ensure` and `boxer up` do nothing on a running sandbox. Call them before every run rather than
+  tracking state.
+- A sandbox costs about 700 MB of disk and around a gigabyte of memory in use. A tool that opens one
+  per task should remove them: `Down()`, `boxer rm`, or `auto_reclaim` and `boxer gc` for idle ones.
+- Use `auto:` ports in any `boxer.toml` you generate. A fixed host port fails in the second worktree.
+- boxer removes its own shim directories from `PATH` before it runs anything. Do not add them back
+  around a boxer call: a `uname` shim would call boxer inside boxer and deadlock the session.

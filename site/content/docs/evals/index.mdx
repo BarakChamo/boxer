@@ -1,12 +1,12 @@
 ---
-title: Why there are evaluations
-description: What boxer claims, and the evaluation tiers that check each claim.
+title: Evaluations
+description: The evaluation tiers that check boxer's claims against real agents and runtimes, and what each costs.
 ---
 
-boxer's claims are about behaviour: *this harness's commands run in the sandbox*, *this integration
-level holds*, *a worktree's sandbox is its own*, *an agent finds its own server*. Unit tests cannot
-establish these, because they depend on a real coding agent running against a real runtime. The
-evaluation tiers test them, and every result is published with the conditions it was measured under.
+The evaluation tiers run real coding agents against real runtimes to check what unit tests cannot:
+that a harness's commands run in the sandbox, that an integration level holds, that each worktree
+gets its own sandbox, and that an agent finds its own dev server. Every result is published with
+the conditions it was measured under.
 
 | Tier | What it asks | Cost |
 | --- | --- | --- |
@@ -14,22 +14,23 @@ evaluation tiers test them, and every result is published with the conditions it
 | `t1` | Does each integration work, with a scripted model? | free, fast |
 | `t2` | The same, with real models | cents |
 | `adherence` | When boxer only *asks*, how often do agents comply? | cents |
-| `flow` | Can an agent develop against a dev server in the sandbox? | cents |
+| `flow` | Can an agent develop against a dev server in the sandbox? | ~$0.20 |
 | `sdlc` | Twelve development lifecycles in parallel worktrees | ~$0.30 |
-| `matrix` | The same workload at every integration level | ~$2 |
+| `matrix` | The same workload at every integration level | $2 to $3 |
 
-An integration level is how boxer routes a harness's commands into the sandbox (hook rewrite, shims,
-running inside the guest, ...); see [Enforcement](/docs/guides/enforcement).
+An integration level is how boxer routes a harness's commands into the sandbox: a hook rewrite, a
+PATH shim, or running the harness inside the guest. [Enforcement](/docs/guides/enforcement) lists
+them.
 
 ```sh
 make smoke          # one backend; BOXER_BACKEND=docker make smoke for another
 make eval-t1        # no credentials needed
-make eval-matrix    # needs an AI Gateway key
+make eval-matrix    # needs AI_GATEWAY_API_KEY
 ```
 
 <Cards>
-  <Card title="How boxer is evaluated" href="/docs/evals/strategy" description="The layers, the oracle, the rules, and the bugs they caught." />
-  <Card title="Support, measured" href="/docs/evals/results" description="The latest results, by level, harness and backend." />
+  <Card title="Evaluation strategy" href="/docs/evals/strategy" description="The layers, the oracle, the rules, and the bugs they caught." />
+  <Card title="Results" href="/docs/evals/results" description="The latest numbers by level, harness and backend, with their conditions." />
   <Card title="The matrix tier" href="/docs/evals/matrix" description="The workload, the thirteen claims, and how a cell is scored." />
-  <Card title="Benchmarks" href="/docs/evals/benchmarks" description="What boxer costs, and the numbers that were withdrawn." />
+  <Card title="Benchmarks" href="/docs/evals/benchmarks" description="What boxer costs, when each number was measured, and the withdrawn claims." />
 </Cards>

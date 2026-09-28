@@ -7,8 +7,10 @@ description: "boxer's MCP server: the boxer_run and boxer_status tools, the brie
 boxer mcp [--harness NAME]
 ```
 
-Speaks MCP over stdio: newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It works with any
-harness that supports MCP, including ones boxer has no specific integration for.
+Serves MCP over stdio as newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It answers
+`initialize`, `ping`, `tools/list`, `tools/call`, `resources/list` and `resources/read`, and
+ignores notifications. Any harness that supports MCP can use it, including ones boxer has no
+specific integration for.
 
 `--harness` selects the `[harness.<name>]` override layer, so per-harness settings such as `mode`
 apply here too.
@@ -32,10 +34,12 @@ apply here too.
 | Field | Type | |
 | --- | --- | --- |
 | `command` | string | required. A POSIX shell line, executed with `sh -c` in the guest |
-| `cwd` | string | optional. A host directory; defaults to the repository root |
+| `cwd` | string | optional. The directory to run in; defaults to the server's working directory |
 
-Returns stdout and stderr, followed by `[exit N]`. `isError` is set when the exit is non-zero or
-when boxer refused. A refusal carries the same `reason`/`cause`/`fix` text as the CLI.
+Returns stdout and stderr interleaved, followed by `[exit N]`. Stdin is empty. `isError` is set when
+the exit is non-zero or when boxer refused. A refusal is the same `boxer: <reason>` text, with
+`cause` and `fix` lines, that the CLI prints. The sandbox is created first when
+[`create_on`](/docs/reference/configuration#create_on) includes `run`.
 
 ### `boxer_status`
 
@@ -43,8 +47,9 @@ when boxer refused. A refusal carries the same `reason`/`cause`/`fix` text as th
 | --- | --- | --- |
 | `cwd` | string | optional |
 
-One line: scope, isolation, state, image, worktree and mount path, followed by a line per guest
-port that has a URL. When no sandbox exists yet it says so and names the image it would boot.
+One line with the scope, isolation, state, image, worktree and mount path, then one line per
+forwarded guest port with its [URL](/docs/guides/urls), else `http://127.0.0.1:<host port>`. When no
+sandbox exists yet it says so and names the image it would boot.
 
 ### How `cwd` is interpreted
 
@@ -60,10 +65,7 @@ A client may pass a host path or a guest path. boxer accepts both:
 One resource, `boxer://brief`, `text/markdown`. It is the brief `boxer brief` prints and the hooks
 inject, resolved for the server's working directory: the mount, the mode, the intercept and
 passthrough lists, and the declared tasks with what each is for. It is generated on each read,
-not stored.
-
-For a sandbox [prepared for forking](/docs/guides/forking), which works on a copy of the worktree,
-the brief says so instead of saying the guest sees the same files.
+not stored. Any other URI is an error.
 
 ## Lifecycle signals
 

@@ -1,91 +1,86 @@
 ---
 title: Install
-description: Install a backend and boxer, then run a first sandboxed command.
+description: Install a backend and boxer, then run a first command in a sandbox.
 ---
 
-boxer is a single Go binary. It needs a backend to run sandboxes ([smolvm](https://smolmachines.com)
-by default) and a git repository to work in.
+Install a backend, install boxer, and run one command to check both.
 
-Supported hosts are macOS on Apple Silicon and Linux on x86-64 or arm64. Windows is not supported:
-boxer's worktree model depends on POSIX paths and mounts.
+## Requirements
 
-smolvm needs hardware virtualisation: on Linux that means a `/dev/kvm` your user can open, usually
-through membership of the `kvm` group (`sudo usermod -aG kvm $USER`, then log in again). Inside a
-Linux VM, that VM needs nested virtualisation. boxer cannot start a microVM
-from inside another sandbox that blocks it, such as a harness's own seatbelt. See
-[Enforcement](/docs/guides/enforcement#harnesses-that-sandbox-themselves).
+- macOS on Apple Silicon, or Linux on x86-64 or arm64. Windows is not supported.
+- A git repository to work in. boxer keys each sandbox to a git worktree.
+- For smolvm, hardware virtualisation. On Linux that is a `/dev/kvm` your user can open, usually
+  through the `kvm` group (`sudo usermod -aG kvm $USER`, then log in again). Inside a Linux VM, that
+  VM needs nested virtualisation.
 
-## Install smolvm
+A harness that sandboxes its own process, such as Codex's seatbelt, blocks the hypervisor.
+[Enforcement](/docs/guides/enforcement#harnesses-that-sandbox-themselves) has the flags that turn it off.
+
+## 1. Install a backend
+
+smolvm is the default. It gives each sandbox its own kernel and is the only backend with an egress
+allowlist, environment packs and forks.
 
 ```sh
 curl -sSL https://smolmachines.com/install.sh | bash
-smolvm version
+smolvm --version
 ```
 
-The rest of this page assumes `smolvm` is on your `PATH`.
+To use a runtime you already have, install it and set `backend` in `boxer.toml`:
 
-### Or another backend
+| Backend | Install | Then | `boxer.toml` |
+| --- | --- | --- | --- |
+| Apple `container` (macOS 26, Apple Silicon) | `brew install container` | `container system start` and `container system kernel set --recommended` | `backend = "container"`, `network.mode = "on"` |
+| docker | Docker Desktop or OrbStack on macOS, the docker engine on Linux | | `backend = "docker"`, `network.mode = "on"` |
+| podman | `brew install podman`, or your distribution's package | on macOS, `podman machine init && podman machine start` with the `applehv` provider | `backend = "podman"`, `network.mode = "on"` |
 
-smolvm gives each sandbox its own kernel and is the only backend that enforces an egress allowlist.
-To use a runtime you already have, install it as below and set `backend` in `boxer.toml`
-(`container`, `docker` or `podman`). [Backends](/docs/concepts/backends) says what each one can and
-cannot do.
+Only smolvm enforces the default `network.mode = "allowlist"`. The other three refuse it by name, so
+choose `"on"` or `"off"` for them. [Backends](/docs/concepts/backends) compares what each one
+isolates and enforces.
 
-| backend | install | then |
-| --- | --- | --- |
-| Apple `container` (macOS 26, Apple Silicon) | `brew install container`, or the installer from its [releases](https://github.com/apple/container/releases) | `container system start`, `container system kernel set --recommended` |
-| docker | Docker Desktop or OrbStack | — |
-| podman | `brew install podman` | `podman machine init && podman machine start` (use the `applehv` provider on a Mac) |
+## 2. Install boxer
 
-`boxer backends --probe` starts a real sandbox on each installed backend to confirm it works.
+```sh
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
+```
 
-### Optional: portless, for dev-server URLs
+The script downloads the release for your platform into `~/.local/bin`, checks its sha256 against
+the release's `checksums.txt`, and prints the `PATH` line to add if that directory is not on it.
+`BOXER_VERSION=v1.0.0` pins a release and `BOXER_INSTALL_DIR` changes the destination.
+
+Other routes install the same binary:
+
+```sh
+go install github.com/BarakChamo/boxer/cmd/boxer@latest
+npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.0.0/boxer-cli-1.0.0.tgz
+```
+
+Each release also builds a Homebrew cask and the `boxer-cli` npm package. Neither is published to a
+tap or the npm registry yet.
+
+## 3. Check it
+
+```sh
+cd your-repository
+boxer doctor
+boxer run -c 'uname -a'
+```
+
+`boxer doctor` prints what boxer resolved for this directory: the worktree, the backend, the image
+it will boot, the integrations it can see, and anything that will not work. `boxer run` prints
+`Linux`: the command ran in the sandbox. The first run creates the sandbox and pulls its image, so
+it takes longest. `boxer backends --probe` runs a real sandbox on every installed backend.
+
+## Optional: portless
 
 ```sh
 npm install -g portless
 ```
 
-Only needed for [`[urls]`](/docs/guides/urls). Without it, forwarded ports still work but have no
-names.
+[`[urls]`](/docs/guides/urls) uses it to give each worktree's dev server a stable name. Without it,
+forwarded ports still work.
 
-## Install boxer
+## Next
 
-Every route installs the same binary.
-
-```sh
-# Install script: downloads the release for your platform into ~/.local/bin and
-# checks its sha256 against the release's checksums.txt.
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
-
-# npm, from the tarball attached to the release. It downloads the same release binary.
-npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.0.0/boxer-cli-1.0.0.tgz
-
-# From source, with a Go toolchain.
-go install github.com/BarakChamo/boxer/cmd/boxer@latest
-```
-
-Each release also builds a Homebrew cask and the `boxer-cli` npm package, but neither is published
-to a tap or the npm registry yet.
-
-`BOXER_VERSION=v1.2.3` pins the install script to a release, and `BOXER_INSTALL_DIR` changes where
-it puts the binary. If that directory is not on your `PATH`, the script prints the line to add. It
-also warns if `smolvm` is missing.
-
-## Check it
-
-```sh
-cd your-repository
-boxer doctor
-```
-
-`doctor` prints what boxer resolved for this directory: the scope (the git worktree the sandbox is
-keyed to), the image it would boot, the harness integrations it can see, and anything that will not
-work. Run it again whenever a command does not end up in the sandbox.
-
-```sh
-boxer run -c 'uname -a'
-```
-
-This prints `Linux`: the command ran in the guest. The first command in a worktree creates its VM,
-which takes longest the first time, while the image is pulled. Later commands reuse the running VM.
-[Your first sandbox](/docs/start/first-run) explains what happened.
+[Connect your harness](/docs/start/harnesses) so your agent's commands go through boxer, or read
+[Your first sandbox](/docs/start/first-run) for what the first command did.

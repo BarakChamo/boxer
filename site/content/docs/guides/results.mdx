@@ -1,15 +1,12 @@
 ---
-title: Test results and capsules
+title: Read test results and replay failures
 description: Summarise JUnit results after a run, and save a failure as a capsule someone else can replay.
 ---
 
-boxer can summarise a run's JUnit reports, so you see which tests failed without reading the log,
-and save the last run as a **capsule**: a file that someone else can replay to check whether the
-failure still happens. Neither does anything unless you use it.
+boxer summarises a run's JUnit XML after the command exits, and saves the last run as a
+**capsule**, a file someone else replays to check whether the failure still happens.
 
-## Which tests failed
-
-Point a run at its JUnit XML and boxer parses it after the command exits:
+## See which tests failed
 
 ```sh
 boxer run --junit junit.xml -- npm test
@@ -23,9 +20,9 @@ boxer:   FAIL cart/CheckoutTest.rejects_expired
 ```
 
 Failed and errored tests are both listed as `FAIL`, sorted, up to ten. boxer reads the report on
-the host: the worktree is mounted, not copied, so the file the guest wrote is already there.
+the host, where the file the guest wrote already is, because the worktree is mounted.
 
-Three ways to say where the reports are, highest precedence first:
+There are three places to say where the reports are, highest precedence first:
 
 ```sh
 boxer run --junit junit.xml,reports/*.xml -- npm test   # this run
@@ -41,9 +38,9 @@ auto = ["junit.xml", "reports/*.xml"]   # every run in this repository
 fail_on_test_failures = true
 ```
 
-Patterns are relative to the worktree. `*` matches; `**` does not recurse.
+Patterns are relative to the worktree. `*` matches within one directory; `**` does not recurse.
 
-Two rules:
+Two rules decide what is counted:
 
 - **Counts come from the test cases, not the attributes.** boxer counts `<testcase>` elements and
   their `<failure>`, `<error>` and `<skipped>` children, and ignores `tests=` and `failures=` on
@@ -51,13 +48,13 @@ Two rules:
 - **A report older than the run is ignored**, so a command that crashed before writing one does
   not report the previous run's results.
 
-### Failing on test failures
+### Fail the run on test failures
 
 By default the run's exit code is the command's, and the summary is informational.
 `--fail-on-test-failures`, or `results.fail_on_test_failures`, turns exit 0 into 1 when the report
 has failures or errors. A non-zero exit code is never replaced.
 
-## Capsules
+## Save a failure as a capsule
 
 Every run leaves a record for its sandbox: the command, directory, exit code, image, pack, HEAD,
 whether the tree was dirty, the tail of stdout and stderr, and the test summary if there was one.
@@ -86,8 +83,8 @@ A replay overlays the captured configuration onto the current one and runs the c
 boxer: reproduced — exit 1, as recorded
 ```
 
-**Exit 0 means the failure reproduced**, and exit 1 means it did not. This is the reverse of a
-test: replay answers "does this still fail?".
+**Exit 0 means the failure reproduced**, and exit 1 means it did not, because replay answers "does
+this still fail?".
 
 Replay refuses, with exit 1, a worktree with uncommitted changes (override with `--allow-dirty`) or
 a HEAD other than the captured one (`--allow-drift`). A captured patch is applied only with
@@ -95,5 +92,5 @@ a HEAD other than the captured one (`--allow-drift`). A captured patch is applie
 
 ### What a capsule is not
 
-It does not contain a machine. A capsule describes the environment; to keep a prepared guest, use a
-[named pack](/docs/concepts/scopes-and-packs).
+A capsule describes the environment and contains no machine. To keep a prepared guest, save a
+[named pack](/docs/concepts/scopes-and-packs#packs-you-name).

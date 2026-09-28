@@ -3,10 +3,16 @@ title: The matrix tier
 description: The same Next.js workload at every integration level and harness, scored on thirteen weighted claims.
 ---
 
-The `matrix` tier runs the same Next.js workload across every integration level, harness and
-orchestrator. Each combination is a cell, and each cell gets its own worktree, sandbox and automatic
-host port. Where `sdlc` varies the task on one configuration, the matrix varies the configuration
-on one task.
+The `matrix` tier runs the same Next.js workload across every
+[integration level](/docs/guides/enforcement), harness and orchestrator. Each combination is a
+cell, and each cell gets its own worktree, sandbox and automatic host port. The `sdlc` tier varies
+the task on one configuration. The matrix varies the configuration on one task.
+
+```sh
+make eval-matrix    # 55 cells, three at a time; needs AI_GATEWAY_API_KEY
+```
+
+The latest scores are on [Results](/docs/evals/results).
 
 ## The two tasks
 
@@ -31,19 +37,18 @@ skip.
 
 ## What the evidence is worth
 
-The platform file the agent writes is not trusted alone, since a model can write `Linux` without
-running anything. Two checks corroborate it: the dependency must be in `package.json`, and boxer's
-trace must show the level's own signature carrying a command.
+The oracle does not trust the platform file the agent writes on its own, since a model can write
+`Linux` without running anything. Two checks back it up: the dependency must be in `package.json`,
+and boxer's trace must show the level's own signature carrying a command.
 
 Two levels leave different evidence, and the report names which mechanism it found. The OpenCode
 plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher gives the harness
-a clean environment, so boxer's trace variable never reaches it; there, the worktree the
+a clean environment, so boxer's trace variable never reaches it. There, the worktree the
 orchestrator created is the evidence.
 
 ## Running it
 
 ```sh
-make eval-matrix
 bin/boxer-eval --tier matrix --cell claude/rewrite --parallel 1
 bin/boxer-eval --tier matrix --list                        # what would run; runs nothing
 BOXER_EVAL_URLS=1 bin/boxer-eval --tier matrix             # every sandbox named, no address in the prompt

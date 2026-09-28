@@ -1,24 +1,45 @@
-# npm
+# boxer-cli
 
-The `boxer-cli` package: one install route among four, for people whose package manager is npm.
+The npm launcher for boxer. It installs the `boxer` command by downloading the release binary for
+your platform.
 
 ```sh
-npm i -g boxer-cli
+npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.0.0/boxer-cli-1.0.0.tgz
+boxer version
 ```
 
-It ships no boxer code. `postinstall.js` downloads the release binary matching the package's
-version, verifies its sha256 against the release's `checksums.txt`, and unpacks it into
-`vendor/`; `bin/boxer.js` execs it. The binary and the checksum come from the same release, so a
-tampered asset fails the install rather than running.
+`boxer-cli` is not published to the npm registry, so `npm i -g boxer-cli` does not work. Install
+the tarball attached to the [GitHub release](https://github.com/BarakChamo/boxer/releases)
+instead. The other install routes are `install.sh` and `go install`:
 
-No dependencies, by design — a launcher that pulls a tree of its own into every install is a
-supply chain around a single binary. `tar` is expected on `PATH`.
+```sh
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
+go install github.com/BarakChamo/boxer/cmd/boxer@v1.0.0
+```
 
-Supported: darwin and linux, amd64 and arm64. Anything else gets an error naming `go install`
-instead of a broken install.
+## What the package does
 
-`BOXER_BASE_URL` overrides the asset directory, which is how `scripts/install-routes.sh` tests
-this against a staged release without publishing one.
+The package ships no boxer code. `postinstall.js` downloads `boxer_<version>_<os>_<arch>.tar.gz`
+from the release that matches the package version, checks its sha256 against that release's
+`checksums.txt`, and unpacks `boxer` into `vendor/`. `bin/boxer.js` runs it and passes through
+arguments, standard streams and the exit code. A checksum mismatch fails the install.
 
-Publishing stays manual: the release workflow attaches the tarball to the GitHub release and stops
-there.
+If npm skipped the install script (`--ignore-scripts`), `bin/boxer.js` runs `postinstall.js` on
+first use, with the same checksum check.
+
+The package has no dependencies. It needs Node 18 or later and `tar` on `PATH`.
+
+## Platforms
+
+darwin and linux, on amd64 and arm64. On any other platform the install fails with the
+`go install` line to use instead.
+
+## Testing against a staged release
+
+`BOXER_BASE_URL` replaces the release download directory. `scripts/install-routes.sh` uses it to
+install this package against a release staged on the local machine.
+
+## Publishing
+
+The release workflow runs `npm pack` and attaches `boxer-cli-<version>.tgz` to the GitHub release.
+It does not publish to the registry.

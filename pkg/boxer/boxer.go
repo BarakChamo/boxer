@@ -2,7 +2,8 @@
 // make sure it exists, run commands in it, take it down, and list what is running on the host.
 // Everything else in the module lives under internal/ and is not importable.
 //
-// Experimental: the API may change before 1.0.
+// Covered by the 1.0 stability contract in docs/release.md: identifiers are added, never renamed
+// or removed.
 package boxer
 
 import (
@@ -73,7 +74,7 @@ func (b *Box) Down() error { return b.env.Down() }
 func (b *Box) Status() (Machine, bool, error) { return b.env.Exists() }
 
 // List returns every boxer-owned machine on the backend the CLI would use from the process's
-// working directory: the one boxer.toml names, else BOXER_BACKEND, else smolvm.
+// working directory: BOXER_BACKEND, else the one boxer.toml names, else smolvm.
 func List() ([]Machine, error) { return vm.Owned(host()) }
 
 // Stop halts a machine by name; stopping a stopped machine is not an error.

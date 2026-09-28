@@ -11,7 +11,7 @@ DSH boots a *profile*: an ordered stack of cordis plugin patch layers (`dsh --pr
 rows ride in a patch layer the launcher is given with `--patch`.
 
 DSH has no hooks plugin of its own. What it ships is `@deepseek-ai/dsh-hooks-claude-code`, a
-compatibility bridge that reads a **Claude Code** `hooks.json` — so boxer's hook file is the
+compatibility bridge that reads a **Claude Code** `hooks.json`, so boxer's hook file is the
 Claude Code one, its payloads are Claude Code payloads, and its output is the Claude Code shape
 (`hookSpecificOutput.permissionDecision`, or exit 2 with stderr as the reason). The bridge is
 installed with the CLI but is not in any shipped profile, so the patch mounts it.
@@ -23,7 +23,7 @@ What the bridge does and does not do, from its own documentation and from live r
 - `SessionEnd` is one of 23 Claude Code events the bridge does not implement, so nothing reclaims
   the sandbox at session end; boxer's MCP server EOF is the session-end signal instead.
 - `SessionStart` runs detached, its context can miss the first request, and disposing the bridge
-  aborts a still-running hook — so a hook that waits for a sandbox is killed when a short run ends.
+  aborts a still-running hook, so a hook that waits for a sandbox is killed when a short run ends.
   boxer therefore provisions on `UserPromptSubmit`, the awaited waterfall, and hands its session
   brief over there.
 - The shell tool the model calls is named `bash` (lowercase), and MCP tools arrive as
@@ -42,9 +42,9 @@ PATH shims already sandbox them.
 
 ## Install
 
-1. `com.deepseek.dsh/cordis.patch.yml` → `.dsh/cordis.patch.yml` in the repository.
-2. `com.deepseek.dsh/hooks/hooks.json` → `.dsh/hooks.json` in the repository.
-3. `skills/boxer/SKILL.md` → `.agents/skills/boxer/SKILL.md` (a default DSH project skill root).
+1. Copy `com.deepseek.dsh/cordis.patch.yml` to `.dsh/cordis.patch.yml` in the repository.
+2. Copy `com.deepseek.dsh/hooks/hooks.json` to `.dsh/hooks.json` in the repository.
+3. Copy `skills/boxer/` to `.agents/skills/boxer/` (a default DSH project skill root).
 
 `boxer install dsh` does all three. Then boot DSH with the patch:
 
@@ -52,4 +52,6 @@ PATH shims already sandbox them.
 dsh --profile headless --patch .dsh/cordis.patch.yml "run the tests"
 ```
 
-`boxer` must be on `PATH`; the MCP row, the hooks, and the shims all call it by name.
+To apply the rows to every profile, copy them into `$DSH_HOME/cordis.patch.yml` instead.
+
+`boxer` must be on `PATH`. The MCP row, the hooks and the shims call it by name.

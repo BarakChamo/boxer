@@ -1,15 +1,32 @@
 ---
 title: Benchmarks
-description: What boxer costs against the alternatives and across its own backends, with the method and the withdrawn claims.
+description: What boxer costs against other sandboxes and across its own backends, with the date and conditions of each measurement.
 ---
 
-Every number here was measured on one machine, an Apple Silicon Mac with 10 cores and 24 GB. The
-benchmark scripts are in `bench/` in the repository; each writes its raw results beside it, and
-`bench/README.md` has the full method. A number measured only once is labelled a single sample.
+Every number on this page comes from one Apple M4 Mac (10 cores, 24 GB, macOS 26.5.2). The
+scripts are in `bench/`, each writes its raw results beside it, and `bench/README.md` has the full
+method. A number measured once is labelled a single sample.
+
+| measurement | script | recorded | boxer build |
+| --- | --- | --- | --- |
+| [A command in a running sandbox](#a-command-in-a-running-sandbox) | `make bench` | 2026-09-25 | v1.0.0-48-ged8def6, smolvm 1.16.1 |
+| [Starting a development stack](#starting-a-development-stack) | `make bench-devserver` | 2026-09-25 | not recorded |
+| [Several sandboxes at once](#several-sandboxes-at-once) | `bench/parallel-clean.sh` | 2026-09-25 | not recorded |
+| [Across boxer's backends](#across-boxers-backends) | `bench/backends.sh` | 2026-09-25 | not recorded |
+| [`[urls]` on and off](#urls-on-and-off) | by hand, no raw file committed | before 2026-09-26 | not recorded |
+
+"Recorded" is the date the results were committed to `bench/`.
+
+<Callout type="warn">
+None of these was re-measured after the 2026-09-27 fixes. Those changed how docker, podman and
+Apple `container` publish ports (now `127.0.0.1`), gave every smolvm machine an idle workload, and
+made `boxer up` with `[urls]` on take a lock and wait for the proxy and the route.
+</Callout>
 
 ## A command in a running sandbox
 
-`make bench`, a no-op and a set of ordinary workloads, into an already-running sandbox:
+`make bench` runs a no-op and a set of ordinary workloads in an already-running sandbox, 20 samples
+per cell, median reported. Docker 29.4.0.
 
 | | no-op |
 | --- | ---: |
@@ -18,35 +35,36 @@ benchmark scripts are in `bench/` in the repository; each writes its raw results
 | `docker exec` into a running container | 32 ms |
 | `docker run`, a fresh container per command | 253 ms |
 
-- **boxer is level with a warm container**, within 4% on every workload that is not I/O-bound.
-- **It beats a container per command by about 8x**, because the sandbox per worktree stays warm.
-- **Seatbelt is faster**, and isolates something different: a syscall filter around a host process,
-  not another kernel.
-- **The mount costs.** A recursive grep is 2.3x a warm container, a 200-file write 2.6x. That is
-  virtiofs, and it is the one cost here inherent to the boundary.
-- **boxer's overhead is fixed per command**: +13 to +22 ms over raw `smolvm machine exec` on every
-  workload, most of it starting the `smolvm` process. boxer's own code is under 1 ms of it.
-- The rewrite hook every intercepted command goes through takes 3 ms.
+- boxer is within 4% of `docker exec` on every workload that is not I/O-bound.
+- boxer is about 8x faster than a container per command, because the sandbox per worktree stays
+  warm.
+- Seatbelt is faster. It filters syscalls around a host process and does not start another kernel.
+- The worktree mount costs. A recursive grep takes 2.3x as long as in a warm container, and writing
+  200 files 2.6x. That cost is virtiofs.
+- boxer adds 13 to 22 ms over raw `smolvm machine exec` on every workload, most of it starting the
+  `smolvm` process. boxer's own code is under 1 ms of that.
+- The rewrite hook that every intercepted command passes through takes 3 ms.
 
 ## Starting a development stack
 
-`make bench-devserver`: time for a Next.js dev server to answer HTTP 200, with the image, the
-lockfile, the npm cache and the allocation held equal between contenders.
+`make bench-devserver` times how long a Next.js dev server takes to answer HTTP 200. Every
+contender gets `node:24-alpine`, 10 vCPU and 8 GB, an empty npm cache, the same lockfile and a
+cleared `.next`.
 
 | | start a session (deps installed) | install dependencies |
 | --- | ---: | ---: |
-| no sandbox | 6.8 s | — |
+| no sandbox | 6.8 s | 3.5 s |
 | **boxer**, smolvm | **7.6 s** | 9.2 s |
 | OrbStack (a container) | 10.8 s | 5.2 s |
 
-Starting a session is paid every time; boxer is 0.8 s over running with no sandbox. Installing is
-boxer's weak row, because the guest writes through the mount. [`[prep]`](/docs/reference/configuration#preparing-the-worktree-before-the-sandbox-starts)
-and the host package-cache mounts exist to move that work out of the guest.
+You pay the session start every time, and boxer is 0.8 s over no sandbox. Installing is boxer's
+weak row because the guest writes through the mount. [`[prep]`](/docs/guides/environment) and the
+host package-cache mounts move that work out of the guest.
 
 ## Several sandboxes at once
 
-`bench/parallel-clean.sh`, at Vercel Sandbox's default shape — 2 vCPU and 4 GB each — with one
-linked worktree per sandbox and every cell measured from a wiped host:
+`bench/parallel-clean.sh` runs at Vercel Sandbox's default shape, 2 vCPU and 4 GB each, with one
+linked worktree per sandbox. Every cell starts from a wiped host.
 
 | sandboxes | boxer, ready | OrbStack, ready |
 | ---: | ---: | ---: |
@@ -54,12 +72,18 @@ linked worktree per sandbox and every cell measured from a wiped host:
 | 3 | 22.3 s | **18.8 s** |
 | 5 | **26.3 s** | 27.1 s |
 
-Past the first sandbox the time is dominated by Next.js compiling on ten shared cores. One and
-three are single samples; five is the median of three to four.
+Past the first sandbox, Next.js compiling on ten shared cores takes most of the time. One and three
+are single samples. Five is the median of three to four.
 
 ## Across boxer's backends
 
-`bench/backends.sh`, one backend at a time, alone on the host, three samples each:
+`bench/backends.sh` runs one backend at a time, alone on the host, three samples each, with a
+Next.js dev server per worktree at 2 vCPU and 4 GB. There is no Linux run of this benchmark.
+
+These figures are not comparable with the table above. `bench/parallel-clean.sh` restarts OrbStack
+and prunes its image cache before every cell and times plain `docker run`, so its container rows
+include a cold runtime VM. `bench/backends.sh` empties every backend but does not restart it, and
+times each one through boxer.
 
 | backend | boundary | one worktree | three worktrees |
 | --- | --- | ---: | ---: |
@@ -69,50 +93,51 @@ three are single samples; five is the median of three to four.
 | smolvm | kernel per sandbox | 8.5 s | 27.3 s |
 
 The two kernel-per-sandbox backends agree within 0.3 s, and the two shared-kernel ones within
-0.9 s, so the ~4.6 s gap is the cost of the boundary rather than of one implementation. At three
-worktrees the spread falls to 27%. Shared-kernel backends are also near-deterministic (docker
-±0.2 s over six cells) where microVMs are not (smolvm ±2.3 s at one worktree).
+0.9 s. The gap of about 4 s between the groups is the cost of a kernel per sandbox, and no single
+implementation causes it. At three worktrees the spread falls to 27%. Shared-kernel backends vary
+less: docker moved ±0.2 s over six cells, smolvm ±2.3 s at one worktree.
 
-## Features
+## `[urls]` on and off
 
-Measured interleaved, on against off, five pairs:
+Five pairs, interleaved, on against off. The raw samples are not in `bench/`. It was measured
+separately from `make bench`, so compare its two rows with each other, not with the 31 ms median.
 
 | | `boxer up` | warm `boxer run` |
 | --- | ---: | ---: |
 | `[urls]` off | 289 ms | 49 ms |
 | `[urls]` on | 322 ms | 51 ms |
 
-Registering a URL runs alongside setup, so most of it is hidden. With `[urls]` off, nothing runs.
+boxer registers URLs while setup runs, so most of that time overlaps. With `[urls]` off, nothing
+runs.
 
-## Memory, and why there is no ratio
+## Memory
 
 A sandbox serving a Next.js dev server touches about **1.2 GB inside the guest**, 642 MB of it
-node's own heap, and does not grow to fill a larger allocation. That replicates across runs.
+node's own heap, and does not grow to fill a larger allocation. That figure replicates across runs.
 
-What it costs the host compared with a container is not established. The whole-host measurement
-varied up to 2.1x within a single configuration (halving each guest's memory produced both the
-lowest and the highest figure), so any ratio drawn from it is within the noise. A microVM per
-worktree costs more than a shared kernel, by a kernel, a guest userland and a page cache each; how
-much more on this workload is unmeasured.
+There is no host-memory ratio against a container. The whole-host measurement varied up to 2.1x
+within one configuration, and halving each guest's memory produced both the lowest and the highest
+figure. A microVM per worktree costs a kernel, a guest userland and a page cache more than a shared
+kernel. How much more on this workload is unmeasured.
 
 ## Withdrawn
 
 Three earlier claims did not survive repetition:
 
-- **"About 243 MB per sandbox, crossover at six."** Measured on sandboxes running nothing. One
-  serving a dev server costs about a gigabyte, most of it node.
+- **"About 243 MB per sandbox, crossover at six."** This was measured on sandboxes running nothing.
+  One serving a dev server costs about a gigabyte, most of it node.
 - **"Four times OrbStack's memory at five sandboxes."** The harness ran every cell in one process,
-  so the container runtime's VM was already grown and it was charged only for marginal growth. From
-  a wiped host the same cell read 2.2–2.9 GB, not 501 MB.
+  so the container runtime's VM had already grown and was charged only for marginal growth. From a
+  wiped host the same cell read 2.2 to 2.9 GB, not 501 MB.
 - **"Halving the guest allocation saves memory."** It produced the widest spread measured.
 
 Each was a single sample that matched an expectation.
 
-## The caveats that remain
+## Caveats
 
-- **One host, one architecture.** On a Mac, `docker exec` crosses a VM boundary too; on a Linux host
-  every container row would be cheaper and the comparison would change. This is the largest caveat.
-- **Cache state dominates cold start.** A first run pulls the image; every figure above is warm
+- **One host, one architecture.** On a Mac, `docker exec` crosses a VM boundary too. On a Linux host
+  every container row would be cheaper and the comparison would change.
+- **Cache state dominates cold start.** A first run pulls the image. Every figure above is warm
   unless it says otherwise.
-- **Benchmarks gate nothing.** Whether boxer works is covered by the
-  [evaluation tiers](/docs/evals/strategy).
+- **Benchmarks gate nothing.** The [evaluation tiers](/docs/evals/strategy) check whether boxer
+  works.

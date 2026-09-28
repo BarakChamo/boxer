@@ -11,8 +11,18 @@ codex plugin marketplace add ./boxer     # or ./codex (this view)
 codex plugin add boxer@boxer
 ```
 
-Or copy `com.openai.codex/hooks/hooks.json` to `<repo>/.codex/hooks.json` (`boxer install codex`)
-and add the MCP server to `~/.codex/config.toml`:
+Or write the files into the repository:
+
+```sh
+boxer install codex
+```
+
+That copies `com.openai.codex/hooks/hooks.json` to `.codex/hooks.json` and the skill to
+`.agents/skills/boxer/`. In a linked worktree it also writes the hooks to the main repository's
+`.codex/hooks.json`, because Codex reads project hooks from there. Codex runs project hooks only
+after you trust them: run `/hooks` once, or pass `--dangerously-bypass-hook-trust` to `codex exec`.
+
+Add the run tool to `.codex/config.toml`:
 
 ```toml
 [mcp_servers.boxer]
@@ -20,7 +30,10 @@ command = "boxer"
 args = ["mcp", "--harness", "codex"]
 ```
 
-`boxer` must be on `PATH`; hooks call it by name.
+`boxer install codex --user` writes the hooks into `~/.codex/config.toml` instead, where they need
+no project trust.
+
+`boxer` must be on `PATH`. Hooks call it by name.
 
 ## What the bundle does
 

@@ -1,96 +1,187 @@
 # boxer
 
-boxer runs a coding agent's shell commands in a sandbox instead of on your machine. Each git
-worktree gets its own sandbox, created on the first command, with the worktree mounted at
-`/workspace`. The default sandbox is a [smolvm](https://smolmachines.com) microVM with its own
-kernel; Apple's `container`, docker and podman are alternatives, and
-[Backends](site/content/docs/concepts/backends.mdx) says what each one enforces.
+Run a coding agent's shell commands in a sandbox, one per git worktree. For Claude Code, Codex,
+Gemini CLI, Copilot, OpenCode and the agents and orchestrators around them.
 
-The agent does not need to know. It runs `npm test`; boxer runs it in the sandbox and returns the
-same output and exit code.
+```console
+$ boxer run -c 'uname -s && pwd'
+Linux
+/workspace
+```
 
-boxer is one Go binary. macOS on Apple Silicon and Linux (x86-64, arm64) are supported.
+The agent keeps working as before. It runs `npm test`, boxer runs it in the worktree's sandbox from
+the matching directory, and the exit code, stdout and stderr come back unchanged. The default
+sandbox is a [smolvm](https://smolmachines.com) microVM with its own kernel. Apple `container`,
+docker and podman are also supported.
+
+macOS on Apple Silicon and Linux on x86-64 and arm64.
+
+## Install
+
+```sh
+curl -sSL https://smolmachines.com/install.sh | bash                                     # smolvm, the default backend
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh       # boxer, into ~/.local/bin
+```
+
+Or with Go, or from the npm tarball on the release:
+
+```sh
+go install github.com/BarakChamo/boxer/cmd/boxer@latest
+npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.0.0/boxer-cli-1.0.0.tgz
+```
+
+To use docker, podman or Apple `container` instead of smolvm, install it and set
+`backend = "docker"` in `boxer.toml`, with `network.mode = "on"` or `"off"`: only smolvm enforces
+the default allowlist, and the others refuse it rather than open the network. [Install](site/content/docs/start/install.mdx) has the
+details for each.
 
 ## Quick start
 
-Install smolvm, then boxer:
-
-```sh
-curl -sSL https://smolmachines.com/install.sh | bash
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
-```
-
-The script puts `boxer` in `~/.local/bin` and prints the `PATH` line to add if that directory is
-not on it. npm and `go install` also work; see
-[Install](site/content/docs/start/install.mdx).
-
-Run a command in a sandbox, from inside any git repository:
-
 ```sh
 cd your-repository
-boxer doctor                    # what boxer resolved here: scope, image, integrations, problems
-boxer run -c 'uname -a'         # prints Linux: the command ran in the VM
+boxer doctor                        # what boxer resolved here, and anything wrong
+boxer run -c 'uname -a'             # Linux: the first command creates the sandbox
+boxer install claude-code           # hooks, MCP tool and skill for your agent
+git add .claude .mcp.json && git commit -m 'Use boxer'
 ```
 
-The first command creates the worktree's VM and pulls its image, which takes longer the first
-time. Later commands reuse the running VM.
+Commit what `boxer install` writes. A worktree is cut from a branch, so an integration that is
+not committed is not in the next worktree.
 
-Then connect your coding agent, and commit what it writes so every worktree inherits it:
+From then on, the agent's `npm`, `node`, `python`, `go`, `make` and the rest of the intercept list
+run in the sandbox. `git`, `gh` and `ssh` stay on the host.
+
+## Connect your agent
+
+| Agent | Command | How it is enforced |
+| --- | --- | --- |
+| Claude Code, Codex, Gemini CLI, Grok | `boxer install <harness>` | hooks rewrite each intercepted command |
+| Copilot CLI | `boxer install copilot --user` | the same, in `~/.copilot` |
+| OpenCode, pi | `boxer install opencode`, `boxer install pi` | a plugin or extension rewrites it in-process |
+| Kimi Code, DSH | `boxer install <harness>` and `mode = "tool"` | shell calls are denied; the `boxer_run` tool is the way in |
+| fx, or any agent you want off the host | `boxer shell <harness>` | the agent itself runs in the sandbox |
+| Any agent that loads skills | `npx skills add BarakChamo/boxer --skill boxer` | instructions only, not enforced |
+
+Orchestrators (T3 Code, Paperclip, herdr, Conductor, Multica, OpenHands) create a worktree per task
+and use the same integrations. [Orchestrators](site/content/docs/guides/orchestrators.mdx) has the
+setup for each. [Skills and plugins](site/content/docs/guides/skills-and-plugins.mdx) covers the skill,
+the plugin package, and `npx plugins`.
+
+## Configure
+
+A `boxer.toml` at the repository root describes the guest. Without one, boxer picks an image from
+your lockfile.
+
+```toml
+image = "mirror.gcr.io/library/node:24-alpine"
+setup = ["npm ci --no-audit --no-fund"]          # once per worktree
+start = ["npx next dev -p 3000 -H 0.0.0.0"]      # services, started with the sandbox
+ready = "wget -q -O /dev/null http://127.0.0.1:3000/"
+
+[network]
+allow_hosts = ["registry.npmjs.org"]             # the default network reaches the image registry only
+ports = ["auto:3000"]                            # a free host port per worktree
+
+[urls]
+enabled = true                                   # https://<branch>.<repo>.localhost:1355 via portless
+
+[tasks.test]
+cmd = "npm test"
+description = "the unit tests"
+```
+
+An existing `.devcontainer/devcontainer.json` is read too. [Examples](examples/) has working
+configurations for Next.js, Vite, Python, Go, monorepos, devcontainers and the container backends,
+and [Configuration](site/content/docs/reference/configuration.mdx) lists every key.
+
+## Commands
 
 ```sh
-boxer install claude-code       # or codex, gemini-cli, opencode, grok, kimi, pi, dsh; `all` for every one
-git add .claude .mcp.json && git commit -m 'boxer'
+# Run
+boxer run -c '<shell line>'         # in this worktree's sandbox
+boxer run --task test               # a task declared in boxer.toml
+boxer up | down | status            # create and start, delete, inspect this worktree's sandbox
+
+# See and clean up
+boxer ls                            # sandboxes with their worktree, branch, git state and URL (-A: every backend)
+boxer url                           # where this worktree's dev server is
+boxer rm --gone                     # remove sandboxes whose worktree was deleted
+boxer gc                            # reclaim idle sandboxes and unused caches
+
+# Check
+boxer doctor                        # resolved configuration, integrations, disk used
+boxer backends --probe              # create and run a real sandbox on each installed backend
+boxer integrations                  # which harnesses have boxer wired in
 ```
 
-From then on the agent's intercepted commands (`npm`, `node`, `python`, `go`, `make` and others)
-run in the sandbox. `git`, `gh` and `ssh` stay on the host. [Connect your
-harness](site/content/docs/start/harnesses.mdx) covers each agent, including Copilot, which
-installs with `--user`.
+Every command that reports state takes `--json`. Output adapts to the reader: tables and prompts at a
+terminal, plain text for an agent or a pipe. [CLI reference](site/content/docs/reference/cli.mdx).
 
-## What else it does
+## Backends
 
-| | |
-| --- | --- |
-| Configure the guest: image, setup commands, services, ports, network allowlist | [Environment](site/content/docs/guides/environment.mdx), [configuration reference](site/content/docs/reference/configuration.mdx) |
-| Name the commands an agent should run (`boxer run --task test`) | [Tasks](site/content/docs/guides/tasks.mdx) |
-| Summarise JUnit results and turn a failure into a replayable capsule | [Results](site/content/docs/guides/results.mdx) |
-| Give each worktree's dev server a stable URL | [URLs](site/content/docs/guides/urls.mdx) |
-| List, watch and reclaim sandboxes (`boxer ls`, `boxer watch`, `boxer gc`) | [Managing](site/content/docs/guides/managing.mdx) |
-| Fork a warm sandbox into copy-on-write children | [Forking](site/content/docs/guides/forking.mdx) |
-| Run the agent itself inside the VM (`boxer shell claude`) | [Inside mode](site/content/docs/guides/inside.mdx) |
+| Backend | Boundary | Egress allowlist | Snapshots and forks |
+| --- | --- | --- | --- |
+| smolvm (default) | a kernel per sandbox | yes | yes |
+| Apple `container` | a kernel per sandbox | no | no |
+| docker, podman | one kernel shared by every sandbox | no | no |
 
-Which harnesses, orchestrators and backends are verified, and how, is on
-[Support, measured](site/content/docs/evals/results.mdx).
+A backend that cannot enforce the allowlist refuses it by name rather than running with an open
+network. [Backends](site/content/docs/concepts/backends.mdx) compares them.
+
+## Security and performance
+
+boxer protects your machine from what an agent runs. The worktree is mounted read-write, and a few
+paths stay on the host on purpose, such as `git` and the MCP servers a harness names. Forwarded
+ports bind to `127.0.0.1`. The threat model is a careless or destructive agent, not one trying to
+escape: [Security](site/content/docs/concepts/security.mdx).
+
+A command in a running smolvm sandbox takes 31 ms, level with `docker exec` into a warm container,
+and a Next.js session starts in 7.6 s against 6.8 s with no sandbox. File I/O through the mount is
+the main cost. [Benchmarks](site/content/docs/evals/benchmarks.mdx) has the method and every number.
+
+## Build on boxer
+
+```go
+b, err := boxer.Open(dir, boxer.Options{})   // github.com/BarakChamo/boxer/pkg/boxer
+if err != nil {
+	return err
+}
+if _, err := b.Ensure(true, false); err != nil { // create and start, or do nothing if running
+	return err
+}
+code, err := b.Run([]string{"sh", "-c", "npm test"}, boxer.RunOpts{Stdout: os.Stdout, Stderr: os.Stderr})
+```
+
+[`examples/go-embed`](examples/go-embed) runs one command across several worktrees in parallel.
+Programs in other languages use `--json`; harness integrations use `boxer hook` and `boxer mcp`.
+[Building on boxer](site/content/docs/guides/building-on-boxer.mdx).
+
+## How it is tested
+
+Every harness and orchestrator integration is run for real, with a scripted model and with live
+ones. The smoke suite runs every configuration path on every backend, and passes on all seven
+backend and host pairs (2026-09-27). The Next.js matrix, live agents in parallel worktrees on
+smolvm, scores 99.4% on a pre-release build. [Evaluations](site/content/docs/evals/index.mdx) explains the
+tiers, and [Results](site/content/docs/evals/results.mdx) has the results per harness.
 
 ## Documentation
 
-The docs site lives in [`site/`](site); `make docs-dev` serves it locally.
+The docs site is in [`site/`](site); `make docs-dev` serves it on localhost. Start with
+[Introduction](site/content/docs/index.mdx), [Install](site/content/docs/start/install.mdx) and
+[Connect your harness](site/content/docs/start/harnesses.mdx).
 
-**Using boxer:** [install](site/content/docs/start/install.mdx) ·
-[first sandbox](site/content/docs/start/first-run.mdx) ·
-[connect your harness](site/content/docs/start/harnesses.mdx) ·
-[how it works](site/content/docs/guides/how-it-works.mdx) ·
-[configuration](site/content/docs/reference/configuration.mdx) ·
-[security model](site/content/docs/concepts/security.mdx) ·
-[troubleshooting](site/content/docs/guides/troubleshooting.mdx)
-
-**Building on boxer:** [the three interfaces](site/content/docs/guides/building-on-boxer.mdx) ·
-[JSON output](site/content/docs/reference/json.mdx) · [MCP](site/content/docs/reference/mcp.mdx) ·
-[Go package](site/content/docs/reference/go.mdx)
-
-**Working on boxer:** [architecture](docs/architecture.md) · [testing](docs/testing.md) ·
-[adding a harness](docs/adding-a-harness.md) · [evaluation plan](docs/eval-plan.md) ·
-[requirements](docs/requirements.md) · [releasing and the stability contract](docs/release.md) ·
-[CONTRIBUTING](CONTRIBUTING.md)
+## Development
 
 ```sh
-make test          # unit tests, race detector, coverage floor; a fake smolvm, safe any time
-make smoke         # every configuration path against a real microVM, no model
-make eval-t1       # every harness CLI against a scripted model and a real VM
-make eval-t2       # the same cells against live models, a few cents
+make build      # bin/boxer
+make test       # unit tests with the race detector and per-package coverage floors
+make smoke      # every configuration path against a real sandbox
+make eval-t1    # every harness against a scripted model
 ```
 
-## Licence
+[CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [testing](docs/testing.md),
+[adding a harness](docs/adding-a-harness.md).
 
-Apache-2.0. See [LICENSE](LICENSE), [SECURITY.md](SECURITY.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
+## License
+
+Apache-2.0. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

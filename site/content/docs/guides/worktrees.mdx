@@ -1,20 +1,21 @@
 ---
-title: Worktrees and parallel work
-description: Run several agents in parallel, one worktree and one sandbox each.
+title: Run agents in parallel worktrees
+description: Run several agents at once, one git worktree and one sandbox each.
 ---
 
-boxer gives each git worktree its own sandbox, so parallel agents need only parallel worktrees.
+boxer gives each git worktree its own sandbox, so running agents in parallel takes only a worktree
+per agent.
 
 ```sh
 git worktree add ../myapp-feature -b feature
 cd ../myapp-feature
-boxer run -c 'npm test'      # its own VM, its own port, its own filesystem
+boxer run -c 'npm test'      # its own sandbox, host port and node_modules
 ```
 
-With the default `isolation = "worktree"`, two worktrees never share a sandbox, so two agents cannot overwrite each other's `node_modules`,
-race on a port, or see each other's half-finished files.
+With the default `isolation = "worktree"`, two worktrees never share a sandbox, so two agents
+cannot overwrite each other's `node_modules` or race on a port.
 
-## Committing a boxer.toml
+## Commit a boxer.toml
 
 Every worktree cut from a branch inherits that branch's `boxer.toml`, so keep it free of
 host-specific values. Ports are the usual one:
@@ -26,7 +27,7 @@ ports = ["auto:3000"]     # not "3000:3000"
 
 A fixed host port fails with a busy-address error as soon as a second worktree starts.
 
-## Finding each worktree's dev server
+## Find each worktree's dev server
 
 `auto:` gives every worktree its own host port, so none of them is at `localhost:3000`.
 `boxer status` says where each one landed. To give them names instead, turn on `[urls]`:
@@ -44,34 +45,31 @@ $ boxer up
 boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
 ```
 
-The main checkout is `myapp.localhost`, a worktree on a branch is `<branch>.myapp.localhost`, and a
-detached worktree (what most orchestrators create) uses the sandbox's two-word name in place of a
-branch. Names last as long as the sandbox. Agents read them from `boxer status --json` or the
-`boxer_status` tool. [URLs](/docs/guides/urls) covers the setup and the naming rules.
+Each worktree gets its own name, and agents read it with `boxer url`.
+[Name each worktree's dev server](/docs/guides/urls) covers the setup and the naming rules.
 
-## What each worktree pays
+## Size the sandboxes
 
 Each sandbox has its own memory and disk. The default allocation is `cpus = 4` and
-`memory = "4G"`, so four sandboxes ask for 16 GB.
-
-Measured, four concurrent node sandboxes held about 4 GB resident and 2.7 GB of disk: roughly a
-gigabyte and 700 MB each. The host has to be able to cover the allocation, not only the resident
-use, so lower it if you run several:
+`memory = "4G"`, so four sandboxes ask for 16 GB. Measured, four concurrent node sandboxes held
+about 4 GB resident and 2.7 GB of disk, roughly 1 GB and 700 MB each. The host has to cover the
+allocation, so lower it if you run several:
 
 ```toml
 cpus   = 2
 memory = "2G"
 ```
 
-`boxer ls --resources` prints allocation and resident use side by side. Packs add 130 to 365 MB
-each, and `packs_keep_last` (default 5) bounds how many are kept. `boxer gc` reclaims idle
-sandboxes and unreferenced packs.
+`boxer ls --resources` prints allocation and use side by side. Packs add 130 to 365 MB each, and
+`packs_keep_last` (default 5) bounds how many are kept. `boxer gc` removes sandboxes whose worktree
+is gone or that sat unused past `idle_timeout` (2h), and packs unused for as long;
+[Manage sandboxes](/docs/guides/managing) has the rest.
 
 ## Orchestrators
 
 Tools that cut a worktree per task (Conductor, T3 Code, Paperclip, herdr) get a sandbox per task
-with no extra setup, as long as the boxer integration is committed on the branch they cut from. See
-[Orchestrators](/docs/guides/orchestrators).
+with no extra setup, as long as the boxer integration is committed on the branch they cut from.
+[Orchestrators](/docs/guides/orchestrators) covers each one.
 
 <Callout type="warn">
 Codex reads hooks from the main repository, not the linked worktree. Use `boxer install codex`

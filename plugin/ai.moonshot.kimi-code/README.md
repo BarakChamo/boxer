@@ -20,8 +20,11 @@ way in. Both paths are covered by `boxer-eval` (tier t1) against the real Kimi b
 ## Install
 
 1. Append `ai.moonshot.kimi-code/hooks.toml` to `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME/config.toml`).
-2. `ai.moonshot.kimi-code/mcp.json` → `.kimi-code/mcp.json` in the repository (`boxer install kimi` does this and merges).
-3. `skills/boxer/SKILL.md` → `.agents/skills/boxer/SKILL.md` in the repository (universal skills path).
-4. `boxer shim install` and prepend the printed directory to `PATH`.
+2. Merge `ai.moonshot.kimi-code/mcp.json` into `.kimi-code/mcp.json` in the repository.
+3. Copy `skills/boxer/` to `.agents/skills/boxer/` in the repository.
+4. Run `boxer shim install` and prepend the printed directory to `PATH`.
 
-`boxer` must be on `PATH`; hooks and shims call it by name.
+`boxer install kimi` does steps 2 and 3 and prints the `hooks.toml` block for step 1, since Kimi
+hooks live only in the user config.
+
+`boxer` must be on `PATH`. Hooks and shims call it by name.

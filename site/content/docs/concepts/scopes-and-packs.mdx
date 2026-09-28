@@ -3,9 +3,10 @@ title: Scopes and packs
 description: How boxer decides which sandbox a command runs in, and how it caches built environments.
 ---
 
-A **scope** is the identity of one sandbox: it decides which sandbox a command runs in. A **pack**
-is a cached snapshot of a built environment: it decides whether a new sandbox has to be built. An
-unexpected new sandbox, a missing one, or a setup step that ran again is usually one of these two.
+A **scope** is the identity of one sandbox, and decides which sandbox a command runs in. A **pack**
+is a cached snapshot of a built environment, and decides whether a new sandbox has to be built. An
+unexpected new sandbox, a missing one, or a setup step that ran again usually traces to one of the
+two.
 
 ## Scope
 
@@ -27,7 +28,8 @@ goes into the hash is set by `isolation`:
 | `subagent` | the worktree root, the session id and the agent id | subagent |
 
 `worktree` is the default because orchestrators already create one worktree per task. Parallel
-agents get separate sandboxes with no extra setup, and a sandbox's lifetime follows a worktree's.
+agents get separate sandboxes with no extra setup, and `boxer gc` reclaims a sandbox once its
+worktree is gone.
 
 ### Degradation
 
@@ -40,11 +42,11 @@ on_missing_id = "degrade"    # degrade | fail
 ```
 
 `degrade` falls back one step (subagent to session, session to worktree) and prints a warning.
-`fail` refuses to run.
+`fail` refuses to run. `boxer doctor` shows whether resolution degraded.
 
 ### Placement is part of the key
 
-Running the harness inside the guest ([inside mode](/docs/guides/inside)) and outside it produce
+Running the harness inside the guest ([inside mode](/docs/guides/inside)) and outside it produces
 two different scopes for the same worktree, because one sandbox carries the harness and the other
 does not.
 
@@ -59,28 +61,29 @@ sandbox.
 
 A pack is keyed on the image plus a hash of everything that shaped it:
 
-- `image_setup` — the commands that changed the guest
-- `env` — the variables baked into it
-- `mounts` — what else is attached
-- `start` and `ready` — what a VM from this pack is expected to be running
+- `image_setup`, the commands that changed the guest
+- `env`, the variables baked into it
+- `mounts`, what else is attached
+- `start` and `ready`, what a VM from this pack is expected to be running
 
-Change any of them and the next sandbox builds a fresh pack.
+Change any of them and the next sandbox builds a new pack.
 
 `setup` is not in the key. It prepares the worktree, which no pack carries.
 
 ### `image_setup` versus `setup`
 
-Putting a command in the wrong list is the most common configuration mistake.
+Put a command that changes the guest in `image_setup`, and one that changes the worktree in
+`setup`.
 
 ```toml
-image_setup = ["apt-get install -y libpq-dev"]   # changes the image → packed
-setup       = ["npm ci"]                          # changes the worktree → not packed
+image_setup = ["apt-get install -y libpq-dev"]   # changes the image, so it is packed
+setup       = ["npm ci"]                          # changes the worktree, so it is not
 ```
 
 A pack carries the guest's filesystem. The worktree is mounted from the host, so it is not in the
 snapshot. Put `npm install` in `image_setup` and the second worktree starts from a pack that marks
 the install done, with no `node_modules` in its worktree. Dependency installs belong in `setup`.
-[Environment](/docs/guides/environment#dependencies) covers both lists and `[prep]`.
+[Environment](/docs/guides/environment#install-dependencies) covers both lists and `[prep]`.
 
 ### Cache management
 
@@ -97,7 +100,8 @@ again.
 
 ```sh
 boxer up --rebuild     # drop this environment's pack and build it again
-boxer gc               # unreferenced packs and idle sandboxes
+boxer gc               # idle sandboxes, sandboxes whose worktree is gone, unused packs
+boxer gc --all         # also every stopped sandbox and every unreferenced pack
 boxer doctor           # what boxer currently costs on disk
 ```
 
@@ -115,10 +119,10 @@ boxer pack use base      # recreate this scope's sandbox from it
 boxer pack rm base
 ```
 
-Use one for a guest that took real time to prepare: a toolchain assembled by hand, a state to
-return to before a risky upgrade, or a base several worktrees should start from.
+Use one for a guest that took a long time to prepare, such as a toolchain assembled by hand, or a
+base several worktrees should start from.
 
-`gc` never touches a named pack. The automatic cache is swept by age and count.
+`gc` never touches a named pack. It sweeps the automatic cache by age and by `packs_keep_last`.
 
 <Callout>
 A named pack is a filesystem snapshot: what is installed, not what is running. smolvm cannot

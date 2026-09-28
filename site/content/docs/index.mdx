@@ -1,49 +1,69 @@
 ---
-title: What boxer is
-description: One sandbox per git worktree, so a coding agent's shell commands run there instead of on your machine.
+title: Introduction
+description: boxer runs a coding agent's shell commands in a sandbox, one per git worktree.
 ---
 
-Coding agents run shell commands — `npm install`, `make`, `python script.py` — as you, on your
-machine, with your credentials and filesystem.
-
-boxer runs them in a sandbox instead: one per git worktree, created on the first command, with the
-worktree mounted at `/workspace`. The default sandbox is a [smolvm](https://smolmachines.com)
-microVM with its own kernel; Apple `container`, docker and podman are
-[alternatives](/docs/concepts/backends) with different isolation and cost.
-
-The agent does not need to know. It runs `npm test`; the command runs in the sandbox, from the
-matching directory under the mount, and returns the same exit code, stdout and stderr.
+boxer runs a coding agent's shell commands in a sandbox instead of on your machine. Each git
+worktree gets its own sandbox, created on the first command, with the worktree mounted at
+`/workspace`. The agent keeps working as before: it runs `npm test`, the command runs in the
+sandbox from the matching directory, and the exit code, stdout and stderr come back unchanged.
 
 ```console
 $ boxer run -c 'uname -a'
 Linux sb-7f2a91 6.12.95 #1 SMP aarch64 Linux
 ```
 
-(The host here is a Mac.)
+The host here is a Mac. The default sandbox is a [smolvm](https://smolmachines.com) microVM with its
+own kernel. Apple `container`, docker and podman are the [other backends](/docs/concepts/backends).
+
+## What's included
+
+boxer is one Go binary. The rest of this table is the ways to connect it to an agent or a program.
+
+| Part | What it is | Docs |
+| --- | --- | --- |
+| `boxer` CLI | runs commands in the sandbox and manages sandboxes (`run`, `up`, `ls`, `rm`, `gc`, `doctor`) | [CLI](/docs/reference/cli) |
+| Hooks | `boxer hook <harness>` rewrites or denies a harness's shell calls before they run | [Enforcement](/docs/guides/enforcement) |
+| PATH shims | files named `npm`, `node`, `make` and so on that re-run themselves in the sandbox | [Enforcement](/docs/guides/enforcement#path-shims) |
+| MCP server | `boxer mcp`: the `boxer_run` and `boxer_status` tools and the `boxer://brief` resource | [MCP](/docs/reference/mcp) |
+| Skill | `skills/boxer`, in the Agent Skills format: how commands run here and what to do when refused | [Skills and plugins](/docs/guides/skills-and-plugins) |
+| Plugin package | `plugin/`, in the Agent Plugins format: the skill, the MCP server, and each client's hooks | [Skills and plugins](/docs/guides/skills-and-plugins#the-plugin-package) |
+| Inside mode | `boxer shell <harness>` and `boxer acp <harness>` run the agent itself in the sandbox | [Inside mode](/docs/guides/inside) |
+| Go package | `pkg/boxer`: open, run and remove sandboxes from a Go program | [Building on boxer](/docs/guides/building-on-boxer) |
+| JSON output | `--json` on every command that reports state, with stable fields and exit codes | [JSON](/docs/reference/json) |
+| Evaluation suite | the smoke suite and `boxer-eval`, which run real harnesses against real sandboxes | [Evaluations](/docs/evals) |
+
+## Pick a setup
+
+| You run | Do this | You get |
+| --- | --- | --- |
+| Claude Code, Codex, Gemini CLI or Grok in a terminal | `boxer install <harness>` and commit the files | hooks that rewrite every intercepted command |
+| Copilot CLI | `boxer install copilot --user` | the same hooks, in `~/.copilot` |
+| OpenCode or pi | `boxer install opencode` or `boxer install pi` | a plugin or extension that does the same |
+| Kimi Code or DSH | `boxer install <harness>`, then `mode = "tool"` | shell calls denied, `boxer_run` as the way in |
+| An orchestrator (T3 Code, Paperclip, herdr, Conductor, Multica, OpenHands) | install for the harness it drives, then warm each worktree | the above, per task worktree |
+| An agent you do not trust with a host shell, or fx | `boxer shell <harness>` | the agent itself in the sandbox |
+| Your own program | `pkg/boxer` or `--json` | sandboxes under your control |
+
+[Connect your harness](/docs/start/harnesses) and [Orchestrators](/docs/guides/orchestrators)
+have the steps for each.
 
 ## What it is not
 
-- **Not a guard for your code.** The worktree is mounted read-write, because the agent is there to
-  change it. boxer protects everything else on the machine.
-- **Not a container runtime or dev environment.** It sits between the agent and its commands. The
-  machines, images and snapshots belong to the backend; boxer keeps only small records, removed with
-  the sandbox.
-- **Not a defence against a deliberate attacker.** The threat model is an agent being careless or
-  destructive, not one trying to escape. [Security model](/docs/concepts/security) says where the
-  line is.
+boxer protects your machine from what an agent runs. It does not protect the worktree: the agent is
+there to change it, so the mount is read-write.
 
-## Where to start
+It is not a container runtime or a dev environment. The machines, images and snapshots belong to
+the backend, and boxer keeps only small records that it removes with the sandbox.
+
+It is not a defence against an attacker who knows they are in it. The threat model is a careless or
+destructive agent. The [security model](/docs/concepts/security) says where that line is.
+
+## Next steps
 
 <Cards>
-  <Card title="Install" href="/docs/start/install" description="The binary, smolvm, and a first sandboxed command." />
-  <Card title="Connect your harness" href="/docs/start/harnesses" description="Claude Code, Codex, Copilot, Kimi, OpenCode and the rest." />
-  <Card title="How it works" href="/docs/guides/how-it-works" description="Scopes, integration levels, and what happens on the first command." />
-  <Card title="Examples" href="/docs/guides/examples" description="Working boxer.toml files for Next.js, Python, Go, monorepos and more." />
+  <Card title="Install" href="/docs/start/install" description="A backend, boxer, and a first sandboxed command." />
+  <Card title="Connect your harness" href="/docs/start/harnesses" description="One command per agent, and what it writes." />
+  <Card title="Examples" href="/docs/guides/examples" description="boxer.toml for Next.js, Vite, Python, Go and monorepos." />
   <Card title="Configuration" href="/docs/reference/configuration" description="Every key in boxer.toml." />
-  <Card title="Backends" href="/docs/concepts/backends" description="smolvm, Apple container, docker, podman: what each isolates and costs." />
-  <Card title="Dev servers and URLs" href="/docs/guides/urls" description="A stable URL for each worktree's server, passed to agents." />
-  <Card title="Managing sandboxes" href="/docs/guides/managing" description="List, remove and check what boxer has on this machine." />
-  <Card title="Security model" href="/docs/concepts/security" description="What the boundary holds, and the deliberate ways out." />
-  <Card title="Build on boxer" href="/docs/guides/building-on-boxer" description="The Go package, JSON output, and the CLI as an interface." />
-  <Card title="How it is evaluated" href="/docs/evals/strategy" description="The test tiers, the oracle, and what the numbers mean." />
 </Cards>

@@ -3,7 +3,7 @@ title: Backends
 description: smolvm, Apple container, docker and podman compared by isolation boundary, enforced features and start-up time.
 ---
 
-A backend is the runtime that runs the sandbox. boxer drives four. They differ in isolation
+A backend is the runtime that runs the sandbox. boxer drives four, which differ in isolation
 boundary, in what boxer can enforce through them, and in start-up time.
 
 ```toml
@@ -22,13 +22,16 @@ boundary first, and `boxer backends` compares every installed one.
 | `docker` | a container | one kernel shared by every sandbox on the machine |
 | `podman` | a container | one kernel shared by every sandbox on the machine |
 
-On a Mac, docker and podman run their containers inside one Linux VM, so "shared kernel" means
-shared between sandboxes, not with macOS. On Linux they share the host's kernel.
+On a Mac, docker and podman run their containers inside one Linux VM, so their sandboxes share that
+VM's kernel and not the macOS one. On Linux they share the host's kernel.
 
 An escape from a microVM lands in one guest. An escape from a container lands in the kernel every
-other sandbox on that machine uses. boxer's threat model is a careless agent, not a hostile one
-(see the [security model](/docs/concepts/security)); if containment is why you use boxer, keep a
-kernel-per-sandbox backend.
+other sandbox on that machine uses. boxer's threat model is a careless agent. If containment is why
+you use boxer, keep a kernel-per-sandbox backend.
+
+On every backend the sandbox sees the worktree, read-only package caches and your `mounts`, and
+`git`, `gh` and `ssh` run on the host on purpose. Forwarded ports and the portless proxy bind
+`127.0.0.1` on every backend. The [security model](/docs/concepts/security) covers both.
 
 ## What each can do
 
@@ -37,18 +40,18 @@ Generated from the backends' code with `go test ./internal/vm -run CapabilityMat
 | backend | egress allowlist | environment cache (packs) | fork | egress log | secrets off argv | ownership by label |
 | --- | --- | --- | --- | --- | --- | --- |
 | `smolvm` | yes | yes | yes | yes | yes | yes |
-| `container` | — | — | — | — | yes | yes |
-| `docker` | — | — | — | — | yes | yes |
-| `podman` | — | — | — | — | yes | yes |
+| `container` | no | no | no | no | yes | yes |
+| `docker` | no | no | no | no | yes | yes |
+| `podman` | no | no | no | no | yes | yes |
 
-When a backend lacks a feature, boxer refuses with an error that names it, rather than
+When a backend lacks a feature, boxer refuses with an error that names it, instead of
 approximating:
 
 - **Egress allowlist.** `network.mode = "allowlist"` is the default, and container runtimes offer
   only no network or full network. On those backends boxer refuses the default and the error gives
   the fix: set `network.mode` to `"off"` or `"on"`.
 - **Packs** ([environment cache](/docs/concepts/scopes-and-packs#packs)). Without them,
-  `image_setup` runs once per sandbox rather than once per host.
+  `image_setup` runs once per sandbox instead of once per host.
 - **Forking.** `boxer fork` needs copy-on-write VM branching, which only smolvm has.
 
 Everything else (hooks, shims, the MCP server, tasks, URLs, devcontainer support, `[prep]`, cache
@@ -67,14 +70,15 @@ three samples each, 2 vCPU and 4 GB per sandbox, on a 10-core Apple Silicon Mac:
 | `container` | 8.2 s | 25.6 s |
 | `smolvm` | 8.5 s | 27.3 s |
 
-The two kernel-per-sandbox backends land within 0.3 s of each other, so the ~4.6 s gap is the
-cost of a kernel per sandbox, not of smolvm. At three worktrees the spread falls to 27%: three
-Next.js compiles saturate the cores and the sandbox stops being the bottleneck. The cost is at
-start-up only. A warm command in an existing sandbox takes 30–50 ms on all of them (31 ms measured
-on smolvm, 36–51 ms on docker). Method and caveats: [Benchmarks](/docs/evals/benchmarks).
+The two kernel-per-sandbox backends land within 0.3 s of each other, and the two shared-kernel
+ones within 0.9 s, so the gap of about 4 s (8.2 to 8.5 s against 3.6 to 4.5 s) comes from the kernel per sandbox and applies to
+smolvm and `container` alike. At three worktrees the spread falls to 27%, because three Next.js
+compiles saturate the cores. The gap is paid at start-up. A warm `boxer run` on smolvm takes 31 ms,
+level with `docker exec` into a running container at 32 ms. The [benchmarks](/docs/evals/benchmarks)
+have the method and caveats.
 
-There is no memory column: the whole-host measurement varied twofold within a single
-configuration.
+The table has no memory column, because the whole-host measurement varied up to 2.1x within a
+single configuration.
 
 ## Choosing
 
@@ -85,6 +89,10 @@ configuration.
   with `network.mode` set explicitly. The sandboxes share a kernel.
 - **Many short-lived sandboxes where start-up time dominates:** a container backend starts one
   about 4 s sooner.
+
+The smoke suite passes 88 of 88 cells on smolvm, and 79 with 9 skipped by capability on docker,
+podman and Apple `container`, on macOS and on Linux where the backend exists
+([results](/docs/evals/results#on-each-backend)).
 
 ## Known runtime problems
 
@@ -123,5 +131,6 @@ boxer backends --probe    # create, use and delete a real sandbox on each
 
 **Firecracker** needs `/dev/kvm`, which macOS does not have, and its maintainers declined a
 Virtualization.framework port. **Docker Sandboxes (`sbx`)** has a per-host allowlist but no labels
-on any object and no way to inspect a sandbox, so boxer cannot prove which sandboxes it owns. **Remote backends** such as Vercel
-Sandbox copy the workspace rather than mounting it, which no backend here does yet.
+on any object and no way to inspect a sandbox, so boxer cannot prove which sandboxes it owns.
+**Remote backends** such as Vercel Sandbox copy the workspace instead of mounting it, and no boxer
+backend copies a workspace yet.

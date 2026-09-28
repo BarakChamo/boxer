@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -246,7 +247,13 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 	args = append(args, argv...)
 	a.log(args)
 
-	cmd := exec.Command(a.Bin, args...)
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	if o.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, o.Timeout)
+	}
+	defer cancel()
+	cmd := exec.CommandContext(ctx, a.Bin, args...)
 	head := &headWriter{w: o.Stderr}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.Stdin, o.Stdout, head
 	if err := cmd.Start(); err != nil {

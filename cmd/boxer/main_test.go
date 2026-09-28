@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/inside"
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -180,6 +182,12 @@ func TestTasksAndBrief(t *testing.T) {
 	if code, out := call(t, nil, "run", "--task", "test"); code != 0 || !strings.Contains(out, "ran-the-task") {
 		t.Fatalf("run --task: %d %s", code, out)
 	}
+	// A task's env table reaches the command.
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[tasks.greet]\ncmd = \"echo hello-$WHO\"\nenv = { WHO = \"task-env\" }\n")
+	if code, out := call(t, nil, "run", "--task", "greet"); code != 0 || !strings.Contains(out, "hello-task-env") {
+		t.Fatalf("task env: %d %s", code, out)
+	}
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[tasks]\ntest = \"echo ran-the-task\"\nbuild = \"make build\"\n")
 	// An unknown name is a refusal an agent can act on: the fix line lists what does exist.
 	code, out = call(t, nil, "run", "--task", "tset")
 	if code != 1 || !strings.Contains(out, "NO_SUCH_TASK") || !strings.Contains(out, "fix:       boxer run --task build | test") {
@@ -555,5 +563,16 @@ func TestGCAllKeepsRunningSandboxes(t *testing.T) {
 	}
 	if _, ok, _ := client.Status("sb-busy"); !ok {
 		t.Fatal("gc --all deleted a running sandbox")
+	}
+}
+
+// The usage line for `boxer shell` is written by hand; it once left out two harnesses that worked.
+func TestUsageNamesEveryInsideHarness(t *testing.T) {
+	line := usage[strings.Index(usage, "harnesses: claude"):]
+	listed := strings.Split(strings.TrimPrefix(line[:strings.Index(line, "\n")], "harnesses: "), ", ")
+	for _, h := range inside.Names() {
+		if !slices.Contains(listed, h) {
+			t.Errorf("boxer help does not list %q under boxer shell: %v", h, listed)
+		}
 	}
 }

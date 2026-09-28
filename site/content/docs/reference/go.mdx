@@ -1,81 +1,251 @@
 ---
 title: Go package
-description: The pkg/boxer API for opening, running and managing sandboxes from Go.
+description: Every exported identifier in pkg/boxer, for opening, running and managing sandboxes from Go.
 ---
 
 ```go
 import "github.com/BarakChamo/boxer/pkg/boxer"
 ```
 
-`pkg/boxer` is the module's only importable package; everything else is under `internal/`. It is
-a thin facade over the code the CLI uses, so it behaves the same as the CLI.
-
-<Callout>
-Experimental until 1.0, and may change. From 1.0 the [stability
-contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md) covers its exported
-functions, types and fields, and breaking one needs a major version.
-</Callout>
-
-For worked examples, see [Building on boxer](/docs/guides/building-on-boxer).
-
-## Types
+`pkg/boxer` is the module's only importable package; everything else is under `internal/`. It
+calls the same code the CLI does, so a `Box` reads the worktree's `boxer.toml` and behaves as
+`boxer run` would there. The [stability contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md)
+covers its exported functions, types and fields from 1.0.
 
 ```go
-type Options struct {
-    Harness   string   // selects the [harness.<name>] override layer
-    SessionID string   // for isolation = "session"
-    AgentID   string   // for isolation = "subagent"
+b, err := boxer.Open("/Users/me/src/app-wt1", boxer.Options{})
+if err != nil {
+    return err
 }
-
-type RunOpts = box.RunOpts   // Stdin, Stdout, Stderr, TTY
-type Machine = vm.Machine    // one sandbox, on any backend; Labels carry the boxer.* keys
-type Scope   = scope.Scope   // Key is the machine name, Root the mounted worktree
-type Error   = box.Error     // Reason, Cause, Fix, Scope
+if _, err := b.Ensure(true, false); err != nil {
+    return err
+}
+code, err := b.Run([]string{"sh", "-c", "npm test"}, boxer.RunOpts{Stdout: os.Stdout, Stderr: os.Stderr})
 ```
 
-## Opening a sandbox
+[`examples/go-embed`](https://github.com/BarakChamo/boxer/tree/main/examples/go-embed) runs one
+shell line in several worktrees at once through this package and reports each exit code.
+[Building on boxer](/docs/guides/building-on-boxer) covers the decisions around it.
+
+## Index
+
+| Identifier | Kind |
+| --- | --- |
+| [`Open`](#open) | func |
+| [`List`](#list), [`Stop`](#stop), [`Delete`](#delete), [`LastUsed`](#lastused) | func |
+| [`Box`](#box) | type, with `Scope`, `Warnings`, `Ensure`, `Run`, `Status`, `Down` |
+| [`Options`](#options) | type |
+| [`RunOpts`](#runopts) | type alias |
+| [`Machine`](#machine) | type alias |
+| [`Scope`](#scope) | type alias |
+| [`Error`](#error) | type alias |
+
+## Open
 
 ```go
 func Open(cwd string, o Options) (*Box, error)
 ```
 
-Resolves the sandbox for `cwd` — the process working directory when empty. The error is a
-`*Error` when boxer refused: no repository, worktree required, scope unresolved.
+Resolves the sandbox for `cwd`, or for the process working directory when `cwd` is empty. It reads
+configuration and does not create anything. The error is a `*Error` when boxer refused, with cause
+`NO_REPOSITORY`, `WORKTREE_REQUIRED` or `SCOPE_UNRESOLVED`, and a plain error when `boxer.toml` is
+invalid.
 
-## Methods on `*Box`
+## Options
 
-| Method | |
+```go
+type Options struct {
+    Harness   string
+    SessionID string
+    AgentID   string
+}
+```
+
+Every field may be empty.
+
+| Field | |
 | --- | --- |
-| `Scope() Scope` | the resolved scope |
-| `Warnings() []string` | non-fatal findings from resolution: main checkout, degraded isolation |
-| `Ensure(allowCreate, recreate bool) (created bool, err error)` | make the machine exist and run |
-| `Run(argv []string, o RunOpts) (int, error)` | execute in the guest; returns the guest exit code |
-| `Status() (Machine, bool, error)` | the machine, and whether it exists |
-| `Down() error` | delete the machine; absence is not an error |
+| `Harness` | Selects the [`[harness.<name>]`](/docs/reference/configuration#harness-overrides) override layer |
+| `SessionID` | The session id for `isolation = "session"` |
+| `AgentID` | The subagent id for `isolation = "subagent"` |
 
-`Ensure` creates only when `allowCreate` is set; `recreate` deletes an existing machine first.
-Both it and `Run` are safe to call on a running sandbox.
+## Box
 
-`Run` returns `-1` with an error when `on_sandbox_unavailable = "passthrough"` and the sandbox
-could not be provisioned. The caller decides whether to run the command on the host.
+```go
+type Box struct { /* unexported */ }
+```
 
-## Host-wide functions
+The sandbox resolved for one working directory. Its methods are safe to call on a running sandbox.
 
-| Function | |
-| --- | --- |
-| `List() ([]Machine, error)` | every boxer-owned machine on the host |
-| `Stop(name string) error` | halt one; stopping a stopped machine is not an error |
-| `Delete(name string) error` | remove one |
-| `LastUsed(name string) time.Time` | when the scope last ran a command; zero when unknown |
+### Box.Scope
 
-These take a machine name rather than a directory, because the worktree may be gone. They act on
-the backend the CLI would use from the process's working directory: the one `boxer.toml` names,
-else `BOXER_BACKEND`, else smolvm.
+```go
+func (b *Box) Scope() Scope
+```
 
-`Stop` halts a machine without deleting it, the state `boxer status` reports as exit code 3. It is
-the same operation as `boxer stop NAME`.
+The resolved scope.
 
-## Errors
+### Box.Warnings
+
+```go
+func (b *Box) Warnings() []string
+```
+
+Non-fatal findings from resolution, such as running in the main checkout or degraded isolation.
+
+### Box.Ensure
+
+```go
+func (b *Box) Ensure(allowCreate, recreate bool) (created bool, err error)
+```
+
+Makes the machine exist and run, runs `setup` and `start`, and waits for `ready`. It creates only
+when `allowCreate` is set; otherwise a missing sandbox is `NO_SANDBOX`. `recreate` deletes an
+existing machine first. `created` reports whether a machine was created.
+
+### Box.Run
+
+```go
+func (b *Box) Run(argv []string, o RunOpts) (int, error)
+```
+
+Executes `argv` in the guest and returns its exit code. It provisions first when
+[`create_on`](/docs/reference/configuration#create_on) includes `run`. A non-nil error means the
+command did not run. `-1` with an error means
+[`on_sandbox_unavailable = "passthrough"`](/docs/reference/configuration#on_sandbox_unavailable)
+applies and you may run `argv` on the host.
+
+### Box.Status
+
+```go
+func (b *Box) Status() (Machine, bool, error)
+```
+
+The machine, and whether it exists.
+
+### Box.Down
+
+```go
+func (b *Box) Down() error
+```
+
+Deletes the machine. Absence is not an error.
+
+## List
+
+```go
+func List() ([]Machine, error)
+```
+
+Every boxer-owned machine on the host backend.
+
+## Stop
+
+```go
+func Stop(name string) error
+```
+
+Halts one machine by name and keeps it, the state `boxer status` reports as exit 3. Stopping a
+stopped machine is not an error. Same as `boxer stop NAME`.
+
+## Delete
+
+```go
+func Delete(name string) error
+```
+
+Removes one machine by name.
+
+## LastUsed
+
+```go
+func LastUsed(name string) time.Time
+```
+
+When the scope last ran a command, or the zero time when unknown.
+
+`List`, `Stop`, `Delete` and `LastUsed` take a machine name rather than a directory, because the
+worktree may be gone. `List`, `Stop` and `Delete` act on the backend the CLI would use from the
+process's working directory: `BOXER_BACKEND`, else the one `boxer.toml` names, else smolvm.
+
+## RunOpts
+
+```go
+type RunOpts = box.RunOpts
+
+type RunOpts struct {
+    Stdin   io.Reader
+    Stdout  io.Writer
+    Stderr  io.Writer
+    TTY     bool
+    Timeout time.Duration
+    Task    string
+}
+```
+
+The streams, whether to request a terminal, a timeout (zero for none), and the `[tasks]` name to
+record in the run record. Pass the same writer as `Stdout` and `Stderr` to get one interleaved
+stream.
+
+## Machine
+
+```go
+type Machine = vm.Machine
+
+type Machine struct {
+    Name      string
+    State     string
+    Image     string
+    Labels    map[string]string
+    CreatedAt int64
+    PID       int
+    CPUs      int
+    MemoryMiB int
+}
+
+func (m Machine) Running() bool
+```
+
+One sandbox on any backend. `Name` is the scope key. `Labels` carry the `boxer.*` keys, such as
+`boxer.root` for the worktree. `CreatedAt` is Unix seconds.
+
+## Scope
+
+```go
+type Scope = scope.Scope
+
+type Scope struct {
+    Key       string
+    Isolation string
+    Root      string
+    Degraded  bool
+    Reason    string
+}
+
+func (s Scope) Slug() string
+func (s Scope) Names() string
+```
+
+`Key` is `sb-` plus twelve hex characters and is the machine name. `Isolation` is the isolation
+used after degradation, and `Reason` says why when `Degraded` is set. `Root` is the mounted
+worktree. `Slug` is the two-word name (`swift-crab`); `Names` is `swift-crab (sb-7e1852e4a3c3)`.
+
+## Error
+
+```go
+type Error = box.Error
+
+type Error struct {
+    Reason string
+    Cause  string
+    Fix    string
+    Scope  Scope
+}
+
+func (e *Error) Error() string
+```
+
+boxer's refusal. `Error()` is the same multi-line text the CLI prints.
 
 ```go
 var be *boxer.Error

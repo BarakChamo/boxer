@@ -5,86 +5,125 @@ description: Short definitions of the terms boxer's documentation uses, each lin
 
 **ACP (Agent Client Protocol).** The protocol an editor uses to drive a coding agent as a
 subprocess over stdio. `boxer acp <harness>` starts the harness's ACP server inside the guest; see
-[Running the harness inside](/docs/guides/inside).
+[running the harness inside](/docs/guides/inside#editors-over-acp).
 
 **Adherence.** How often a live model follows the brief when nothing enforces it and the prompt
-never mentions boxer. Measured by its own [evaluation tier](/docs/evals).
+never mentions boxer. It has its own [evaluation layer](/docs/evals/strategy).
 
-**Backend.** The runtime that runs sandboxes: `smolvm` (default), Apple `container`, `docker` or
-`podman`. See [Backends](/docs/concepts/backends).
+**Allowlist.** The default `network.mode`, under which the guest reaches only `allow_hosts` and the
+registry hosts its image pull needs. Only smolvm enforces it; see
+[network](/docs/reference/configuration#network).
 
-**Brief.** A generated summary of how this checkout runs commands: the mount, the mode, the
+**Backend.** The runtime that runs sandboxes: `smolvm` (the default), Apple `container`, `docker` or
+`podman`. See [backends](/docs/concepts/backends).
+
+**`boxed` agent.** The subagent the plugin package ships, which has no shell tool and runs
+everything through `boxer_run`. See [skills and plugins](/docs/guides/skills-and-plugins).
+
+**Branch source.** A smolvm sandbox restarted by `boxer fork --prepare` so it can be forked. See
+[forking](/docs/guides/forking#prepare-the-sandbox).
+
+**Brief.** The generated summary of how this checkout runs commands: the mount, the mode, the
 intercept and passthrough lists, and the declared tasks. `boxer brief` prints it, the hooks inject
 it, and the [MCP server](/docs/reference/mcp#resource) serves it at `boxer://brief`.
 
-**Capsule.** A `capsule.toml` recording a failure well enough to rerun it: the command, the commit,
-the relevant configuration, and what counts as reproducing it. `boxer capsule replay` exits 0 when
-it still fails; see [Test results and capsules](/docs/guides/results).
+**Capsule.** A `capsule.toml` that records the last command run in a scope, the commit, the
+relevant configuration and the exit that counts as reproducing it. `boxer capsule replay` exits 0
+when the failure still happens; see [capsules](/docs/guides/results#save-a-failure-as-a-capsule).
 
-**Cell.** One row of an evaluation matrix: one harness at one integration level running one task
-in its own worktree and sandbox. See [The matrix tier](/docs/evals/matrix).
+**Cell.** One row of an evaluation matrix, one harness at one integration level running one task in
+its own worktree and sandbox. See [the matrix tier](/docs/evals/matrix).
 
-**Enforcement.** Which interception mechanisms are live: `hook`, `shim`, `both` or `audit`. See
-[Enforcement](/docs/guides/enforcement).
+**Degraded scope.** A scope that fell back to a coarser `isolation` because the harness supplied no
+session or agent id. See [degradation](/docs/concepts/scopes-and-packs#degradation).
 
-**Fork.** A copy-on-write child of a running smolvm sandbox. Children share the parent's worktree.
-See [Forking](/docs/guides/forking).
+**Enforcement.** Which mechanisms hold commands to the sandbox: `hook`, `shim`, `both` or `audit`.
+See [enforcement](/docs/guides/enforcement).
 
-**Guest.** Inside the sandbox. The **host** is your machine.
+**Environment pack.** The pack boxer caches automatically after `image_setup`, keyed by the image
+and the configuration that shapes it, so the next worktree starts from it. `gc` reclaims old ones;
+see [packs](/docs/concepts/scopes-and-packs#packs).
+
+**Fork.** A copy-on-write child of a running smolvm sandbox, sharing the parent's worktree. See
+[forking](/docs/guides/forking).
+
+**Guest.** The inside of the sandbox. The **host** is your machine.
 
 **Harness.** A coding agent's CLI, such as Claude Code, Codex or OpenCode. See
-[Harnesses](/docs/start/harnesses).
+[harnesses](/docs/start/harnesses).
 
-**`image_setup`, `setup` and `[prep]`.** Three command lists. `image_setup` changes the guest
-image and is cached in the pack; `setup` prepares the worktree and runs per worktree; `[prep]` runs
-on the host before the sandbox exists. See [Environment](/docs/guides/environment#dependencies).
+**Hook.** A harness callback that runs `boxer hook <harness>` before each shell call, so boxer can
+rewrite or deny it. See [hooks](/docs/guides/enforcement#hooks).
+
+**`image_setup` and `setup`.** Two command lists that run in the guest. `image_setup` changes the
+image and is cached in the environment pack; `setup` prepares one worktree and runs in each. See
+[environment](/docs/guides/environment#install-dependencies).
 
 **Inside and outside.** Where the harness runs. **Outside**, the default, the harness runs on the
 host and boxer sandboxes the commands it issues. **Inside** (`integration = "inside"`), the harness
-runs in the guest. See [Running the harness inside](/docs/guides/inside).
+itself runs in the guest; see [running the harness inside](/docs/guides/inside).
 
-**Integration level.** One of five ways a command reaches the guest: MCP and skill, hooks, the
-OpenCode plugin, PATH shims, and inside mode. They stack; `boxer install` picks the strongest the
-harness supports. See [Harnesses](/docs/start/harnesses).
+**Integration level.** One of the five ways a harness's commands reach the guest: MCP and skill,
+hooks, plugins, PATH shims, and inside mode. A harness uses every one it supports at once; see
+[integration levels](/docs/start/harnesses#integration-levels).
 
-**Intercept.** The list of program names boxer sandboxes. **Passthrough** is the list that
-stays on the host.
+**Intercept.** The list of programs whose commands boxer sandboxes. **Passthrough** is the list
+that always stays on the host. See [what gets sandboxed](/docs/reference/configuration#what-gets-sandboxed).
 
-**Isolation.** What a scope is keyed to: `repo`, `worktree` (default), `session` or `subagent`.
+**Isolation.** What a scope is keyed to: `repo`, `worktree` (the default), `session` or `subagent`.
+See [scope](/docs/concepts/scopes-and-packs#scope).
 
-**Mode.** What boxer does with a command it catches: `rewrite` turns it into `boxer run`, `tool`
-denies the shell and leaves the `boxer_run` MCP tool, `off` does nothing.
+**Mode.** What a hook does with a command it catches. `rewrite` turns it into `boxer run`, `tool`
+denies it and points to the `boxer_run` MCP tool, and `off` does nothing.
 
-**Named pack.** A pack saved with `boxer pack save`. `gc` never removes it.
+**Named pack.** A pack saved with `boxer pack save` and started from with `boxer pack use`. `gc`
+never removes it; see [packs you name](/docs/concepts/scopes-and-packs#packs-you-name).
 
 **Orchestrator.** A tool that creates a worktree per task and starts a harness in it, such as
-Conductor or OpenHands. See [Orchestrators](/docs/guides/orchestrators).
+Conductor or OpenHands. See [orchestrators](/docs/guides/orchestrators).
 
-**Pack.** A snapshot of a smolvm guest after `image_setup` has run, reused by the next sandbox with
-the same environment. See [Scopes and packs](/docs/concepts/scopes-and-packs#packs).
+**Pack.** A snapshot of a smolvm guest's filesystem, not its processes. boxer keeps environment
+packs itself; you keep named packs. See [packs](/docs/concepts/scopes-and-packs#packs).
 
-**Placement.** Inside or outside. Part of the scope key, so the two placements of one worktree get
-two sandboxes.
+**Placement.** Inside or outside. It is part of the scope key, so the two placements of one
+worktree get two sandboxes; see [placement](/docs/concepts/scopes-and-packs#placement-is-part-of-the-key).
 
-**Rewrite.** Replacing a command with its sandboxed form before it runs, so the agent sees the
-command's output rather than a refusal.
+**Plugin.** Either the OpenCode plugin that rewrites commands in-process, or the Agent Plugins
+package `npx plugins add BarakChamo/boxer` installs, which carries the skill and the `boxed` agent
+and no hooks. See [skills and plugins](/docs/guides/skills-and-plugins).
 
-**Scope.** The identity of one sandbox: `sb-` plus twelve hex characters, also the sandbox's name.
-The two words printed beside it (`swift-crab`) come from the same hash. See
-[Scopes and packs](/docs/concepts/scopes-and-packs).
+**portless.** The local reverse proxy boxer uses to give forwarded ports stable names, on port 1355
+by default. See [URLs](/docs/guides/urls).
 
-**Shim.** A file on `PATH` named after a program, which reruns the command in the guest. Works with
-no harness cooperation, as long as `PATH` holds.
+**Prep.** The `[prep]` command list, which runs on the host in the worktree before the sandbox
+exists. It is opt-in and only safe for packages with prebuilt binaries; see
+[prep](/docs/reference/configuration#prep).
 
-**Skill.** The Agent Skill boxer installs, telling the agent to run commands through boxer. It asks
-rather than enforces.
+**Rewrite.** Replacing a command with `boxer run -c '<command>'` before it runs, so the agent sees
+the command's output rather than a refusal.
 
-**smolvm.** The microVM runtime boxer uses by default. See [Backends](/docs/concepts/backends).
+**Run record.** What the last command in a scope did: the command, directory, exit, git state,
+output tails and test results. `boxer status --json` shows it and `boxer capsule new` captures it;
+see [JSON output](/docs/reference/json#run-record).
+
+**Scope.** The identity of one sandbox, `sb-` plus twelve hex characters, which is also the
+sandbox's name. The two words printed beside it (`swift-crab`) come from the same hash; see
+[scopes and packs](/docs/concepts/scopes-and-packs).
+
+**Shim.** A file on `PATH` named after a program, which reruns the command in the guest. It needs no
+harness support, as long as `PATH` holds; see [PATH shims](/docs/guides/enforcement#path-shims).
+
+**Skill.** The Agent Skill that tells an agent how commands run in this repository. It asks and
+does not enforce; see [skills and plugins](/docs/guides/skills-and-plugins#the-skill).
+
+**smolvm.** The microVM runtime boxer uses by default, one kernel per sandbox. See
+[backends](/docs/concepts/backends).
 
 **Task.** A named command line in `[tasks]`, run with `boxer run --task <name>`. See
-[Tasks](/docs/guides/tasks).
+[tasks](/docs/guides/tasks).
 
-**Tier.** One level of evaluation (`t1`, `t2`, `adherence`, `flow`, `sdlc`, `matrix`). See
-[How boxer is evaluated](/docs/evals/strategy).
+**Tier.** One layer of evaluation, such as `smoke`, `t1`, `t2`, `adherence`, `flow`, `sdlc` or
+`matrix`. See [evaluation strategy](/docs/evals/strategy).
 
-**Worktree.** A git working tree. boxer's default unit of isolation.
+**Worktree.** A git working tree, and boxer's default unit of isolation. See
+[worktrees](/docs/guides/worktrees).

@@ -6,10 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -94,7 +96,7 @@ Run and configure
   boxer install <harness> --user   write ~/.claude/settings.json or ~/.codex/config.toml hooks
                                    (the files Paperclip seeds its managed harness homes from)
   boxer shell <harness> [-e K=V] [-- args]   run the harness itself inside the sandbox (integration = inside)
-                                   harnesses: claude, codex, gemini, kimi, opencode, pi, grok
+                                   harnesses: claude, codex, copilot, fx, gemini, grok, kimi, opencode, pi
                                    bundles/installs: claude-code, codex, gemini-cli, opencode, grok, pi, kimi, dsh
   boxer acp <harness> [-e K=V]               run the harness's ACP server inside the sandbox, stdio piped
   boxer shim install --harness a,b [dir]     PATH shims named after harness binaries → boxer shell
@@ -102,11 +104,13 @@ Run and configure
   boxer version
 
 Identity flags accepted by up/run/down/status/doctor: --harness NAME --session ID --agent ID
---json on ls, status, down, gc, doctor, backends, integrations, stop, rm prints JSON (see the JSON reference)
+  boxer completion bash|zsh|fish      shell completion
+
+--json prints one JSON document on ls, status, down, gc, doctor, brief, tasks, logs, backends,
+integrations, stop, rm, pack ls, fork and capsule inspect; watch --json prints one per line.
 Output adapts to who is reading: colour and prompts at a terminal, plain text for an agent or a pipe.
 BOXER_OUTPUT=json|text|human overrides it; NO_COLOR turns colour off; BOXER_AGENT=1 marks an agent.
-  boxer completion bash|zsh|fish      shell completion
-Harnesses: claude-code codex gemini-cli grok kimi dsh opencode pi
+Install targets: claude-code codex copilot gemini-cli grok kimi dsh opencode pi
 `
 
 func main() {
@@ -351,6 +355,13 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			}
 			chosen = t
 			argv = []string{"sh", "-c", t.Cmd}
+			if len(t.Env) > 0 { // env(1) sets the task's variables in the guest without quoting them into the line
+				pre := []string{"env"}
+				for _, k := range slices.Sorted(maps.Keys(t.Env)) {
+					pre = append(pre, k+"="+t.Env[k])
+				}
+				argv = append(pre, argv...)
+			}
 		}
 		if *shellLine != "" {
 			if len(argv) > 0 {

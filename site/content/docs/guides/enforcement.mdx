@@ -1,82 +1,105 @@
 ---
-title: Enforcement and its limits
-description: Which integration mechanisms enforce the sandbox, which only ask, and where each breaks.
+title: Choose an integration level
+description: Which integration level each harness gets, which levels enforce the sandbox, and where each one breaks.
 ---
 
-An integration level is how boxer gets an agent's commands into the sandbox. They are not equally
-strong: hooks, the OpenCode plugin and inside mode enforce; PATH shims enforce only where `PATH`
-is not rebuilt; the skill only asks. `intercept` in `boxer.toml` is the list of programs routed to
-the sandbox (see [configuration](/docs/reference/configuration)).
+An integration level is the mechanism that gets an agent's shell commands into the sandbox. Hooks,
+plugins, tool mode, shell substitution and inside mode enforce. PATH shims enforce only while
+`PATH` is not rebuilt. The skill only asks.
+
+| Harness | Install | Levels that enforce | Measured in the matrix |
+| --- | --- | --- | --- |
+| Claude Code | `boxer install claude-code` | hook rewrite, tool mode, shims, inside | rewrite, tool, shims, inside |
+| Codex | `boxer install codex` | hook rewrite, tool mode, shims (no login shell), inside | rewrite, tool, shims, inside |
+| Copilot CLI | `boxer install copilot --user` | hook rewrite, shims, inside | rewrite, shims |
+| Gemini CLI | `boxer install gemini-cli` | hook rewrite, tool mode, inside | skipped (needs a Gemini API key) |
+| Grok | `boxer install grok` | hook rewrite, tool mode, inside | rewrite, tool |
+| Kimi Code | `boxer install kimi` | tool mode, inside | tool, shims, inside |
+| OpenCode | `boxer install opencode` | plugin rewrite, inside | rewrite, inside |
+| pi | `boxer install pi` | extension rewrite, inside (`shell` only) | rewrite |
+| DSH | `boxer install dsh` | tool mode, shims | tool |
+| fx | nothing to install | inside only | inside |
+
+Scores per cell are in [Results](/docs/evals/results). `boxer install` prints any step it
+cannot do for you, and [Connect your harness](/docs/start/harnesses) lists the files it writes. For
+orchestrators, see [Orchestrators](/docs/guides/orchestrators).
+
+`intercept` in `boxer.toml` is the list of programs the outside levels route to the sandbox (see
+[configuration](/docs/reference/configuration#what-gets-sandboxed)).
 
 ## Hooks
 
 Where a harness has a hook API that accepts a rewritten command, boxer uses it. The agent runs
-`npm test`; boxer sees the call before it runs, matches `npm` against `intercept`, and replaces the
-command with `boxer run -c 'npm test'`. The agent sees no refusal.
+`npm test`, boxer's hook matches `npm` against `intercept`, and the harness runs
+`boxer run -c 'npm test'` instead. The agent sees no refusal.
 
-This holds regardless of shell, `PATH` or how the command was composed, because interception
-happens before the shell. Claude Code, Codex, Grok, Gemini CLI and Copilot accept a rewrite.
+The hook runs before the shell, so shell choice, `PATH` and how the command was composed do not
+matter. Claude Code, Codex, Copilot, Gemini CLI and Grok accept a rewrite. Kimi Code's hooks and
+DSH's hook bridge can only allow or block, so those two use tool mode.
+
+Two harnesses load project hooks only from a trusted directory. Run `/hooks` once in Codex, or pass
+`--dangerously-bypass-hook-trust` to `codex exec`. Launch Grok once with `--trust`, or set
+`GROK_FOLDER_TRUST=0` for headless runs.
 
 ## Tool mode
 
-For harnesses that can block a command but not rewrite one. `mode = "tool"` denies the shell and
-leaves the `boxer_run` MCP tool as the way through. An agent that uses the tool is never denied; one
-that reaches for the shell gets a refusal saying to use the tool.
+```toml
+[harness.kimi]
+mode = "tool"
+```
+
+For harnesses that can block a command but not rewrite one. The hook denies the shell and leaves the
+`boxer_run` MCP tool as the way through. An agent that uses the tool is never denied. One that
+reaches for the shell gets a refusal telling it to use the tool.
+
+Grok never shows boxer's session brief to the model, so in tool mode its first shell command is
+denied once before the agent switches to the tool.
 
 ## The OpenCode plugin and pi extension
 
 OpenCode and pi have TypeScript plugin APIs instead of hooks. boxer's plugin (OpenCode) and
 extension (pi) see the shell call and replace the command before it runs, so they enforce as a hook
-does. `boxer install opencode` and `boxer install pi` write them; pi loads project extensions only
-once the project is trusted (for a one-off run, `pi -e .pi/extensions/boxer.ts`).
+does. `boxer install opencode` and `boxer install pi` write them. pi loads project extensions only
+once the project is trusted. For a one-off run, use `pi -e .pi/extensions/boxer.ts`.
 
 The rewrite happens in-process and writes no rewrite line to the trace, so the evaluation matrix
-reads OpenCode's evidence differently.
+reads OpenCode's evidence from the guest instead.
 
 ## PATH shims
 
 ```sh
-boxer shim install ~/.boxer/shims
+boxer shim install ~/.local/share/boxer/shims
 ```
 
-Needs no harness cooperation. This writes one file per entry in `intercept`, each of which re-runs
-itself in the guest. Put the directory first on the harness's `PATH` and a bare `npm` goes to the
-sandbox. Two things break it:
+Shims need no harness cooperation. This writes one file per entry in `intercept`, each of which
+re-runs its command in the guest. Put the directory first on the harness's `PATH` and a bare `npm`
+goes to the sandbox. With no directory argument, the shims go to `~/.local/share/boxer/shims`.
+
+boxer never writes a shim for `sh`, `bash`, `boxer` or `smolvm`, whatever `intercept` says. Two
+things break shims:
 
 <Callout type="warn">
 **Never shim the runtime your harness is written in.** A `node` shim shadows a node-based
-harness's own interpreter, and the harness dies at startup. For shims, `intercept` should name
-build tools, not interpreters.
+harness's own interpreter, and the harness dies at startup. The default `intercept` includes
+`node` and `python`, so for shims, set `intercept` to build tools only.
 </Callout>
 
 <Callout type="warn">
 **A login shell rebuilds `PATH`.** On macOS `/etc/zprofile` runs `path_helper`, which puts system
-directories first, so a harness that runs `zsh -lc` or `bash -lc` (Codex does) gets `/usr/bin/npm`.
+directories first, so a harness that runs `zsh -lc` or `bash -lc` gets `/usr/bin/npm`.
 `boxer doctor` detects this. Use hooks or tool mode for those harnesses.
 </Callout>
 
-## Shimming the shell instead
-
-There are two forms.
-
-**A `bash` entry on `intercept`** writes a `bash` shim like any other, so a harness that resolves
-`bash` on `PATH` runs every command in the sandbox. One file, and nothing that can shadow an
-interpreter. A harness that spawns `/bin/bash` by absolute path bypasses it.
-
-```toml
-intercept = ["bash"]
-```
-
-**`boxer shim install --shell`** writes `boxer-bash`, a bash whose every command runs in the
-guest. It is not found through `PATH`: point the harness's shell setting at it (`shell_path` in
-OpenHands, `terminal.default_shell` in herdr). This level, shell substitution, needs a harness
-whose shell is configurable; see [results](/docs/evals/results).
+## Shell substitution
 
 ```sh
-boxer shim install --shell ~/.boxer/shims
+boxer shim install --shell ~/.local/share/boxer/shims
 ```
 
-Which fits depends on the harness; the [evaluation matrix](/docs/evals/matrix) measures both.
+This writes `boxer-bash`, a bash whose every command runs in the guest. The harness does not find it
+through `PATH`. Point the harness's shell setting at it: `shell_path` on the OpenHands terminal
+tool, or `terminal.default_shell` in herdr. OpenHands is the one measured harness whose terminal
+shell is configurable.
 
 ## Inside mode
 
@@ -84,34 +107,36 @@ Which fits depends on the harness; the [evaluation matrix](/docs/evals/matrix) m
 integration = "inside"
 ```
 
-The harness itself runs in the VM, so there is nothing on the host to intercept. `boxer shell
-claude` starts it. The harness's credentials and config have to reach the guest, and the VM needs
-more memory. See [Running the harness inside](/docs/guides/inside).
+The harness itself runs in the VM, so nothing on the host needs intercepting. `boxer shell claude`
+starts it. The harness's credentials and config have to reach the guest, and the VM needs more
+memory. See [Run the harness inside](/docs/guides/inside).
 
 ## The skill
 
-Every level ships a skill telling the agent that commands go through boxer. On its own it does
-not enforce anything: an agent that ignores it is not sandboxed. It is the fallback for a harness
-with no integration, and the `adherence` evaluation tier measures how often agents follow it.
+`boxer install` also writes a skill or an `AGENTS.md` section that tells the agent its commands go
+through boxer. On its own it enforces nothing, so an agent that ignores it runs on the host. It is
+the fallback for a harness boxer has no integration for. The adherence tier measures how often
+agents follow it, and [Skills and plugins](/docs/guides/skills-and-plugins) covers installing it on
+its own.
 
 ## Harnesses that sandbox themselves
 
-Codex has its own seatbelt/landlock sandbox, and a hypervisor cannot start inside one. Run Codex
-with `--sandbox danger-full-access` (or `--dangerously-bypass-approvals-and-sandbox` under
-`codex exec`) when boxer is the sandbox.
+A hypervisor cannot start inside Codex's seatbelt or landlock sandbox. Run Codex with
+`--sandbox danger-full-access`, or `--dangerously-bypass-approvals-and-sandbox` under `codex exec`,
+when boxer is the sandbox.
 
-The same applies to any harness that confines its own process: the host-side `boxer` process needs
-the hypervisor (Hypervisor.framework on macOS, `/dev/kvm` on Linux) to start a VM. Inside mode turns each harness's own sandbox off in the
-guest for you.
+The same applies to any harness that confines its own process. The host-side `boxer` process needs
+the hypervisor (Hypervisor.framework on macOS, `/dev/kvm` on Linux) to start a VM. Inside mode turns
+each harness's own sandbox off in the guest for you.
 
-`BOXER_INSIDE=1` is set in every guest process boxer starts, so a boxer inside a guest does not
+boxer sets `BOXER_INSIDE=1` in every guest process it starts, so a boxer inside a guest does not
 wrap commands a second time.
 
-## Checking what holds
+## Check what holds
 
 ```sh
 boxer doctor
 ```
 
 It prints the integrations it finds, the enforcement in effect, and setups that look right but
-will not hold.
+will not hold, such as shims behind a login shell.

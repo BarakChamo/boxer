@@ -1,30 +1,31 @@
 ---
-title: Running the harness inside
-description: Run the agent itself in the VM, when that is the right choice, and what it costs.
+title: Run the harness inside
+description: Run the agent itself in the VM, when to choose that, and what it costs.
 ---
 
 Inside mode runs the harness itself in the guest. Every other
 [integration level](/docs/guides/enforcement) leaves the harness on the host and intercepts what it
 runs, so a command can slip past: one composed in an unusual way, one run through a login shell
-that rebuilt `PATH`, or a program not on `intercept`. Inside mode has no host process to slip past.
+that rebuilt `PATH`, or a program not on `intercept`. In inside mode no harness process runs on the
+host.
 
 ```sh
 boxer shell claude          # a terminal harness, in the VM
 boxer acp gemini            # the harness's ACP server, stdio piped to an editor
 ```
 
-Supported: `claude`, `codex`, `fx`, `gemini`, `kimi`, `opencode`, `pi`, `grok`, `copilot`. `pi` has
-no ACP server, so it is `shell` only.
+Supported: `claude`, `codex`, `copilot`, `fx`, `gemini`, `grok`, `kimi`, `opencode`, `pi`. `fx` and
+`pi` have no ACP server, so they are `shell` only. The matrix measured Claude Code, Codex, Kimi Code,
+OpenCode and fx inside, 10 of 10 cells ([results](/docs/evals/results)).
 
-## When it is the right answer
+## When to use it
 
-- **You are defending against a hostile agent, not a careless one.** Outside mode leaves `git`,
-  `gh` and `ssh` on the host by design, and any command boxer does not recognise runs there too.
-  Inside mode has no host shell to reach.
+- **You are defending against a hostile agent.** Outside mode leaves `git`, `gh` and `ssh` on the
+  host by design, and any command boxer does not recognise runs there too. Inside mode has no host
+  shell to reach.
 - **The harness cannot be integrated from outside.** fx has no hooks, cannot be denied headlessly,
   and resolves commands past a PATH shim.
-- **You want one mechanism for every harness.** No hook dialect, no shim directory, no rewrite
-  rules.
+- **You want one mechanism for every harness.** No hook dialect, shim directory or rewrite rules.
 
 ## What it costs
 
@@ -49,7 +50,8 @@ credential in the Keychain unless told otherwise, so boxer sets `FX_DISABLE_KEYC
 
 **The model API has to be reachable.** Inside mode adds each harness's API hosts
 (`api.anthropic.com`, `api.openai.com`, `api.x.ai` and the rest) to the network allowlist, along
-with the npm and Debian registries. An allowlist of your own must include them.
+with the npm and Debian registries. An allowlist of your own must include them. On a backend
+without the allowlist, set `network.mode = "on"` ([backends](/docs/concepts/backends)).
 
 **The VM carries the harness as well as the work.** Give it more memory than an outside sandbox.
 The default image is `mirror.gcr.io/library/node:24-bookworm-slim`, since most of these harnesses
@@ -57,23 +59,24 @@ are npm packages.
 
 **The harness's own sandbox is turned off.** Codex's bwrap cannot start inside the guest, and Claude
 Code declines to run as root. boxer sets what each needs (`IS_SANDBOX=1`,
-`sandbox_mode="danger-full-access"`); the VM is the sandbox.
+`sandbox_mode="danger-full-access"`), and the VM is the sandbox.
 
-## The first run installs
+## The first run installs the harness
 
-The harness is installed in the guest once and saved in the environment
-[pack](/docs/concepts/scopes-and-packs), so later VMs start with it installed.
+The first run installs the harness in the guest. On smolvm boxer saves the result as a
+[pack](/docs/concepts/scopes-and-packs), so later VMs start with it installed. Other backends
+install it once per sandbox.
 
 ```console
 $ boxer shell codex
 boxer: installing codex in the sandbox (once per host)
 ```
 
-If that install is interrupted, `boxer up --recreate` is the reset.
+If that install is interrupted, run `boxer up --recreate`.
 
 ## Paths
 
-Inside mode mounts the worktree at its host path, not at `/workspace`, so file paths the harness
+Inside mode mounts the worktree at its host path instead of `/workspace`, so file paths the harness
 prints (references, diffs, errors) are valid on the host.
 
 ## Editors over ACP
@@ -85,15 +88,26 @@ command at it:
 { "command": "boxer", "args": ["acp", "gemini"] }
 ```
 
-## Choosing between inside and outside
+## Orchestrators that spawn a harness binary
+
+```sh
+boxer shim install --harness claude,codex
+```
+
+This writes a shim named after each harness binary that runs `boxer shell <harness>`. An
+orchestrator that spawns `claude` from that directory runs the harness in the VM. Conductor,
+Multica and T3 Code take a binary path; see [Orchestrators](/docs/guides/orchestrators).
+
+## Inside or outside
 
 | | Outside | Inside |
 | --- | --- | --- |
-| What runs on the host | the harness | nothing |
+| What runs on the host | the harness | `boxer` only |
 | Can a command miss the sandbox | yes, for what `intercept` does not name | no |
 | Credentials in the guest | none | the harness's |
 | Memory | the work | the work and the harness |
-| Harness support | nine, at varying levels | nine, all through one mechanism |
+| Harnesses | nine, at the levels in [this table](/docs/guides/enforcement) | nine, through one mechanism |
 
-The two sets differ: DSH has no inside support, and fx has no outside support. Both placements
-share the scope, the image and the packs.
+The two sets differ. DSH has no inside support, and fx has no outside support. Inside and outside
+produce different [scopes](/docs/concepts/scopes-and-packs#placement-is-part-of-the-key) for the same
+worktree, so each placement gets its own VM from the same `boxer.toml`.

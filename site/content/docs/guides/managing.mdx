@@ -1,12 +1,12 @@
 ---
-title: Managing sandboxes
+title: Manage sandboxes
 description: List every sandbox on the machine, remove the ones you do not need, and check that backends and integrations work.
 ---
 
-These commands show what is running and which worktree it belongs to, remove what is safe to
-remove, and check that the backends and integrations boxer depends on work.
+`boxer ls` lists every sandbox with its worktree, `boxer rm` and `boxer gc` remove them, and
+`boxer backends` and `boxer integrations` check what boxer depends on.
 
-## What is here
+## List sandboxes
 
 ```console
 $ boxer ls -A
@@ -16,7 +16,7 @@ olive-fern    sb-2b107321041f  running  docker   main              gone      cod
 → boxer rm --gone  1 sandbox serves a worktree that no longer exists
 ```
 
-- `-A` looks on every installed backend, not only the configured one.
+- `-A` (`--all-backends`) looks on every installed backend, not only the configured one.
 - `SCOPE` is the sandbox's key; see [scopes](/docs/concepts/scopes-and-packs).
 - `BRANCH` is the worktree's branch and its distance from upstream. `--pr` adds its pull request
   through `gh` (a network call per worktree, so it is opt-in).
@@ -28,7 +28,7 @@ olive-fern    sb-2b107321041f  running  docker   main              gone      cod
 
 `boxer status` is the same for this worktree alone; `boxer url` prints only its address.
 
-## Removing
+## Remove sandboxes
 
 ```sh
 boxer rm swift-crab             # by name or scope key
@@ -39,12 +39,22 @@ boxer rm -i                     # choose from a list
 boxer stop swift-crab           # stop without removing
 ```
 
-`rm` also removes everything boxer kept about the sandbox: its run record, its lock, its URL. A
-filter (`--gone`, `--stopped`, `--all`) asks before removing anything; `-y` skips the question. A
-sandbox named on the command line is removed without asking. `gc` reclaims in the background, at
-most every six hours by default.
+`rm` also removes everything boxer kept about the sandbox, including its run record, its lock and
+its URL. A filter (`--gone`, `--stopped`, `--all`) asks before removing anything, and `-y` skips the
+question. A sandbox named on the command line is removed without asking.
 
-## Is the backend working
+## Reclaim space
+
+```sh
+boxer gc --dry-run    # print what would go
+boxer gc              # sandboxes whose worktree is gone or unused past idle_timeout, and old packs
+boxer gc --all        # also every stopped sandbox and every unreferenced pack; running ones stay
+```
+
+`idle_timeout` defaults to `2h`. With `auto_reclaim` on (the default), ordinary commands run the
+same sweep in the background at most every `reclaim_every` (`6h`).
+
+## Check the backends
 
 ```console
 $ boxer backends --probe
@@ -62,7 +72,7 @@ answers. With it, boxer creates a sandbox on each, runs a command, checks the wr
 host, and removes it. Known misconfigurations are named under the table; see
 [Backends](/docs/concepts/backends#known-runtime-problems).
 
-## Are the integrations wired
+## Check the integrations
 
 ```console
 $ boxer integrations
@@ -76,18 +86,18 @@ portless     tool          yes      -          -     -
 → boxer integrations add <name>  on PATH and not wired to boxer: copilot
 ```
 
-For each integration: whether its program is on `PATH`, whether boxer's hooks, skill and MCP
+The table shows, for each integration, whether its program is on `PATH`, whether boxer's hooks, skill and MCP
 entry are installed in this repository and for your user, and whether the installed files came
 from another boxer release (`stale`). The check asks `boxer install` which files it would write,
-so the two always agree.
+so the two agree.
 
 ```sh
-boxer integrations add claude-code            # the same as boxer install claude-code
-boxer integrations add skill --agent claude-code   # through npx skills add BarakChamo/boxer
-boxer integrations add plugin                 # through npx plugins add BarakChamo/boxer
+boxer integrations add claude-code    # the same as boxer install claude-code
 ```
 
-## For people, for agents, for programs
+To install the skill or the plugin package, see [Skills and plugins](/docs/guides/skills-and-plugins).
+
+## Choose the output format
 
 These commands adapt to who is reading:
 

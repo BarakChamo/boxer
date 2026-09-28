@@ -1,15 +1,17 @@
 ---
-title: Support, measured
+title: Results
 description: Which harness works at which integration level and on which backend, from the latest recorded runs.
 ---
 
-A harness is listed as supported at a level only if a cell ran and scored there. The level and
-harness tables come from the [matrix tier](/docs/evals/matrix).
+This page lists the latest recorded result for each tier. A harness counts as supported at an
+[integration level](/docs/guides/enforcement) only if a cell ran and scored there.
 
-Conditions: 2026-09-25, release binary, two full matrix passes of 55 cells, three at a time, every
-cell on `zai/glm-5.3-flash` so the integration level is the only variable. One pass had `[urls]` on
-and the dev server's address withheld from the prompt (URLs mode); the other is the control
-(default). Scorecards: `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
+The level tables come from the [matrix tier](/docs/evals/matrix): two full passes of 55 cells on
+2026-09-25, three at a time, every cell on `zai/glm-5.3-flash` so the integration level is the only
+variable. Both passes used boxer v1.0.0-48-ged8def6 with uncommitted changes, smolvm 1.16.1 and
+`node:24-bookworm-slim`, on a 10-core, 24 GB Apple Silicon Mac. One pass had `[urls]` on and kept
+the dev server's address out of the prompt (URLs mode). The other is the control (default).
+Scorecards are in `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
 
 | | default | URLs mode |
 | --- | --- | --- |
@@ -24,7 +26,7 @@ and the dev server's address withheld from the prompt (URLs mode); the other is 
 | hook rewrite | 12/12 | 11/12 | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
 | tool mode | 10/10 | 10/10 | Claude Code, Kimi Code, DSH, Codex, Grok |
 | command shims | 8/8 | 8/8 | Claude Code, Kimi Code, Codex, Copilot |
-| bash shim | 7/8 | 8/8 | the same four, shimming `bash` |
+| bash shim | 7/8 | 8/8 | the same four, with `intercept = ["bash", "uname"]`; boxer never writes a `bash` shim, so these cells exercised the `uname` shim |
 | shell substitution | 1/1 | 1/1 | OpenHands |
 | inside | 10/10 | 6/10 | Claude Code, Codex, OpenCode, Kimi Code, fx |
 | orchestrator | 6/6 | 6/6 | T3 Code, Paperclip, herdr |
@@ -52,35 +54,39 @@ The smoke suite, with no model, on the final build (2026-09-27), each backend al
 | docker on Linux | 79 | 9 |
 | podman on Linux | 79 | 9 |
 
-- The skips are forks, named packs and the egress log, which only smolvm has.
+- The skips are forks, named packs and the egress log, which only smolvm has
+  ([backends](/docs/concepts/backends)).
 - macOS rows: an M4 Mac. Linux rows: Ubuntu LTS in a Lima VM on the same Mac, with docker and
   rootless podman installed natively and smolvm on nested KVM, run by `scripts/linux-smoke.sh`.
 - smolvm also passed 88 of 88 on macOS with smolvm 1.19.2, the current release; the table's macOS
   run used 1.16.1. Linux used 1.19.2.
 - A test checks these rows against the recorded runs in `docs/smoke-results.jsonl`.
 
-The scripted-model matrix (t1) passed all 68 runnable cells on two of three runs. The third missed
-one: a herdr pane that inherited the environment of the session running the evaluation; it did not
-recur. The one skip is Multica, which needs a server configured on the host.
+The scripted-model tier (t1) ran 69 cells three times on 2026-09-25 and passed all 68 runnable
+cells on two of the runs. The third missed one, a herdr pane that inherited the environment of the
+session running the evaluation, and it did not recur. The one skip is Multica, which needs a server
+configured on the host.
 
 ## When boxer only asks
 
-The adherence tier: eight harnesses, four live models each, with a prompt that never mentions boxer.
+The adherence tier runs eight harnesses on four live models each, with a prompt that never
+mentions boxer. Latest report: 2026-09-25, `docs/eval-adherence.md`.
 
 | scenario | result | notes |
 | --- | --- | --- |
-| `prep` — host-side setup, reached through the harness | **32 of 32** | every harness, every model; 8 of 8 on docker |
-| `server` — find this worktree's dev server | **25 of 32** | 5 harnesses on all four models; Kimi and Copilot on two of four; Grok on one |
+| `prep`, host-side setup reached through the harness | **32 of 32** | every harness, every model; 8 of 8 on docker |
+| `server`, find this worktree's dev server | **25 of 32** | 5 harnesses on all four models; Kimi and Copilot on two of four; Grok on one |
 
-A harness is blamed only when every model fails it, so Kimi and Copilot passing on two of four is
-model adherence. Grok never shows boxer's brief to the model; its cell is left failing so the
+A harness is blamed only when every model fails it, so Kimi and Copilot passing on two of four
+counts as model adherence. [`prep`](/docs/guides/environment) is the opt-in host-side step that runs
+before the sandbox starts. Grok never shows boxer's brief to the model; its cell is left failing so the
 finding stays visible.
 
 ## Known limits
 
 **PATH shims do not survive a login shell.** A login shell rebuilds `PATH`; on macOS `path_helper`
-puts the system directories first. A harness that runs commands through `zsh -lc` — Codex does —
-reaches the host. boxer cannot out-rank `path_helper`, so `boxer doctor` detects the situation and
+puts the system directories first. A harness that runs commands through `zsh -lc`, as Codex
+does, reaches the host. boxer cannot out-rank `path_helper`, so `boxer doctor` detects the situation and
 names the enforcement to use instead.
 
 **Gemini CLI needs its own key.** It speaks only the Gemini API, which the AI Gateway does not

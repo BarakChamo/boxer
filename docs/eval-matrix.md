@@ -135,7 +135,7 @@ the pack cache and running the inside cells cold in both modes: 10 of 10 each.
 | hook rewrite | 96.4% | 11/12 | Claude Code, Codex, OpenCode, Copilot, Grok, pi |
 | tool mode | 100% | 10/10 | Claude Code, Kimi Code, DSH, Codex, Grok |
 | command shims | 100% | 8/8 | Claude Code, Kimi Code, Codex, Copilot |
-| shell shims | 100% | 8/8 | the same four, shimming `bash` instead of a list |
+| shell shims | 100% | 8/8 | the same four, with `intercept = ["bash", "uname"]`; boxer never writes a `bash` shim, so only `uname` was shimmed |
 | shell substitution | 100% | 1/1 | OpenHands, its terminal's shell replaced by `boxer-bash` |
 | inside | 100% | 8/8 | Claude Code, Codex, OpenCode, Kimi Code in the guest |
 | orchestrator | 100% | 6/6 | T3 Code, Paperclip, herdr |

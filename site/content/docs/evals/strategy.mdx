@@ -1,24 +1,23 @@
 ---
-title: How boxer is evaluated
+title: Evaluation strategy
 description: The test layers from unit tests to live agents, what each proves, how results are judged, and the bugs the evals caught.
 ---
 
-boxer is tested in layers. Unit tests prove the code does what its author meant; each layer above
-adds something real (a runtime, a harness, a live model, a real workload) that the layer below
-cannot check.
+boxer is tested in layers. Unit tests run against a fake backend, and each layer above adds one
+real thing the layer below cannot check: a runtime, a harness, a live model or a Next.js workload.
 
 ## The layers
 
 | layer | what it proves | what it cannot | cost |
 | --- | --- | --- | --- |
 | **unit tests**, fake backend | every code path, including every failure | that a runtime behaves like the fake | free, seconds |
-| **real-daemon tests** | docker, podman and Apple `container` argv, JSON and exit codes | anything where the runtime is missing — they skip by name | seconds |
+| **real-daemon tests** | docker, podman and Apple `container` argv, JSON and exit codes | a runtime that is not installed, which skips by name | seconds |
 | **smoke** | every configuration path, on each installed backend | that a harness cooperates | minutes per backend |
 | **t1** | each harness's integration works end to end, with a scripted model | that a real model complies | minutes, free |
 | **t2** | the same, with live models | how often a model complies unprompted | cents |
 | **adherence** | whether an agent told only the brief does the right thing | that development works | cents |
-| **flow**, **sdlc**, **matrix** | a real Next.js workload, at every integration level, in parallel worktrees | — | around $2 |
-| **benchmarks** | what it costs | whether it works — they gate nothing | minutes |
+| **flow**, **sdlc**, **matrix** | a real Next.js workload, at every integration level, in parallel worktrees | nothing below them | $0.19 to $3 a run |
+| **benchmarks** | what it costs | whether it works, since they gate nothing | minutes |
 
 **Smoke** checks boxer's model of each runtime against the runtime. It runs the same cells on
 smolvm, Apple `container`, docker and podman. A cell a backend cannot support is skipped by name,
@@ -26,8 +25,8 @@ using the capability table boxer itself reports, so a backend that claims a capa
 skips its cell is a finding.
 
 **t1** swaps the model for a scripted endpoint that speaks the Anthropic, OpenAI Chat and OpenAI
-Responses APIs, so a harness's hooks, its plugin and boxer run with no key and the same result every
-time. Sixty-nine cells: every harness at every level it supports, plus the orchestrators.
+Responses APIs, so a harness's hooks, its plugin and boxer run with no key and give the same result
+every time. It has 69 cells, one for every harness at every level it supports plus the orchestrators.
 
 **Adherence** covers the cases where boxer only *asks* (a brief, a skill, an instruction file) and a
 live agent decides. Each scenario is a prompt that never mentions boxer:
@@ -43,8 +42,9 @@ live agent decides. Each scenario is a prompt that never mentions boxer:
 
 **The matrix** runs the same two Next.js tasks (add a page, install a dependency) through every
 integration level, harness and orchestrator, three at a time, each in its own worktree, sandbox and
-automatic port. Each cell scores thirteen weighted claims; see [the matrix tier](/docs/evals/matrix). With `BOXER_EVAL_URLS=1` every sandbox also gets a
-portless name and the prompt stops giving the agent its address.
+automatic port. Each cell scores thirteen weighted claims, described in
+[the matrix tier](/docs/evals/matrix). With `BOXER_EVAL_URLS=1` every sandbox also gets a portless
+name and the prompt stops giving the agent its address.
 
 ## What the oracle looks at
 
@@ -92,13 +92,17 @@ Each of these passed the unit tests and was found by an eval tier:
 - Inside cells lost their dev server on a host's first round: caching a harness install as a pack
   stops the machine, and boxer restarted it without restarting the `start` services.
 - A reused worktree path skipped setup, and on docker could see a stale mount.
+- docker, podman and Apple `container` published forwarded ports on every interface, so a dev
+  server answered on the Mac's LAN address. Smoke on each backend found it.
+- On Linux, smolvm ran the image's `CMD` as the machine's first workload, and when it exited it
+  took the `start` services with it. The Linux smoke run found it.
 - Codex ran unsandboxed in linked worktrees, reading project configuration from the main repository.
 - With a `uname` shim on `PATH`, the smolvm launcher's own `uname` call made boxer call itself and
   deadlock.
 
 ## Where the results are
 
-[Support, measured](/docs/evals/results) has the latest numbers by level and harness;
+[Results](/docs/evals/results) has the latest numbers by level, harness and backend.
 [Benchmarks](/docs/evals/benchmarks) has the costs. The full reports, with every cell's findings,
 are under `docs/` in the repository. Each records the conditions it was made under: boxer and its
 commit, the backend, the model, the concurrency and the host. Two runs are comparable only when

@@ -1,0 +1,114 @@
+---
+title: Skills and plugins
+description: "What the boxer skill and plugin contain, the ways to install them, and what each way enforces."
+---
+
+The boxer skill tells an agent how commands run in this repository and what to do when one is
+refused. The plugin package bundles that skill with the `boxed` subagent and, for clients whose
+plugin format carries them, the hooks and the `boxer_run` MCP tool. Which of those an agent
+actually gets depends on how you install it:
+
+| You want | Run | What the agent gets |
+| --- | --- | --- |
+| The sandbox enforced in one repository | `boxer install <harness>` | hooks or plugin, MCP tool, skill; written into the repository |
+| The same for every repository you open | `boxer install <harness> --user` | the same, in your user config (Claude Code, Codex, Copilot) |
+| Only the instructions, through the skills ecosystem | `npx skills add BarakChamo/boxer --skill boxer` | the skill; nothing is enforced |
+| The Agent Plugins package, through `npx plugins` | `npx plugins add BarakChamo/boxer` | the skill and the `boxed` agent; no hooks |
+| A native plugin install | `claude plugin install <dir>` and the other clients' equivalents | everything the client's plugin format carries, hooks included |
+
+`boxer install` is the route that enforces. The skill and `npx plugins` only ask, and a model
+follows a request most of the time, not always:
+[Results](/docs/evals/results#when-boxer-only-asks) has the rates.
+
+## The skill
+
+The skill is one directory in the [Agent Skills](https://agentskills.io) format:
+
+```
+skills/boxer/
+  SKILL.md            when to use it, how to run things, what to do when refused
+  references/BRIEF.md what the sandbox is, what is shared with the host
+  scripts/run         run a shell line in the sandbox
+  scripts/task        run a declared task by name
+  scripts/status      is the sandbox up, where is the worktree, where is the dev server
+  scripts/brief       this checkout's configuration, in prose
+```
+
+It holds no configuration. Everything that varies by repository (mount path, intercepted programs,
+tasks, URLs) comes from `boxer brief` at run time.
+
+Install it:
+
+```sh
+npx skills add BarakChamo/boxer --skill boxer            # into this repository
+npx skills add BarakChamo/boxer --skill boxer -g         # for your user
+boxer integrations add skill --agent claude-code         # the same, through boxer
+```
+
+`boxer install <harness>` also copies the skill, into `.claude/skills/boxer/` for Claude Code and
+`.agents/skills/boxer/` for the others. Commit it with the rest of the integration so every
+worktree has it.
+
+## The plugin package
+
+The package is one directory that is valid for every client at once
+([Agent Plugins](https://agent-plugins.org) 1.0.0), with a subdirectory per client for the parts
+only that client reads:
+
+| Path | Contents |
+| --- | --- |
+| `plugin.json` | the manifest |
+| `skills/boxer/` | the skill above |
+| `mcp.json` | the MCP server: `boxer_run`, `boxer_status`, and the `boxer://brief` resource |
+| `agents/boxed.md` | a subagent with no shell tool, whose only way to run anything is `boxer_run` |
+| `AGENTS.md` | the same instruction, for clients that read a context file |
+| `com.anthropic.claude-code/`, `com.openai.codex/`, ... | each client's hooks, plugin, or extension |
+
+It is checked in at [`plugin/`](https://github.com/BarakChamo/boxer/tree/main/plugin) and attached to
+each release. `boxer package` renders it, or the subset one client reads:
+
+```sh
+boxer package plugin --out dist      # the full package, dist/boxer
+boxer package claude-code --out dist # only what Claude Code reads
+boxer package skills                 # refresh skills/boxer
+```
+
+Every file is identical for every user apart from the release version, because configuration
+reaches the agent at run time.
+
+### Installing it
+
+```sh
+npx plugins add BarakChamo/boxer                  # detects the tool; user scope
+npx plugins add BarakChamo/boxer -s project       # into this repository
+boxer integrations add plugin --agent claude-code # the same, through boxer
+claude plugin install ./boxer                     # Claude Code's own installer, hooks included
+```
+
+`npx plugins` installs what the portable format carries: the skill and the `boxed` agent. The
+hooks are client-specific, so they come from the client's own plugin install or from
+`boxer install`. Each client directory has a README with its install steps.
+
+## Checking what is installed
+
+```sh
+boxer integrations          # every harness and tool, and whether boxer is wired into each
+boxer doctor                # the same for this checkout, with warnings for anything that will not hold
+```
+
+```
+INTEGRATION  KIND          ON PATH  THIS REPO  USER  SKILL
+claude-code  harness       yes      yes        -     yes
+codex        harness       yes      -          yes   yes
+copilot      harness       yes      -          -     yes
+```
+
+`THIS REPO` and `USER` are the enforcing integration, from `boxer install`. A row with only `SKILL`
+means the agent is told how to use the sandbox and nothing stops it running a command on the host. [Enforcement](/docs/guides/enforcement) covers what each
+integration level holds.
+
+## Updating
+
+The skill and plugin carry the release version in their metadata. After upgrading boxer, run the
+same install command again: `boxer install <harness>` rewrites its files, and `npx skills add` and
+`npx plugins add` replace theirs.

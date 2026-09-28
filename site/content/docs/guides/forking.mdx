@@ -1,5 +1,5 @@
 ---
-title: Forking a sandbox
+title: Fork a sandbox
 description: Branch a running sandbox into warm copy-on-write children for sharded work.
 ---
 
@@ -13,7 +13,7 @@ boxer run --scope swift-crab-f1 -c 'npm test -- --shard=1'
 boxer fork rm --all
 ```
 
-## Children share the worktree
+## Know that children share the worktree
 
 A child inherits its parent's mounts and cannot override them, and smolvm refuses to branch a
 machine whose mount is staged:
@@ -23,17 +23,15 @@ fork: staged mounts cannot be branched yet because multiple descendants would
 synchronize into the same host directory
 ```
 
-So every fork of a worktree sees the same files, and two children writing one file race each other
+Every fork of a worktree sees the same files, and two children writing one file race each other
 as two processes on your machine would.
 
 <Callout type="warn">
-Forks are warm workers over one worktree, not isolated environments. Use them for work that
-shards cleanly: test shards writing to separate paths, read-mostly checks, a warm start for
-something that writes elsewhere. For work that edits the same files, use a second git worktree,
-which gets its own sandbox and its own copy by construction.
+Use forks for work that shards cleanly, such as test shards that write to separate paths. For work
+that edits the same files, use a second git worktree, which gets its own sandbox and its own files.
 </Callout>
 
-## Preparing is explicit
+## Prepare the sandbox
 
 A sandbox can only be forked if it was started as a branch source (`smolvm machine start
 --branchable`). Preparing restarts the sandbox, which ends whatever is running in it, so boxer asks
@@ -41,32 +39,34 @@ for it explicitly with `--prepare`:
 
 ```console
 $ boxer fork
-boxer: this sandbox was not started as a branch source, so it cannot be forked. Preparing
-  restarts it, which ends whatever is running in it
+boxer: this sandbox was not started as a branch source, so it cannot be forked. Preparing restarts it, which ends whatever is running in it
+  scope:     swift-crab (sb-7e1852e4a3c3, worktree)
+  worktree:  /Users/me/src/myapp
   cause:     NOT_FORKABLE
   fix:       boxer fork --prepare
 ```
 
 Branchability lasts for one boot, so a sandbox that has been stopped needs `--prepare` again.
 
-## Working with children
+## Work with children
 
 ```sh
-boxer fork ls                    # this scope's children
-boxer run --scope <name> -c '…'  # run in one
-boxer fork rm <name> | --all     # reclaim them
+boxer fork ls                             # this scope's children
+boxer run --scope <name> -c '<command>'   # run in one
+boxer fork rm <name>                      # remove one
+boxer fork rm --all                       # remove them all
 ```
 
 A child is named after its parent (`sb-7e1852e4a3c3-f1` or `swift-crab-f1`), and either form works
 with `--scope`. A child has no worktree of its own, so it is addressed by name rather than from a
 directory.
 
-`--count` is how many children the scope should have, so asking twice for four makes four, not
-eight. `boxer ls` shows children beside sandboxes, and `boxer gc` reclaims a child whose parent is
-gone. A fork costs what a sandbox costs.
+`--count` is how many children the scope should have, so asking twice for four makes four.
+`boxer ls` shows children beside sandboxes, `boxer gc` reclaims a child whose parent is gone, and
+each child costs what a sandbox costs.
 
-## What forking is not
+## Save state across hosts
 
-It is not a checkpoint. smolvm can write a `.smolcheckpoint` of RAM and processes, but refuses on
-any machine with a host mount, and boxer always mounts the worktree. What boxer can carry between
-hosts and days is the filesystem: see [named packs](/docs/concepts/scopes-and-packs).
+A fork does not persist. smolvm can write a `.smolcheckpoint` of RAM and processes, but refuses on
+any machine with a host mount, and boxer always mounts the worktree. To carry a prepared
+filesystem between hosts, save a [named pack](/docs/concepts/scopes-and-packs#packs-you-name).

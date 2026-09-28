@@ -1,25 +1,23 @@
 ---
-title: Dev servers and URLs
+title: Name each worktree's dev server
 description: Give each worktree's dev server a stable hostname, and tell every agent where its own one is.
 ---
 
 `[urls]` gives each forwarded port a hostname per worktree, such as
 `https://fix-ui.myapp.localhost:1355`, through [portless](https://github.com/vercel-labs/portless),
-a local reverse proxy that routes by hostname. Without it, `auto:` ports give every worktree a
-different host port that nobody, person or agent, knows without asking.
+a local reverse proxy that routes by hostname. Without it, each worktree's `auto:` port is a
+different number that a person or agent has to look up.
 
-## Turn it on
+## Turn on URLs
 
 ```sh
 npm install -g portless
 ```
 
 ```toml
-start = ["cd app && npx next dev -p 3000 -H 0.0.0.0"]
-ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+start = ["npx next dev -p 3000 -H 0.0.0.0"]
 
 [network]
-mode  = "on"
 ports = ["auto:3000"]
 
 [urls]
@@ -31,10 +29,10 @@ $ boxer up
 boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
 ```
 
-The server must listen on `0.0.0.0` inside the guest. A forwarded port arrives on the guest's
-network interface, so a server bound to `127.0.0.1` never sees it.
+The server must listen on `0.0.0.0` inside the guest; see
+[Forward ports](/docs/guides/environment#forward-ports).
 
-## What each worktree is called
+## How names are chosen
 
 | worktree | URL |
 | --- | --- |
@@ -42,14 +40,13 @@ network interface, so a server bound to `127.0.0.1` never sees it.
 | a linked worktree on branch `fix-ui` | `https://fix-ui.myapp.localhost:1355` |
 | a detached worktree, or one whose name is taken | `https://swift-crab.myapp.localhost:1355` |
 
-`myapp` is the repository's directory name, or `urls.name`. The branch prefix comes from portless.
-portless gives a detached worktree (what most orchestrators create) no prefix, and two branches
+`myapp` is the repository's directory name, or `urls.name`. portless supplies the branch prefix.
+It gives a detached worktree (what most orchestrators create) no prefix, and gives two branches
 ending in the same segment (`feat/login`, `fix/login`) the same one, so in those cases boxer uses
-the sandbox's two-word name instead. It never takes a name another sandbox or a person already
-registered.
+the sandbox's two-word name. boxer never takes a name another sandbox or a person registered.
 
-With several ports, each is named `<label>.<repo>`. The label comes from `urls.names`, a
-devcontainer's `portsAttributes.label`, or the port number:
+With several ports, each is named `<label>.<repo>`, after the branch prefix. The label comes from
+`urls.names`, a devcontainer's `portsAttributes.label`, or the port number:
 
 ```toml
 [network]
@@ -57,46 +54,51 @@ ports = ["auto:3000", "auto:8080"]
 
 [urls]
 enabled = true
-names   = { "3000" = "web", "8080" = "api" }   # web.myapp…, api.myapp…
+names   = { "3000" = "web", "8080" = "api" }   # fix-ui.web.myapp.localhost, fix-ui.api.myapp.localhost
 ```
 
-## Where agents learn it
+## How agents find it
 
-- the brief every harness shows the agent before its first action: run `boxer url`, not
-  `localhost:<port>`;
-- the skill and `AGENTS.md`;
-- the `boxer_status` MCP tool, which returns each forwarded port's URL;
-- `boxer url [port]`, which prints the address, and `boxer open`, which opens it in a browser;
-- `boxer status --json` and `boxer ls --json`, under `urls`.
+```sh
+boxer url          # the first forwarded port's address
+boxer url 8080     # a specific guest port
+boxer open         # open it in a browser
+```
+
+The brief tells the agent to run `boxer url` instead of assuming `localhost:<port>`, and so do the
+skill and `AGENTS.md`. The `boxer_status` MCP tool returns each port's URL, and `boxer status
+--json` and `boxer ls --json` have them under `urls`.
 
 A harness running [inside](/docs/guides/inside) the sandbox cannot reach the names, because the
 proxy is on the host's loopback. It is told its server is at `127.0.0.1:<port>`, and that the
 address a person should open is in `$BOXER_URLS` (`3000=https://…`).
 
-In a live eval where an agent is told only that a dev server is running and asked to fetch its
-home page, five of the eight harnesses found it by name on all four models tried. See
-[strategy](/docs/evals/strategy).
+In the adherence evaluation, where an agent is told only that a dev server is running and asked to
+fetch its home page, five of eight harnesses reached it by name on all four models; see
+[Results](/docs/evals/results#when-boxer-only-asks).
 
-## Lifecycle
+## When names are added and removed
 
-A name is registered when the sandbox starts and removed when it is deleted by `down`, `rm`, `gc`
-or `down --all`. `gc` also removes a route whose sandbox disappeared some other way. If the portless
-proxy is not running, boxer starts it on port 1355 (never 443, which needs sudo), and stops it
-again when the last route is removed. A proxy you started yourself is left running. The proxy
-listens on loopback only; see [forwarded ports and URLs](/docs/concepts/security#forwarded-ports-and-urls).
+boxer registers a name when the sandbox starts and removes it when `down`, `rm` or `gc` deletes
+the sandbox. `gc` also removes a route whose sandbox disappeared some other way.
 
-Without portless installed, boxer warns once and everything else works: ports are still forwarded,
-and `boxer url` prints `http://127.0.0.1:<host port>`.
+If the portless proxy is not running, boxer starts it on port 1355, or on `PORTLESS_PORT` when that
+is set to 1024 or above, and stops it when the last route goes. A proxy you started yourself is
+left running. The proxy binds `127.0.0.1`; see
+[forwarded ports and URLs](/docs/concepts/security#forwarded-ports-and-urls).
+
+Without portless installed, `boxer up` prints a warning and everything else works. Ports are still
+forwarded, and `boxer url` prints `http://127.0.0.1:<host port>`.
 
 ## Next.js
 
-Next.js 15 serves the page, its chunks and hot reload through the name, but logs a warning that a
-future version will refuse cross-origin dev requests. One setting covers every worktree's name:
+Next.js 15 serves the page, its chunks and hot reload through the name, but warns that a future
+version will refuse cross-origin dev requests. `*.localhost` covers every worktree's name:
 
 ```ts
 // next.config.ts
-const nextConfig = { allowedDevOrigins: ["*.localhost"] };
+const nextConfig = { allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"] };
 export default nextConfig;
 ```
 
-A complete setup is in [Examples](/docs/guides/examples).
+[`examples/nextjs`](/docs/guides/examples#nextjs) is a complete setup.
