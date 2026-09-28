@@ -121,6 +121,15 @@ record, lock, fork marker, URLs — and `gc` sweeps state that belongs to no san
 which is what catches a sandbox removed by `docker rm` or a wiped store. Before this a host that
 had run the benchmarks for a few weeks held over 3,800 such files for sandboxes long gone.
 
+**Re-measured 2026-09-28 on v1.0.0-55-g34ca729**, after the port, idle-workload and `[urls]` fixes,
+and it changes two conclusions below. Warm `boxer run` is 33 ms against 29 ms for `docker exec`, so
+boxer is within 4 ms of it rather than level. The backend matrix is docker 4.3 s / 10.9 s,
+`container` 5.3 s / 14.4 s and smolvm 6.4 s / 15.6 s, so the kernel boundary costs 1 to 2 s at
+one worktree, not ~4.6 s. The 2026-09-25 run was 40 to 50% slower at three worktrees on every
+backend, docker included, with the same app and script. That points to host state on that day,
+which was not recorded. `[urls]` costs nothing measurable (`boxer up` 14.2 against 14.4 ms,
+`bench/urls.sh`). The figures below are the 2026-09-25 run, kept as it was recorded.
+
 Measured on Apple Silicon with smolvm 1.16.1: cold start 652 ms from a host pack, warm `boxer run`
 31 ms, rewrite hook 3 ms. The benchmark suite puts that in context: boxer is about 8x faster than
 a fresh container per command (`docker run`), **level with `docker exec` into an already-running
@@ -136,7 +145,7 @@ host and `boxer version` in 2.8 ms, so the wrapper is within a millisecond of th
 
 **What the boundary costs, across all four backends.** One backend at a time, alone on the host,
 three samples each, every cell from a wiped host, one Next.js dev server per worktree at 2 vCPU /
-4 GB (`bench/backends.sh`, raw cells in `bench/backends.jsonl`):
+4 GB (`bench/backends.sh`, raw cells in `bench/backends-2026-09-25.jsonl`):
 
 | backend | boundary | one worktree | three worktrees |
 | --- | --- | ---: | ---: |

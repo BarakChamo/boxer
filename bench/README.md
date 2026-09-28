@@ -327,10 +327,30 @@ Caveats that remain, and they are not small:
   Alpine's `ash` and macOS's `sh` are different programs. Treat it as a sanity check that
   virtualization is not costing CPU, not as a CPU benchmark.
 
+## The backend matrix (2026-09-28)
+
+The same script on build v1.0.0-55-g34ca729 (smolvm 1.16.1, docker 29.4.0 in OrbStack, `container`
+1.4.1), three samples per cell, raw cells in `bench/backends.jsonl`. Podman was not rerun: no
+podman machine was set up on the host.
+
+| backend | n=1 samples | median | n=3 samples | median |
+| --- | --- | ---: | --- | ---: |
+| `docker` | 4.3 / 4.3 / 4.3 | **4.3s** | 10.9 / 11.7 / 10.2 | **10.9s** |
+| `container` (Apple) | 5.3 / 8.3 / 5.3 | 5.3s | 16.2 / 14.4 / 14.1 | 14.4s |
+| `smolvm` | 6.7 / 6.3 / 6.4 | 6.4s | 13.9 / 15.7 / 15.6 | 15.6s |
+
+- **Every n=3 cell is 40 to 50% faster than on 2026-09-25, docker included.** The golden app
+  (Next.js 15.5.4, created 2026-09-25) and the script are unchanged, and docker's start-up path
+  did not change between the two builds, so the drop is host state rather than boxer. What
+  differed on the host is not recorded, so the cause is not established. Compare rows within one
+  run, not across the two.
+- **The kernel boundary now costs about 1 to 2s on the first sandbox**: 5.3 to 6.4s against 4.3s.
+- `container` again has one slow n=1 sample (8.3s) among two fast ones, as it did on 2026-09-25.
+
 ## The backend matrix (2026-09-25)
 
 One backend at a time, alone on the host, three samples each at one and three worktrees, every
-cell from a wiped host. `bench/backends.sh`, raw cells in `bench/backends.jsonl`. macOS 26.5.2,
+cell from a wiped host. `bench/backends.sh`, raw cells in `bench/backends-2026-09-25.jsonl`. macOS 26.5.2,
 Apple Silicon, 10 cores; a Next.js dev server per worktree at 2 vCPU / 4 GB.
 
 | backend | n=1 samples | median | n=3 samples | median |

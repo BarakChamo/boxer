@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,75 @@ func TestPublishedNumbersMatchTheEvidence(t *testing.T) {
 		}
 		if !strings.Contains(results, "| "+label+" "+cell) {
 			t.Errorf("results.mdx has no row %q for the latest %s run", "| "+label+" "+cell, key)
+		}
+	}
+}
+
+// The benchmarks page is held to its raw files the same way: the backend table must carry the
+// median of each cell in bench/backends.jsonl, and the [urls] table the medians in
+// bench/urls.jsonl. Re-running a benchmark without updating the page fails here.
+func TestPublishedBenchmarksMatchTheirData(t *testing.T) {
+	root := filepath.Join("..", "..")
+	page, err := os.ReadFile(filepath.Join(root, "site", "content", "docs", "evals", "benchmarks.mdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	median := func(xs []float64) float64 {
+		slices.Sort(xs)
+		if n := len(xs); n%2 == 1 {
+			return xs[n/2]
+		} else {
+			return (xs[n/2-1] + xs[n/2]) / 2
+		}
+	}
+	rows := func(name string) []map[string]any {
+		b, err := os.ReadFile(filepath.Join(root, "bench", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []map[string]any
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(l), &m); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			out = append(out, m)
+		}
+		return out
+	}
+
+	cells := map[string]map[float64][]float64{}
+	for _, r := range rows("backends.jsonl") {
+		c := r["contender"].(string)
+		if cells[c] == nil {
+			cells[c] = map[float64][]float64{}
+		}
+		cells[c][r["n"].(float64)] = append(cells[c][r["n"].(float64)], r["seconds"].(float64))
+	}
+	label := map[string]string{"docker": "docker", "container": "Apple `container`", "smolvm": "smolvm", "podman": "podman"}
+	for c, byN := range cells {
+		re := regexp.MustCompile(`\| ` + regexp.QuoteMeta(label[c]) + ` \| [^|]+ \| \**([0-9.]+) s\** \| \**([0-9.]+) s\** \|`)
+		m := re.FindStringSubmatch(string(page))
+		if m == nil {
+			t.Errorf("benchmarks.mdx has no backend row for %s", c)
+			continue
+		}
+		for i, n := range []float64{1, 3} {
+			if want := fmt.Sprintf("%.1f", median(byN[n])); m[i+1] != want {
+				t.Errorf("benchmarks.mdx: %s at %v worktree(s) is %s s, data median %s s", c, n, m[i+1], want)
+			}
+		}
+	}
+
+	urls := map[string][]float64{}
+	for _, r := range rows("urls.jsonl") {
+		k := r["urls"].(string) + "/" + r["call"].(string)
+		urls[k] = append(urls[k], r["ms"].(float64))
+	}
+	for _, arm := range []string{"off", "on"} {
+		want := fmt.Sprintf("| `[urls]` %s | %.1f ms | %.1f ms |", arm, median(urls[arm+"/up"]), median(urls[arm+"/run"]))
+		if !strings.Contains(string(page), want) {
+			t.Errorf("benchmarks.mdx does not carry %q", want)
 		}
 	}
 }

@@ -9,18 +9,18 @@ method. A number measured once is labelled a single sample.
 
 | measurement | script | recorded | boxer build |
 | --- | --- | --- | --- |
-| [A command in a running sandbox](#a-command-in-a-running-sandbox) | `make bench` | 2026-09-25 | v1.0.0-48-ged8def6, smolvm 1.16.1 |
+| [A command in a running sandbox](#a-command-in-a-running-sandbox) | `make bench` | 2026-09-28 | v1.0.0-55-g34ca729, smolvm 1.16.1 |
+| [Across boxer's backends](#across-boxers-backends) | `bench/backends.sh` | 2026-09-28 (podman 2026-09-25) | v1.0.0-55-g34ca729 |
+| [`[urls]` on and off](#urls-on-and-off) | `bench/urls.sh` | 2026-09-28 | v1.0.0-55-g34ca729 |
 | [Starting a development stack](#starting-a-development-stack) | `make bench-devserver` | 2026-09-25 | not recorded |
 | [Several sandboxes at once](#several-sandboxes-at-once) | `bench/parallel-clean.sh` | 2026-09-25 | not recorded |
-| [Across boxer's backends](#across-boxers-backends) | `bench/backends.sh` | 2026-09-25 | not recorded |
-| [`[urls]` on and off](#urls-on-and-off) | by hand, no raw file committed | before 2026-09-26 | not recorded |
 
 "Recorded" is the date the results were committed to `bench/`.
 
 <Callout type="warn">
-None of these was re-measured after the 2026-09-27 fixes. Those changed how docker, podman and
-Apple `container` publish ports (now `127.0.0.1`), gave every smolvm machine an idle workload, and
-made `boxer up` with `[urls]` on take a lock and wait for the proxy and the route.
+The two 2026-09-25 rows were not re-measured after the 2026-09-27 fixes, which changed how the
+container backends publish ports, gave every smolvm machine an idle workload, and made `boxer up`
+with `[urls]` on wait for the proxy and the route.
 </Callout>
 
 ## A command in a running sandbox
@@ -31,19 +31,18 @@ per cell, median reported. Docker 29.4.0.
 | | no-op |
 | --- | ---: |
 | seatbelt (the sandbox Claude Code and Codex use on macOS) | ~8 ms |
-| **`boxer run`**, smolvm | **31 ms** |
-| `docker exec` into a running container | 32 ms |
-| `docker run`, a fresh container per command | 253 ms |
+| **`boxer run`**, smolvm | **33 ms** |
+| `docker exec` into a running container | 29 ms |
+| `docker run`, a fresh container per command | 232 ms |
 
-- boxer is within 4% of `docker exec` on every workload that is not I/O-bound.
-- boxer is about 8x faster than a container per command, because the sandbox per worktree stays
+- boxer is within 4 ms of `docker exec` on every workload that is not I/O-bound.
+- boxer is about 7x faster than a container per command, because the sandbox per worktree stays
   warm.
 - Seatbelt is faster. It filters syscalls around a host process and does not start another kernel.
-- The worktree mount costs. A recursive grep takes 2.3x as long as in a warm container, and writing
-  200 files 2.6x. That cost is virtiofs.
-- boxer adds 13 to 22 ms over raw `smolvm machine exec` on every workload, most of it starting the
-  `smolvm` process. boxer's own code is under 1 ms of that.
-- The rewrite hook that every intercepted command passes through takes 3 ms.
+- The worktree mount costs. A recursive grep takes 2.4x as long as in a warm container, and so does
+  writing 200 files. That cost is virtiofs.
+- boxer adds 19 to 27 ms over raw `smolvm machine exec`, most of it starting the `smolvm` process.
+- The rewrite hook that every intercepted command passes through takes 4 ms.
 
 ## Starting a development stack
 
@@ -87,28 +86,32 @@ times each one through boxer.
 
 | backend | boundary | one worktree | three worktrees |
 | --- | --- | ---: | ---: |
-| podman | shared kernel | **3.6 s** | 25.9 s |
-| docker | shared kernel | 4.5 s | **21.5 s** |
-| Apple `container` | kernel per sandbox | 8.2 s | 25.6 s |
-| smolvm | kernel per sandbox | 8.5 s | 27.3 s |
+| docker | shared kernel | **4.3 s** | **10.9 s** |
+| Apple `container` | kernel per sandbox | 5.3 s | 14.4 s |
+| smolvm | kernel per sandbox | 6.4 s | 15.6 s |
 
-The two kernel-per-sandbox backends agree within 0.3 s, and the two shared-kernel ones within
-0.9 s. The gap of about 4 s between the groups is the cost of a kernel per sandbox, and no single
-implementation causes it. At three worktrees the spread falls to 27%. Shared-kernel backends vary
-less: docker moved ±0.2 s over six cells, smolvm ±2.3 s at one worktree.
+A kernel per sandbox costs about 1 to 2 s on the first worktree, and 3.5 to 4.7 s at three. docker
+was the steadiest, with all three one-worktree samples at 4.3 s. Apple `container` had one slow
+sample out of three (8.3 s against 5.3 s), as it did on 2026-09-25.
+
+Podman was not rerun because the host had no podman machine. On 2026-09-25 it took 3.6 s for one
+worktree and 25.9 s for three. Every other backend was 40 to 50% slower at three worktrees on
+that day than on 2026-09-28, docker included, with the same app and script. The cause was host
+state, not recorded, so compare rows within one run and not across the two.
+`bench/backends-2026-09-25.jsonl` has that run.
 
 ## `[urls]` on and off
 
-Five pairs, interleaved, on against off. The raw samples are not in `bench/`. It was measured
-separately from `make bench`, so compare its two rows with each other, not with the 31 ms median.
+`bench/urls.sh` brings up two worktrees that differ only in `[urls] enabled`, then times five
+interleaved pairs of each call. Medians:
 
-| | `boxer up` | warm `boxer run` |
+| | `boxer up` on a running sandbox | warm `boxer run` |
 | --- | ---: | ---: |
-| `[urls]` off | 289 ms | 49 ms |
-| `[urls]` on | 322 ms | 51 ms |
+| `[urls]` off | 14.2 ms | 30.7 ms |
+| `[urls]` on | 14.4 ms | 32.0 ms |
 
-boxer registers URLs while setup runs, so most of that time overlaps. With `[urls]` off, nothing
-runs.
+The difference is within the spread of the samples. The route is registered when the sandbox
+starts, so a later `boxer up` finds it in place.
 
 ## Memory
 

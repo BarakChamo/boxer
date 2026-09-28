@@ -10,7 +10,7 @@ mean — in particular, that the process-level sandboxes are not isolating the s
 | --- | --- |
 | CPU | Apple M4 (10 cores) |
 | OS | macOS-26.5.2-arm64-arm-64bit |
-| boxer | boxer v1.0.0-48-ged8def6-dirty |
+| boxer | boxer v1.0.0-55-g34ca729 |
 | smolvm | smolvm 1.16.1 |
 | Docker | 29.4.0 |
 | Codex | codex-cli 0.154.0 |
@@ -22,21 +22,21 @@ median. Lower is better. Every contender ran the same shell line over the same c
 
 | workload | host (none) | seatbelt | codex sandbox | docker run | docker exec | smolvm | boxer |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `true` — dispatch only | 3 | 8 | 50 | 253 | 32 | 17 | 31 |
-| `ls` one directory | 4 | 10 | 52 | 247 | 30 | 13 (19) | 30 |
-| `grep -rl` over 400 files | 14 | 21 | 65 | 258 | 43 | 76 (96) | 98 |
-| create and delete 200 files | 30 | 11 | 53 | 271 | 58 | 132 | 150 (193) |
-| 50k-iteration shell loop | 144 | 150 | 192 | 288 | 76 | 60 | 73 |
+| `true` — dispatch only | 3 | 8 | 49 | 232 | 29 | 14 (20) | 33 |
+| `ls` one directory | 4 | 9 | 50 | 234 | 30 | 14 (20) | 33 |
+| `grep -rl` over 400 files | 15 | 20 | 64 | 247 | 41 | 78 | 98 |
+| create and delete 200 files | 28 | 11 | 52 | 248 (329) | 61 | 123 | 149 |
+| 50k-iteration shell loop | 144 | 150 | 191 | 273 | 78 | 57 | 76 |
 
 ## What boxer costs
 
 | workload | vs host (no sandbox) | vs raw smolvm | vs docker exec |
 | --- | ---: | ---: | ---: |
-| `true` — dispatch only | 10.76× (+28 ms) | 1.85× (+14 ms) | 0.98× (-1 ms) |
-| `ls` one directory | 6.82× (+26 ms) | 2.26× (+17 ms) | 0.99× (-0 ms) |
-| `grep -rl` over 400 files | 6.90× (+84 ms) | 1.29× (+22 ms) | 2.27× (+55 ms) |
-| create and delete 200 files | 5.05× (+120 ms) | 1.13× (+18 ms) | 2.61× (+92 ms) |
-| 50k-iteration shell loop | 0.51× (-70 ms) | 1.22× (+13 ms) | 0.96× (-3 ms) |
+| `true` — dispatch only | 11.45× (+30 ms) | 2.41× (+19 ms) | 1.14× (+4 ms) |
+| `ls` one directory | 8.00× (+29 ms) | 2.39× (+19 ms) | 1.09× (+3 ms) |
+| `grep -rl` over 400 files | 6.65× (+83 ms) | 1.25× (+20 ms) | 2.38× (+57 ms) |
+| create and delete 200 files | 5.31× (+121 ms) | 1.22× (+27 ms) | 2.43× (+88 ms) |
+| 50k-iteration shell loop | 0.53× (-68 ms) | 1.35× (+20 ms) | 0.99× (-1 ms) |
 
 ## Cold start
 
@@ -45,7 +45,7 @@ every command by construction, which is why its warm row and its cold row are th
 
 | first command | host (none) | seatbelt | codex sandbox | docker run | docker exec | boxer |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| first command | 3 | 9 | 129 | 329 | 34 | 652 |
+| first command | 4 | 8 | 120 | 318 | 37 | 655 |
 
 ## boxer interception paths
 
@@ -54,7 +54,7 @@ tool call boxer rewrites, so a regression here is felt everywhere and shows up n
 
 | path | boxer |
 | --- | ---: |
-| `hook-rewrite` | 3 |
-| `brief` | 3 |
-| `status` | 29 |
+| `hook-rewrite` | 4 |
+| `brief` | 4 |
+| `status` | 30 |
 

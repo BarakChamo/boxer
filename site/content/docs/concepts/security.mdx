@@ -86,11 +86,10 @@ See [Run the harness inside](/docs/guides/inside).
 
 ## What the boundary costs
 
-A kernel per sandbox costs start-up time. smolvm and Apple `container` take about 4 s longer than
-docker and podman to bring one Next.js worktree to HTTP 200. At three worktrees the spread between
-backends falls to 27%. A warm command costs the same as on a container, 31 ms on smolvm against 32 ms for
-`docker exec`. File-heavy commands pay for the mount, for example a recursive grep at 2.3x a warm
-container. The numbers and method are in [Benchmarks](/docs/evals/benchmarks).
+A kernel per sandbox costs start-up time. smolvm and Apple `container` take 1 to 2 s longer than
+docker to bring one Next.js worktree to HTTP 200, and 3.5 to 4.7 s longer at three. A warm command
+costs about the same as on a container, 33 ms on smolvm against 29 ms for `docker exec`. File-heavy
+commands pay for the mount, for example a recursive grep at 2.4x a warm container. The numbers and method are in [Benchmarks](/docs/evals/benchmarks).
 
 ## Repository configuration is executable input
 

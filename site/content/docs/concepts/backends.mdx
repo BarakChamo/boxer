@@ -61,20 +61,18 @@ name, only those a backend's capabilities rule out.
 ## What each costs
 
 Time for a Next.js dev server to answer HTTP 200, measured one backend at a time on a wiped host,
-three samples each, 2 vCPU and 4 GB per sandbox, on a 10-core Apple Silicon Mac:
+three samples each, 2 vCPU and 4 GB per sandbox, on a 10-core Apple Silicon Mac (2026-09-28):
 
 | backend | one worktree | three worktrees at once |
 | --- | ---: | ---: |
-| `podman` | **3.6 s** | 25.9 s |
-| `docker` (OrbStack) | 4.5 s | **21.5 s** |
-| `container` | 8.2 s | 25.6 s |
-| `smolvm` | 8.5 s | 27.3 s |
+| `docker` (OrbStack) | **4.3 s** | **10.9 s** |
+| `container` | 5.3 s | 14.4 s |
+| `smolvm` | 6.4 s | 15.6 s |
 
-The two kernel-per-sandbox backends land within 0.3 s of each other, and the two shared-kernel
-ones within 0.9 s, so the gap of about 4 s (8.2 to 8.5 s against 3.6 to 4.5 s) comes from the kernel per sandbox and applies to
-smolvm and `container` alike. At three worktrees the spread falls to 27%, because three Next.js
-compiles saturate the cores. The gap is paid at start-up. A warm `boxer run` on smolvm takes 31 ms,
-level with `docker exec` into a running container at 32 ms. The [benchmarks](/docs/evals/benchmarks)
+A kernel per sandbox costs smolvm and `container` 1 to 2 s at one worktree and 3.5 to 4.7 s at
+three. Podman was not in this run; on 2026-09-25 it was the fastest at one worktree, on the same
+driver as docker. A warm `boxer run` on smolvm takes 33 ms,
+against 29 ms for `docker exec` into a running container. The [benchmarks](/docs/evals/benchmarks)
 have the method and caveats.
 
 The table has no memory column, because the whole-host measurement varied up to 2.1x within a
@@ -88,7 +86,7 @@ single configuration.
 - **You already run docker or podman, or you are on Linux without KVM:** `docker` or `podman`,
   with `network.mode` set explicitly. The sandboxes share a kernel.
 - **Many short-lived sandboxes where start-up time dominates:** a container backend starts one
-  about 4 s sooner.
+  1 to 2 s sooner.
 
 The smoke suite passes 88 of 88 cells on smolvm, and 79 with 9 skipped by capability on docker,
 podman and Apple `container`, on macOS and on Linux where the backend exists

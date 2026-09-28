@@ -135,7 +135,7 @@ paths stay on the host on purpose, such as `git` and the MCP servers a harness n
 ports bind to `127.0.0.1`. The threat model is a careless or destructive agent, not one trying to
 escape: [Security](site/content/docs/concepts/security.mdx).
 
-A command in a running smolvm sandbox takes 31 ms, level with `docker exec` into a warm container,
+A command in a running smolvm sandbox takes 33 ms, within 4 ms of `docker exec` into a warm container,
 and a Next.js session starts in 7.6 s against 6.8 s with no sandbox. File I/O through the mount is
 the main cost. [Benchmarks](site/content/docs/evals/benchmarks.mdx) has the method and every number.
 

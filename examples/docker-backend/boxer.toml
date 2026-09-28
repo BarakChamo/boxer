@@ -2,7 +2,7 @@
 #
 # What you give up, said plainly: every sandbox on the machine shares one kernel, and there is no
 # egress allowlist — boxer's default network mode is refused on a container runtime rather than
-# silently opened. What you get: sandboxes start about 4 s sooner, and on Linux boxer runs
+# silently opened. What you get: sandboxes start 1 to 2 s sooner, and on Linux boxer runs
 # without KVM. `boxer backends` compares them; the site's Backends page has the numbers.
 
 backend = "docker"          # or "podman"; BOXER_BACKEND overrides it per command
