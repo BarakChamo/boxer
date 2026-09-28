@@ -5,6 +5,12 @@ description: smolvm, Apple container, docker and podman compared by isolation bo
 
 Choose the runtime that runs each sandbox.
 
+<Callout title="Not sure?">
+Keep the default, smolvm. It gives each sandbox its own kernel and a network allowlist. Already use
+Docker and want to keep it? Set `backend = "docker"` and `network.mode = "on"`, and see
+[Bring your Docker setup](/docs/configure/docker).
+</Callout>
+
 ```toml
 backend = "smolvm"     # smolvm | container | docker | podman
 ```

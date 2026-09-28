@@ -25,6 +25,8 @@ Check these causes in order:
 | The harness uses a login shell. `zsh -lc` rebuilds `PATH` and puts system binaries ahead of shims. `boxer doctor` reports this. | Switch to hooks or tool mode. See [integration levels](/docs/setup/integration-levels). |
 | Codex in a linked worktree. Codex reads project config from the main repository, so it never reads a `.codex/` in the worktree alone. | Run `boxer install codex` from the worktree, which writes both. Or run `boxer install codex --user`. |
 | Project hooks are not trusted. Codex and Grok ignore project hooks until the folder is trusted. | Run `/hooks` once in Codex, or launch Grok once with `--trust`. |
+| The integration is not on the branch. An orchestrator cut the worktree from a branch without the `boxer install` files. | Commit them on the branch the orchestrator starts from. |
+| The orchestrator cannot find `boxer`. A GUI app may not see your shell's `PATH`. | Run `boxer doctor` in the task's worktree. See [Orchestrators](/docs/orchestrators#put-boxer-on-the-orchestrators-path). |
 
 ## The sandbox will not start
 

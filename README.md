@@ -23,7 +23,8 @@ from your machine and from the others.
 - **No change to your agent.** A hook rewrites `npm test` into the sandbox before the shell runs it.
   Output and exit codes come back as usual.
 - **No more port clashes.** Every worktree serves port 3000 inside its sandbox, and gets its own
-  `https://<branch>.<repo>.localhost` outside.
+  host port outside, or a named `https://<branch>.<repo>.localhost` URL with
+  [portless](https://github.com/vercel-labs/portless).
 - **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree, and
   reaches only the hosts you allow.
 - **33 ms per command** in a running sandbox, within 4 ms of `docker exec`. A Next.js session is
@@ -74,7 +75,7 @@ covers the details.
 | Agent | Setup |
 | --- | --- |
 | Claude Code | `boxer install claude-code` |
-| Codex | `boxer install codex` |
+| Codex | `boxer install codex`, then trust the hooks and turn off Codex's own sandbox ([why](https://barakchamo.github.io/boxer/docs/setup/codex)) |
 | Gemini CLI | `boxer install gemini-cli` |
 | Copilot CLI | `boxer install copilot --user` |
 | OpenCode | `boxer install opencode` |
@@ -85,6 +86,16 @@ covers the details.
 
 Orchestrators: [Conductor, T3 Code, Paperclip, herdr, Multica and
 OpenHands](https://barakchamo.github.io/boxer/docs/orchestrators).
+
+## Find your path
+
+| You are | Start here |
+| --- | --- |
+| Using Claude Code or Codex | [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) |
+| Running Conductor, T3 Code or another orchestrator | [Orchestrators](https://barakchamo.github.io/boxer/docs/orchestrators) |
+| Managing containers with your own scripts and hooks | [Coming from your own scripts](https://barakchamo.github.io/boxer/docs/configure/from-scripts) |
+| Using Docker, your own images, or services like Postgres | [Bring your Docker setup](https://barakchamo.github.io/boxer/docs/configure/docker) |
+| New to containers and VMs | [What is boxer](https://barakchamo.github.io/boxer/docs), then the Quickstart |
 
 ## Configure your project
 
@@ -116,8 +127,9 @@ enabled = true                            # https://<branch>.<repo>.localhost:13
 | Apple `container` | own kernel per sandbox | no |
 | docker, podman | one shared kernel | no |
 
-Set `backend = "docker"` in `boxer.toml` to switch. See
-[Backends](https://barakchamo.github.io/boxer/docs/backends).
+Set `backend = "docker"` and `network.mode = "on"` in `boxer.toml` to switch. You do not need
+smolvm then. See [Backends](https://barakchamo.github.io/boxer/docs/backends) and
+[Bring your Docker setup](https://barakchamo.github.io/boxer/docs/configure/docker).
 
 ## Documentation
 

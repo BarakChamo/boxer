@@ -132,8 +132,10 @@ If the repository has `.devcontainer/devcontainer.json`, boxer reads it first:
 | `postStartCommand` | `start` |
 | `initializeCommand` | `[prep]` |
 
-boxer also reads the image, ports, environment, bind mounts and `remoteUser`. It names anything it
-will not do, such as `features` or `runArgs`. Any key in `boxer.toml` overrides the devcontainer.
+boxer also reads the image, ports, environment, bind mounts and `remoteUser`. It does not build
+images or run Compose, so `build`, `dockerFile`, `dockerComposeFile` and `features` are refused by
+name. [Bring your Docker setup](/docs/configure/docker#use-your-devcontainer) has what to do
+instead. Any key in `boxer.toml` overrides the devcontainer.
 The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
 
 You still need a short `boxer.toml` for the allowlist. devcontainer has no key for it, and boxer's

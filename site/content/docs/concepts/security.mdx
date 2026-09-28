@@ -134,7 +134,7 @@ agent.
 NODE_ENV = "development"       # configuration. Baked into the pack.
 
 env_passthrough = ["CI"]       # read from the host at run time
-secrets         = ["NPM_TOKEN"]# same, and never written anywhere
+secrets         = ["NPM_TOKEN"]   # the same; never in a command line, a pack or a log
 ```
 
 `env` is saved into the environment pack, which persists on disk. Put anything you would not want

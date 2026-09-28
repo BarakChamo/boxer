@@ -1,1 +1,1 @@
-{ "pages": ["environment", "urls", "tasks", "examples"] }
+{ "pages": ["environment", "docker", "from-scripts", "urls", "tasks", "examples"] }

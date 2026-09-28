@@ -75,10 +75,12 @@ See [Manage sandboxes](/docs/use/managing) for the rest.
 ## Orchestrators
 
 Tools that cut a worktree per task (Conductor, T3 Code, Paperclip, herdr) get a sandbox per task.
-They need three things set up: the integration committed on the branch, `boxer install git`, and
-`boxer` on their `PATH`. See [Orchestrators](/docs/orchestrators).
+They need the integration committed on the branch they cut from, and `boxer` on their `PATH`.
+`boxer install git` is optional. It starts each sandbox as soon as the worktree is created, which
+matters for tools that time out on a cold start, such as T3 Code. See
+[Orchestrators](/docs/orchestrators).
 
 <Callout type="warn">
 Codex reads hooks from the main repository, not the linked worktree. Run `boxer install codex`
-instead of copying hooks into a worktree. See [Choose your setup](/docs/setup).
+instead of copying hooks into a worktree. See [Codex](/docs/setup/codex).
 </Callout>

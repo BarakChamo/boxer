@@ -3,13 +3,21 @@ title: Conductor
 description: Sandbox Conductor workspaces with the committed project layer, or run each agent inside the sandbox.
 ---
 
-Conductor runs each agent's real binary in an ordinary git worktree.
+Conductor runs each agent's real binary in an ordinary git worktree. First, make sure Conductor
+can find `boxer` ([PATH for GUI apps](/docs/orchestrators#put-boxer-on-the-orchestrators-path)).
 
 ## Try the project layer first
 
 It is not yet tested whether Conductor's sessions load project hooks. If they do,
 the committed `boxer install claude-code` is all you need. To check, create a workspace, ask the agent to run `node -p process.platform`, and run
 `boxer ls`. If it printed `linux` and a sandbox for that worktree shows up, you are done.
+
+## Codex in Conductor
+
+Use `boxer install codex --user`. Nobody is there to approve project hooks in a Conductor session,
+and user-level hooks need no approval. Turn off Codex's own sandbox with
+`sandbox_mode = "danger-full-access"` in `~/.codex/config.toml`, which applies however Conductor
+starts Codex.
 
 ## Otherwise, run the agent in the sandbox
 
@@ -27,7 +35,12 @@ sandbox. [Inside mode](/docs/use/inside) covers credentials for each agent.
 The setup script warms each workspace's sandbox, so you do not need `boxer install git` here.
 
 The file holds absolute paths to your shim directory, so it only works on your machine. Each
-developer runs the two commands above. Do not commit it.
+developer runs the two commands above.
+
+This route runs the whole agent inside the sandbox. The agent then needs its login inside the
+sandbox too, and boxer mounts its config directory (such as `~/.claude`) read-write. See
+[Inside mode](/docs/use/inside) for each agent's credentials, and
+[Security](/docs/concepts/security) for what that exposes.
 
 <Callout>
 Conductor's local workspaces are GUI-only, so this setup is verified by hand, not by the automated

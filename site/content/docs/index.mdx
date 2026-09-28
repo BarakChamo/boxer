@@ -24,6 +24,38 @@ your own system. boxer gives each worktree its own sandbox:
 - **33 ms per command**, within 4 ms of `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
 - **Local.** No account, no upload. See how it [compares](/docs/comparison) with the alternatives.
 
+## Do I need boxer?
+
+Probably, if either of these is true:
+
+- **You run more than one agent at a time.** Each one gets its own dev server, ports and installed
+  tools, so they stop breaking each other.
+- **You let an agent run commands on its own.** An install script or a stray `rm` runs in the
+  sandbox instead of on your machine.
+
+boxer does not protect the code in your project. The sandbox works on your real files, so an agent
+that deletes them deletes them. Commit often. [Security](/docs/concepts/security) has the details.
+
+**The terms, in one line each.** A *sandbox* is a separate place for commands to run. A *microVM*
+is a small virtual computer with its own operating system, which is what boxer uses by default. A
+*container* is a lighter kind of sandbox that shares your machine's operating system core (its
+*kernel*). An *image* is the starting contents of a sandbox, such as Node on Linux. A *worktree*
+is an extra checkout of your git repository, so two tasks can edit the same project at once.
+Agents and orchestrators create worktrees for you. A *hook* is a script your agent runs before each
+command, which is how boxer steps in. An *MCP server* gives an agent extra tools. The
+[Glossary](/docs/reference/glossary) has more.
+
+## Find your path
+
+| You are | Start here |
+| --- | --- |
+| Using Claude Code or Codex | [Quickstart](/docs/quickstart). About five commands. |
+| Running an orchestrator like Conductor or T3 Code | [Quickstart](/docs/quickstart) steps 1 to 3, then [Orchestrators](/docs/orchestrators) |
+| Already managing containers with your own scripts and hooks | [Coming from your own scripts](/docs/configure/from-scripts) |
+| Set on Docker, or bringing your own images, services and devcontainer | [Bring your Docker setup](/docs/configure/docker) |
+| New to all of this | [Quickstart](/docs/quickstart). You do not need to know containers. |
+| Building your own tools on top | [Build on boxer](/docs/reference/building-on-boxer) |
+
 ## What happens while your agent works
 
 Once boxer is installed into your agent, this happens on its own:
@@ -77,13 +109,6 @@ weakest:
 `boxer.toml` to turn on tool mode. Inside mode is the strictest, but the agent's login and config
 have to reach the sandbox, so it is opt-in. [Integration levels](/docs/setup/integration-levels) has
 the details, and where each level can be bypassed.
-
-## Where to start
-
-- [Quickstart](/docs/quickstart): install boxer and connect your agent.
-- [Set up your agent](/docs/setup): one page per harness.
-- [Orchestrators](/docs/orchestrators): Conductor, T3 Code, Paperclip, herdr, Multica, OpenHands.
-- [Security](/docs/concepts/security): what the sandbox isolates, and what it does not.
 
 The default sandbox is a [smolvm](https://smolmachines.com) microVM. Apple `container`, docker and
 podman also work, with less isolation. See [Backends](/docs/backends). boxer runs on macOS on Apple

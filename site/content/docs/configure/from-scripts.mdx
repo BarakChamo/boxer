@@ -1,0 +1,74 @@
+---
+title: Coming from your own scripts
+description: Map the scripts and hooks you use today to boxer, run boxer next to them, and switch over gradually.
+---
+
+If you already give each worktree its own environment with scripts, boxer replaces most of them
+with configuration. This page maps what you have to what boxer does.
+
+## What maps to what
+
+| You do this today | boxer does it with |
+| --- | --- |
+| `docker compose up` per worktree | `setup` and `start` in `boxer.toml`, in one sandbox per worktree ([services](/docs/configure/docker#run-postgres-redis-and-other-services)) |
+| a script that picks a free port | `ports = ["auto:3000"]`, and `boxer url` to find it |
+| a `post-checkout` hook that starts the stack | `boxer install git`, which starts the sandbox in every new worktree |
+| a Claude Code or Codex hook that wraps commands in `docker exec` | `boxer install claude-code` or `boxer install codex` |
+| a teardown script when a worktree is removed | automatic within 6 hours, or `boxer rm --gone` at once |
+| an `.env` per worktree with its own ports | `[env]` for fixed values, and `boxer status --json` for each worktree's host ports and URLs |
+| a Dockerfile for the dev image | your image, used as-is ([Docker setup](/docs/configure/docker#use-your-own-image)) |
+
+boxer does not replace a multi-container Compose stack as it is. It runs one sandbox per worktree,
+so run the services inside it. `docker` is not on the `intercept` list, so an agent that runs
+`docker compose up` still starts containers on your machine, with the same port clashes as before.
+
+## Run boxer next to your setup
+
+boxer adds to your configuration. It does not replace it.
+
+- **Your agent hooks stay.** `boxer install` adds its hooks to `.claude/settings.json` or
+  `.codex/hooks.json` next to yours. If one of your hooks also rewrites commands, remove it or
+  limit it to commands outside boxer's `intercept` list. Two hooks that both rewrite the same
+  command conflict, and which one wins depends on the agent.
+- **Your git hook stays.** `boxer install git` adds a marked block to your existing
+  `post-checkout` hook, and honours `core.hooksPath`. It runs `boxer up --detach` on any checkout
+  that changes files, which does nothing when the sandbox is already running.
+- **You choose which commands go to the sandbox.** `intercept` lists the programs that run in the
+  sandbox. Everything else, including `docker`, runs on your machine as before.
+
+```toml title="boxer.toml"
+intercept = ["npm", "node", "pytest"]    # only these go to the sandbox
+```
+
+## Switch over gradually
+
+1. **Watch first.** Set `enforcement = "audit"`. The hooks print what they would do
+   (`boxer: audit: would rewrite: npm test`) and run every command on your machine as before. The
+   sandbox is still created at session start, so you can check it boots.
+2. **Try it on one branch.** Commit the `boxer install` files on a branch and work in worktrees cut
+   from it. Other branches are unaffected.
+3. **Turn it on.** Remove `enforcement = "audit"`, and retire the scripts boxer now covers.
+
+To stop at any point, set `mode = "off"`, or start a session with `BOXER_MODE=off`.
+
+## Drive boxer from your scripts
+
+Every command that reports state takes `--json`, and the exit codes are stable.
+
+```console
+$ boxer status --json           # exit 0 running, 3 stopped, 4 absent (some fields left out)
+{
+  "state": "running",
+  "worktree": "/Users/me/src/myapp-fix-ui",
+  "ports": { "3000": "61234" },
+  "urls": { "3000": "https://fix-ui.myapp.localhost:1355" }
+}
+```
+
+```sh
+boxer ls --json                 # every sandbox, its worktree, branch and URLs
+boxer run -c 'npm test'         # run a command in this worktree's sandbox, with its exit code
+```
+
+[Build on boxer](/docs/reference/building-on-boxer) covers the JSON output, the Go package and
+writing your own integration.

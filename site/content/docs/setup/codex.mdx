@@ -21,7 +21,16 @@ Then do two things `boxer install` cannot:
 2. **Turn off Codex's own sandbox.** A hypervisor cannot start inside Codex's seatbelt or landlock
    sandbox, so boxer cannot create one from there. boxer replaces it: intercepted commands run in
    the microVM. Run Codex with `--sandbox danger-full-access`, or
-   `--dangerously-bypass-approvals-and-sandbox` under `codex exec`.
+   `--dangerously-bypass-approvals-and-sandbox` under `codex exec`. To set it once, add
+   `sandbox_mode = "danger-full-access"` to `~/.codex/config.toml`. That also covers Codex when an
+   orchestrator starts it.
+
+   The name sounds alarming. Here is what changes: build and test commands run in boxer's microVM
+   instead of Codex's sandbox. `git`, `gh`, `ssh` and any command not in `intercept` run on your
+   machine without Codex's sandbox around them. [Security](/docs/concepts/security) lists what stays
+   on the host.
+
+These steps are tested with the Codex CLI. The Codex desktop app is not tested.
 
 <Callout>
 Codex reads project configuration from the main checkout, not from a linked worktree. Run from a

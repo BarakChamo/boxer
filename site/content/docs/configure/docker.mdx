@@ -1,0 +1,121 @@
+---
+title: Bring your Docker setup
+description: Use docker or podman as the backend, your own Dockerfile or devcontainer image, private images, and services like Postgres and Redis.
+---
+
+boxer can run each worktree's sandbox as a docker or podman container, and it can use the images you
+already build. It does not build images or run Compose.
+
+## Use docker as the backend
+
+```toml title="boxer.toml"
+backend = "docker"          # or "podman"
+
+[network]
+mode = "on"                 # docker cannot enforce an allowlist; "off" blocks the network
+```
+
+You do not need smolvm. Each worktree gets its own container instead of its own microVM. Compared
+with the default, you give up three things:
+
+- **A kernel per sandbox.** All containers share one kernel.
+- **The egress allowlist.** The network is either on or off.
+- **Environment packs and forks.** `image_setup` runs again in every new worktree, instead of
+  once.
+
+To make docker your default for every repository, put `backend = "docker"` and
+`[network] mode = "on"` in `~/.config/boxer/boxer.toml`. [Backends](/docs/backends) compares all four.
+
+## Use your own image
+
+boxer does not build images. Build yours, then point `image` at it.
+
+| Backend | Your image |
+| --- | --- |
+| docker, podman | `docker build -t myapp-dev .`, then `image = "myapp-dev"`. A local tag works. |
+| smolvm | `docker save myapp-dev -o ~/images/myapp-dev.tar`, then `image = "~/images/myapp-dev.tar"`. Use a path outside the repository, because a new worktree does not contain an uncommitted file. |
+| any | a published image, such as `image = "ghcr.io/acme/dev:1.4"` |
+
+When you rebuild the image, run `boxer up --recreate` in each worktree to pick it up. boxer never
+runs the image's own `ENTRYPOINT` or `CMD`. Put what should run in `start`.
+
+**Private registries.** With docker or podman, the daemon pulls the image, so `docker login` is
+enough. On smolvm, save the image to an archive as above.
+
+## Use your devcontainer
+
+If the repository has `.devcontainer/devcontainer.json` with an `image`, boxer reads it. It maps
+`onCreateCommand` to `image_setup`, `postCreateCommand` to `setup` and `postStartCommand` to
+`start`, and reads ports, environment, mounts and `remoteUser`.
+
+It ignores these, with a warning that names them:
+
+| devcontainer key | Do this instead |
+| --- | --- |
+| `build`, `dockerFile` | build the image yourself and set `image`, as above |
+| `dockerComposeFile` | run the services in the sandbox (next section) |
+| `features` | install them in `image_setup`, or bake them into your image |
+
+The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
+
+## Run Postgres, Redis and other services
+
+boxer runs one sandbox per worktree, not a Compose stack. Run your services inside that sandbox.
+Every worktree then gets its own database on the same port, with no clashes.
+
+```toml title="boxer.toml"
+image = "mirror.gcr.io/library/node:24-alpine"
+image_setup = [
+  "apk add --no-cache postgresql16 postgresql16-client redis",
+  "mkdir -p /var/lib/postgresql/data && chown postgres:postgres /var/lib/postgresql/data",
+  "su postgres -c 'initdb -D /var/lib/postgresql/data --auth=trust'",
+]
+setup = ["npm ci"]
+start = [
+  "redis-server --save '' --appendonly no",
+  "su postgres -c 'postgres -D /var/lib/postgresql/data -k /tmp'",
+  "npx next dev -H 0.0.0.0 -p 3000",
+]
+ready = "pg_isready -h 127.0.0.1 -U postgres && redis-cli ping"
+
+[network]
+allow_hosts = ["dl-cdn.alpinelinux.org", "registry.npmjs.org"]
+ports = ["auto:3000"]
+
+[env]
+DATABASE_URL = "postgres://postgres@127.0.0.1:5432/postgres"
+REDIS_URL = "redis://127.0.0.1:6379"
+```
+
+- `image_setup` installs the services once. On smolvm, the result is cached, so the next worktree
+  boots in about 2 seconds instead of reinstalling.
+- `start` runs them every time the sandbox starts. Put the Postgres socket in `/tmp`, because `/run`
+  is empty at boot.
+- `ready` waits for both before the agent's first command.
+- The database starts from the state `image_setup` left. Data written later is lost when the
+  sandbox is removed. `setup` runs before `start`, so seed the database from a
+  [task](/docs/configure/tasks) that the agent runs once the sandbox is ready.
+
+On docker or podman, drop `allow_hosts` and set `network.mode = "on"`. With your own Dockerfile,
+install Postgres and Redis there instead of in `image_setup`, and keep the `start` and `ready` lines.
+
+## Environment variables and secrets
+
+```toml title="boxer.toml"
+env_passthrough = ["CI"]            # copied from your shell by name at run time
+secrets = ["API_KEY"]               # the same, and marks them as secrets
+
+[env]
+NODE_ENV = "development"            # fixed values; saved in the environment snapshot, so no secrets
+```
+
+Values from `env_passthrough` and `secrets` never appear in a command line, a snapshot or a log.
+
+[Environment](/docs/configure/environment#set-environment-variables-and-secrets) covers secrets and
+mounts.
+
+## Monorepos
+
+Put one `boxer.toml` at the repository root. `setup` installs the whole workspace, and `start` can
+run several dev servers, each with its own port. [Examples](/docs/configure/examples) has a
+monorepo configuration.

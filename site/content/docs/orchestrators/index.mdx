@@ -9,14 +9,14 @@ is gone.
 
 | Orchestrator | Setup | Tested |
 | --- | --- | --- |
-| [Conductor](/docs/orchestrators/conductor) | committed project layer, or `boxer install conductor` | by hand |
+| [Conductor](/docs/orchestrators/conductor) | committed project layer, or `boxer install conductor` | `boxer install conductor` by hand; project layer not tested |
 | [T3 Code](/docs/orchestrators/t3-code) | committed project layer | matrix, 2 of 2 |
 | [Paperclip](/docs/orchestrators/paperclip) | committed project layer (Claude Code), user layer (Codex) | matrix, 2 of 2 |
 | [herdr](/docs/orchestrators/herdr) | committed project layer | matrix, 2 of 2 |
 | [Multica](/docs/orchestrators/multica) | a runtime profile pointed at a boxer shim | not tested |
 | [OpenHands](/docs/orchestrators/openhands) | `boxer-bash` as the terminal shell | matrix, 1 of 1 |
 
-## Three things every orchestrator needs
+## What every orchestrator needs
 
 **1. Commit the integration.** The orchestrator cuts each worktree from a branch. If the files
 `boxer install` writes are not on that branch, the task runs on your machine.
@@ -26,23 +26,48 @@ boxer install claude-code
 git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
 ```
 
-**2. Warm the sandbox when the worktree is created.**
+**2. Optional: warm the sandbox when the worktree is created.**
 
 ```sh
 boxer install git
 ```
 
 This adds a `post-checkout` hook that runs `boxer up --detach` in every new worktree, so the
-sandbox is booting before the agent starts. Without it, the first command waits for a cold boot,
-and some orchestrators time out. `boxer install all` does not do this, so run it separately.
+sandbox is booting before the agent starts. Without it, the first command waits for a cold boot.
+T3 Code times out on that and needs it. For the others it only saves time. `boxer install all` does not do this, so run it separately.
 
-**3. Put `boxer` on the orchestrator's `PATH`.** Hooks and shims call `boxer`. A GUI app does not
-read your shell profile, so check the orchestrator can find it.
+**3. Put `boxer` on the orchestrator's `PATH`.** Hooks and shims call `boxer`. See below.
+
+## Put boxer on the orchestrator's PATH
+
+A terminal orchestrator inherits your shell's `PATH`. A GUI app such as Conductor may not read your
+shell profile. To check, run `boxer doctor` from a task's terminal. If `boxer` is not found, install
+it where every process looks:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sudo BOXER_INSTALL_DIR=/usr/local/bin sh
+```
+
+## Run many tasks at once
+
+Each sandbox is allowed 4 CPUs and 4 GB of memory by default. A sandbox serving a Next.js dev
+server uses about 1.2 GB inside the guest ([Benchmarks](/docs/evals/benchmarks#memory)). To run more
+tasks at once, lower the limits in `boxer.toml`:
+
+```toml title="boxer.toml"
+cpus = 2
+memory = "2G"
+```
+
+A new sandbox takes longest the first time: the image downloads and `setup` runs. On smolvm, a
+repository with `image_setup` caches the result, so the next worktree skips it.
+`boxer ls --resources` shows what each sandbox uses.
 
 ## Clean up
 
 Orchestrators delete worktrees without telling boxer. boxer's background sweep (`auto_reclaim`,
-every 6 hours by default) removes their sandboxes. To do it now:
+every 6 hours by default) removes their sandboxes. To do it now, `boxer rm --gone -A` removes only sandboxes whose worktree is gone, on every
+backend. `boxer gc` also removes idle sandboxes and unused caches.
 
 ```sh
 boxer rm --gone -A

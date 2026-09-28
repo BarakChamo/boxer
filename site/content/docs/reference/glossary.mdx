@@ -31,6 +31,9 @@ it, and the [MCP server](/docs/reference/mcp#resource) serves it at `boxer://bri
 relevant configuration and the exit that counts as reproducing it. `boxer capsule replay` exits 0
 when the failure still happens. See [capsules](/docs/use/results#save-a-failure-as-a-capsule).
 
+**Container.** A sandbox that shares your machine's kernel with every other container. docker and
+podman run containers. Lighter than a microVM, with a weaker boundary. See [Backends](/docs/backends).
+
 **Cell.** One row of an evaluation matrix. A cell is one harness at one integration level running one
 task in its own worktree and sandbox. See [the matrix tier](/docs/evals/matrix).
 
@@ -63,15 +66,22 @@ image and is cached in the environment pack. `setup` prepares one worktree and r
 host and boxer sandboxes the commands it issues. **Inside** (`integration = "inside"`), the harness
 itself runs in the guest. See [running the harness inside](/docs/use/inside).
 
-**Integration level.** One of the five ways a harness's commands reach the guest: MCP and skill,
-hooks, plugins, PATH shims, and inside mode. A harness uses every one it supports at once. See
-[integration levels](/docs/setup).
+**Integration level.** One of the ways a harness's commands reach the guest: hook rewrite,
+plugin, tool mode, PATH shims, shell substitution, inside mode, or skill and MCP tool only. A harness
+uses every one it supports at once. See [Integration levels](/docs/setup/integration-levels).
+
+**Kernel.** The core of an operating system, which controls processes, files and the network. A
+microVM has its own. Containers share yours.
 
 **Intercept.** The list of programs whose commands boxer sandboxes. **Passthrough** is the list
 that always stays on the host. See [what gets sandboxed](/docs/reference/configuration#what-gets-sandboxed).
 
 **Isolation.** What a scope is keyed to: `repo`, `worktree` (the default), `session` or `subagent`.
 See [scope](/docs/concepts/scopes-and-packs#scope).
+
+**microVM.** A small virtual machine with its own kernel, which boots in about a second. smolvm
+runs one per sandbox, which keeps each task's processes and system changes apart from the others
+and from your machine.
 
 **Mode.** What a hook does with a command it catches. `rewrite` turns it into `boxer run`, `tool`
 denies it and points to the `boxer_run` MCP tool, and `off` does nothing.
@@ -106,6 +116,9 @@ the command's output instead of a refusal.
 output tails and test results. `boxer status --json` shows it and `boxer capsule new` captures it.
 See [JSON output](/docs/reference/json#run-record).
 
+**Sandbox.** A separate place for commands to run, so what they install, start or change stays
+out of your machine and out of other tasks. boxer gives each worktree one.
+
 **Scope.** The identity of one sandbox, `sb-` plus twelve hex characters. It is also the
 sandbox's name. The two words printed beside it (`swift-crab`) come from the same hash. See
 [scopes and packs](/docs/concepts/scopes-and-packs).
@@ -125,5 +138,6 @@ instructions and enforces nothing. See [skills and plugins](/docs/setup/skills-a
 **Tier.** One layer of evaluation, such as `smoke`, `t1`, `t2`, `adherence`, `flow`, `sdlc` or
 `matrix`. See [evaluation strategy](/docs/evals/strategy).
 
-**Worktree.** A git working tree, and boxer's default unit of isolation. See
-[worktrees](/docs/use/worktrees).
+**Worktree.** An extra checkout of a git repository in its own folder, on its own branch, so two
+tasks can edit the same project at once. Agents and orchestrators create them for you. It is
+boxer's default unit of isolation. See [Parallel worktrees](/docs/use/worktrees).

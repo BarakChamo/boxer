@@ -29,7 +29,7 @@ const steps = [
 const highlights = [
   ['A sandbox per worktree', 'Created when an agent starts working there. Nothing to configure per task.'],
   ['No change to your agent', 'Hooks rewrite npm test into the sandbox before the shell runs it. Output and exit codes come back as usual.'],
-  ['A URL per dev server', 'Every worktree serves port 3000 inside its sandbox, and gets its own https://branch.app.localhost outside.'],
+  ['A URL per dev server', 'Every worktree serves port 3000 inside its sandbox, and gets its own host port outside, or a named https://branch.app.localhost URL with portless.'],
   ['A real boundary', 'Each sandbox is a microVM with its own kernel. It sees the worktree, and reaches only the hosts you allow.'],
   ['Fast enough to forget', '33 ms per command. A Next.js session is ready in 7.6 s, against 6.8 s with no sandbox.'],
   ['Local and open source', 'Runs on your Mac or Linux machine. No account, no upload, Apache-2.0.'],
@@ -38,7 +38,7 @@ const highlights = [
 const compare = [
   ['', 'boxer', 'Agent’s built-in sandbox', 'A container per worktree', 'Cloud sandbox'],
   ['Separate ports and dev server per task', 'yes, automatic', 'no', 'yes, if you map ports', 'yes'],
-  ['Own kernel per task', 'yes', 'no', 'no', 'yes'],
+  ['Own kernel per task', 'yes, on smolvm', 'no', 'no', 'yes'],
   ['Follows worktrees the agent creates', 'yes', 'n/a', 'no, start each one', 'no'],
   ['Code stays on your machine', 'yes', 'yes', 'yes', 'no'],
   ['Cost of one command', '33 ms', '~8 ms', '~29 ms', 'a network round trip'],

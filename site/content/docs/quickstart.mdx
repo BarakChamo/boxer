@@ -1,82 +1,145 @@
 ---
 title: Quickstart
-description: Install boxer, connect it to Claude Code, and let every worktree get its own sandbox without thinking about it.
+description: Install boxer, connect your agent, and let every worktree get its own sandbox without thinking about it.
 ---
 
 You set boxer up once per repository. After that, every agent session in every worktree gets its
-own sandbox. This guide uses Claude Code. For another agent, replace step 2 with its
-[setup page](/docs/setup).
+own sandbox. You need a git repository; run `git init` if your project is not one yet.
+
+<Callout>
+Using Conductor, T3 Code or another orchestrator? Do step 1, then go to
+[Orchestrators](/docs/orchestrators). Already use Docker? See the note in step 1.
+</Callout>
 
 ## 1. Install boxer
 
 ```sh
-curl -sSL https://smolmachines.com/install.sh | bash                             # smolvm, the microVM runtime
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
+curl -sSL https://smolmachines.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
 ```
 
-smolvm runs the sandboxes. boxer decides which sandbox a command belongs in and runs it there. On
-Linux, smolvm needs `/dev/kvm` (`sudo usermod -aG kvm $USER`, then log in again). To use docker,
-podman or Apple `container` instead, see [Backends](/docs/backends).
+The first line installs smolvm, which runs the sandboxes. The second installs boxer, which decides which sandbox each command belongs in and runs it there.
+On Linux, smolvm needs `/dev/kvm` (`sudo usermod -aG kvm $USER`, then log in again).
 
-## 2. Connect Claude Code
+**Prefer Docker?** Skip smolvm. Add `backend = "docker"` and `[network] mode = "on"` to your
+`boxer.toml` in step 3. You get a container per worktree instead of a microVM. See
+[Bring your Docker setup](/docs/configure/docker).
+
+## 2. Connect your agent
+
+<Tabs items={['Claude Code', 'Codex', 'Both']}>
+<Tab value="Claude Code">
 
 ```sh
 cd your-repo
 boxer install claude-code
-```
-
-This writes four things into the repository, merged into any files already there:
-
-- **Hooks** in `.claude/settings.json`. The `SessionStart` hook creates the sandbox. The
-  `PreToolUse` hook rewrites each shell command to run in it. This is the part that enforces.
-- **An MCP server** in `.mcp.json`, which gives Claude a `boxer_run` tool and a description of its
-  sandbox.
-- **A skill** in `.claude/skills/boxer/`, which explains to Claude how commands run here.
-- **A subagent** in `.claude/agents/boxed.md`, for work that should run entirely in the sandbox.
-
-Commit them:
-
-```sh
 git add .claude .mcp.json
 git commit -m "Run agent commands in boxer"
 ```
 
-Every worktree is cut from a branch. With the hooks committed, every worktree has them, including
-the ones Claude, Codex or an orchestrator creates for you. To cover every repository on your
-machine instead, run `boxer install claude-code --user`.
+The first time you open the repository, Claude Code asks you to approve the `boxer` MCP server.
+Approve it.
+
+</Tab>
+<Tab value="Codex">
+
+```sh
+cd your-repo
+boxer install codex
+git add .codex .agents
+git commit -m "Run agent commands in boxer"
+```
+
+Then, in Codex:
+
+1. **Trust the project hooks.** Run `/hooks` once in Codex.
+2. **Turn off Codex's own sandbox.** It blocks the hypervisor boxer needs, and boxer takes over its
+   job: build commands run in a microVM instead of on your machine. `git` still runs on your
+   machine. To set it once, add `sandbox_mode = "danger-full-access"` to `~/.codex/config.toml`, or
+   pass `--sandbox danger-full-access` each time. See [Codex](/docs/setup/codex) and
+   [Security](/docs/concepts/security).
+
+Codex does not get the MCP server automatically. The hooks enforce without it. To add the
+`boxer_run` tool too, see [Codex](/docs/setup/codex).
+
+</Tab>
+<Tab value="Both">
+
+```sh
+cd your-repo
+boxer install claude-code
+boxer install codex
+git add .claude .mcp.json .codex .agents
+git commit -m "Run agent commands in boxer"
+```
+
+Then do the one-time steps on the Claude Code and Codex tabs.
+
+</Tab>
+</Tabs>
+
+For Claude Code, `boxer install` writes four things. Other agents get the same pieces where their
+format supports them:
+
+| Piece | What it does |
+| --- | --- |
+| **Hooks** | The `SessionStart` hook creates the sandbox. The `PreToolUse` hook rewrites each shell command to run in it. This is the part that enforces. |
+| **MCP server** | Gives the agent a `boxer_run` tool and a description of its sandbox. |
+| **Skill** | Explains to the agent how commands run here. |
+| **Subagent** | A helper agent that runs everything through boxer (Claude Code only). |
+
+It merges into files you already have. Your own hooks stay, and boxer adds its own next to them.
+
+Commit the files. Every worktree is cut from a branch, so committed hooks are in every worktree,
+including the ones your agent or an orchestrator creates.
+
+<Callout title="Try it without committing">
+Run `boxer install claude-code --user` instead. It writes the hooks to `~/.claude/settings.json`,
+so they apply to every repository on your machine and nothing changes in the repo. Codex has the
+same `--user` option.
+</Callout>
+
+For other agents (Gemini CLI, Copilot CLI, OpenCode, pi, Grok, Kimi Code), see
+[Set up your agent](/docs/setup).
 
 ## 3. Describe your project
 
-boxer needs to know how to prepare a sandbox for your project. Add a `boxer.toml` to the
-repository root. This one is for a Next.js app:
+A `boxer.toml` tells boxer how to set up the sandbox. You can skip it to try boxer, but most
+projects want one:
+
+- Without it, boxer picks an image from your lockfile (Node, Python, Go, Rust and more) and runs no
+  install. The sandbox sees the `node_modules` or `.venv` you installed on your machine, which may
+  not run on Linux.
+- Without it, the sandbox can reach only the image registry. An agent's `npm install` fails until
+  you allow the package registry.
+
+Add a `boxer.toml` to the repository root. This one is for a Next.js app:
 
 ```toml title="boxer.toml"
 image = "mirror.gcr.io/library/node:24-alpine"
-setup = ["npm ci"]                                       # when a worktree's sandbox is created
-start = ["npx next dev -H 0.0.0.0 -p 3000"]              # started with the sandbox
+setup = ["npm ci"]                                       # runs when a worktree's sandbox is created
+start = ["npx next dev -H 0.0.0.0 -p 3000"]              # starts with the sandbox
 ready = "wget -q -O /dev/null http://127.0.0.1:3000/"    # the sandbox is ready when this passes
 
 [network]
 allow_hosts = ["registry.npmjs.org"]                     # everything else is blocked
 ports = ["auto:3000"]                                    # a free host port per worktree
-
-[urls]
-enabled = true                                           # https://<branch>.<repo>.localhost:1355
 ```
 
 Commit it with the rest. You never run these commands yourself. boxer runs `setup` and `start` when
 it creates each worktree's sandbox. The dev server must listen on `0.0.0.0` so the forwarded port
-reaches it. `[urls]` needs [portless](https://github.com/vercel-labs/portless)
-(`npm install -g portless`).
+reaches it.
 
-No `boxer.toml` also works. boxer then picks an image from your lockfile and runs nothing at
-startup. [Examples](/docs/configure/examples) has configurations for Vite, Python, Go and
-monorepos.
+To give each worktree a named URL instead of a port, install
+[portless](https://github.com/vercel-labs/portless) (`npm install -g portless`) and add
+`[urls] enabled = true`. See [Dev server URLs](/docs/configure/urls).
+
+[Examples](/docs/configure/examples) has configurations for Vite, Python, Go and monorepos.
 
 ## 4. Work as usual
 
-Start Claude Code in the repository, or in any worktree of it. At session start, boxer creates the
-worktree's sandbox, runs `npm ci`, starts the dev server, and gives Claude this:
+Start your agent in the repository, or in any worktree of it. At session start, boxer creates the
+worktree's sandbox, runs `npm ci`, starts the dev server, and tells the agent:
 
 ```text
 This repository runs commands inside a boxer sandbox: a microVM per worktree with the worktree
@@ -84,39 +147,51 @@ mounted at /workspace. Files you edit on the host are the same files the sandbox
 Shell commands that start with npm, npx, pnpm, yarn, bun, bunx, node, deno, python, python3, pip,
 uv, pytest, cargo, rustc, go, make, cmake are transparently executed in the sandbox; write them
 normally. git, gh, ssh, boxer, smolvm always run on the host.
-Servers the sandbox runs are reachable at stable URLs, one set per worktree: `boxer url` prints
-this worktree's (`boxer status --json` lists them all under `urls`). Use it, not localhost:<port>,
-in a browser, a test or a curl.
 ```
 
-When Claude runs `npm test`, the hook turns it into `boxer run -c 'npm test'`. The test runs in the
-sandbox and Claude sees the usual output. When it runs `git status`, the hook leaves it alone and
-it runs on your machine.
+On docker or podman, the first line says "a container" instead of "a microVM".
 
-Start a second session in another worktree, created however you like, and it gets a second
-sandbox with its own dev server and URL. The two do not share ports, installed tools or
-processes. A worktree created in the middle of a session gets its sandbox on its first command.
-The skill tells the agent to run `boxer url` to find the new address.
+When the agent runs `npm test`, the hook turns it into `boxer run -c 'npm test'`. The test runs in
+the sandbox and the agent sees the usual output. When it runs `git status`, the hook leaves it
+alone and it runs on your machine.
 
-When a worktree is deleted, boxer removes its sandbox. Any boxer command starts this cleanup in
-the background, at most every 6 hours. `boxer gc` runs it now.
+- **Another worktree gets another sandbox**, with its own dev server and port. The two do not share
+  ports, installed tools or processes. It does not matter who created the worktree.
+- **Two sessions in the same worktree share its sandbox.** For separate sandboxes, give each
+  session its own worktree: `claude --worktree fix-ui` creates one and starts Claude in it, and an
+  orchestrator makes one per task.
+- **A deleted worktree's sandbox is removed.** Any boxer command starts this cleanup in the
+  background, at most every 6 hours. `boxer gc` runs it now.
 
-## 5. See what is running
+The first session in a new worktree waits for the image to download and `setup` to run. Later
+sessions start in seconds. See [Benchmarks](/docs/evals/benchmarks).
 
-You do not need these to work, but they show what boxer is doing:
+## 5. Check it
 
 ```console
-$ boxer ls                  # every sandbox, its branch and its URL (some columns left out)
-NAME         STATE    BRANCH    SERVES
-mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
-olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
-
 $ boxer doctor              # the resolved setup, and anything that will not work
+$ boxer ls                  # every sandbox, its branch and where it serves (some columns left out)
+NAME         STATE    BRANCH    SERVES
+mild-lynx    running  add-auth  http://127.0.0.1:52341
+olive-comet  running  fix-ui    http://127.0.0.1:52388
 ```
+
+Open the `SERVES` address in your browser to see that worktree's dev server. To confirm a command
+really runs in the sandbox, ask the agent to run `node -p process.platform`. It prints `linux`, even
+on a Mac.
+
+## Turn it off or remove it
+
+| To | Do |
+| --- | --- |
+| Watch what boxer would do, without changing anything | set `enforcement = "audit"` in `boxer.toml` |
+| Run one session on your machine | start the agent with `BOXER_MODE=off` |
+| Turn it off for the repository | set `mode = "off"` in `boxer.toml` |
+| Remove it | revert the commit that added the `boxer install` files, then run `boxer down --all` |
 
 ## Next
 
-- [Orchestrators](/docs/orchestrators): Conductor, T3 Code, Paperclip and others create the
-  worktrees for you. Each needs one or two extra lines of setup.
-- [Environment](/docs/configure/environment): images, dependency installs, caches and secrets.
-- [Security](/docs/concepts/security): what the sandbox isolates, and what stays on your machine.
+- [Orchestrators](/docs/orchestrators) if something else creates the worktrees.
+- [Environment](/docs/configure/environment) for images, dependency installs, services, caches and
+  secrets.
+- [Security](/docs/concepts/security) for what the sandbox isolates, and what stays on your machine.
