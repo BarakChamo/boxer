@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Backend is what boxer needs from anything that can host a sandbox. It is deliberately small:
@@ -243,9 +244,14 @@ func Host(configured string) Backend {
 type headWriter struct {
 	w    io.Writer
 	head []byte
+	mu   *sync.Mutex
 }
 
 func (h *headWriter) Write(p []byte) (int, error) {
+	if h.mu != nil {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+	}
 	if n := 160 - len(h.head); n > 0 {
 		if n > len(p) {
 			n = len(p)
@@ -256,6 +262,30 @@ func (h *headWriter) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return h.w.Write(p)
+}
+
+// lockedWriter shares headWriter's mutex, so stdout and stderr never write at the same moment.
+type lockedWriter struct {
+	w  io.Writer
+	mu *sync.Mutex
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.w == nil {
+		return len(p), nil
+	}
+	return l.w.Write(p)
+}
+
+// streams wires a container CLI's stdout and stderr. exec copies each through its own goroutine
+// once stderr is wrapped, and callers routinely pass one buffer for both (the MCP tool's output,
+// a probe's combined text), which made those two goroutines race on the buffer. One mutex across
+// both serialises them, whether or not the writers are the same.
+func streams(stdout, stderr io.Writer) (io.Writer, *headWriter) {
+	mu := &sync.Mutex{}
+	return lockedWriter{w: stdout, mu: mu}, &headWriter{w: stderr, mu: mu}
 }
 
 // runtimeFailure returns the error a runtime's own failure deserves, or nil when code is the
