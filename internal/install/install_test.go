@@ -371,3 +371,38 @@ func TestCodexHooksReachTheMainRepositoryFromAWorktree(t *testing.T) {
 		t.Errorf("codex hooks are missing in a plain checkout: %v", err)
 	}
 }
+
+// A user's own hooks in a harness's hooks file survive boxer's install, and a second install adds
+// nothing. install once copied its bundled file over .codex/hooks.json and .dsh/hooks.json.
+func TestInstallKeepsTheUsersOwnHooks(t *testing.T) {
+	for _, h := range []struct{ harness, file string }{{"codex", ".codex/hooks.json"}, {"dsh", ".dsh/hooks.json"}} {
+		root := t.TempDir()
+		path := filepath.Join(root, filepath.FromSlash(h.file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mine := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"my-own-hook"}]}]}}`
+		if err := os.WriteFile(path, []byte(mine), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			if _, err := Install(h.harness, config.Defaults(), "t", root); err != nil {
+				t.Fatal(err)
+			}
+		}
+		b, _ := os.ReadFile(path)
+		got := string(b)
+		if !strings.Contains(got, "my-own-hook") {
+			t.Errorf("%s: install removed the user's hook:\n%s", h.file, got)
+		}
+		if !strings.Contains(got, "boxer hook "+h.harness) {
+			t.Errorf("%s: no boxer hook:\n%s", h.file, got)
+		}
+		var once map[string]any
+		_ = json.Unmarshal(b, &once)
+		groups, _ := once["hooks"].(map[string]any)["PreToolUse"].([]any)
+		if len(groups) != 2 {
+			t.Errorf("%s: want the user's PreToolUse group and boxer's, once each; got %d:\n%s", h.file, len(groups), got)
+		}
+	}
+}

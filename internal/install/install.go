@@ -71,7 +71,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 	}
 	r := &Result{}
 	toolMode := cfg.Mode == "tool"
-	ns, hooksFile, hooks, skill, agents, server := parts(tmp, harness)
+	ns, _, hooks, skill, agents, server := parts(tmp, harness)
 	switch harness {
 	case "claude-code":
 		if err := r.mergeJSON(filepath.Join(root, ".claude", "settings.json"), func(m map[string]any) {
@@ -88,7 +88,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		r.copy(filepath.Join(tmp, "agents", "boxed.md"), filepath.Join(root, ".claude", "agents", "boxed.md"))
 		r.Notes = append(r.Notes, "PATH shims are not part of project settings; run `boxer shim install` where the agent's shell starts.")
 	case "codex":
-		r.copy(hooksFile, filepath.Join(root, ".codex", "hooks.json"))
+		r.mergeHooksFile(filepath.Join(root, ".codex", "hooks.json"), hooks)
 		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		// Codex resolves project configuration to the *main* repository, so in a linked worktree it
 		// never reads the worktree's own .codex/hooks.json — and every command then runs on the
@@ -97,7 +97,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		// on 2026-09-19: hooks in the worktree alone fire not once; the same hooks in the main
 		// repository fire SessionStart, PreToolUse and SessionEnd.
 		if main := mainRepo(root); main != "" {
-			r.copy(hooksFile, filepath.Join(main, ".codex", "hooks.json"))
+			r.mergeHooksFile(filepath.Join(main, ".codex", "hooks.json"), hooks)
 			r.Notes = append(r.Notes,
 				"This is a linked worktree, and Codex reads project hooks from the main repository, so the hooks were installed in "+main+" as well.")
 		}
@@ -167,7 +167,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 			"Kimi cannot rewrite tool input: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in, or run `boxer shim install` and prepend the directory to PATH.")
 	case "dsh":
 		r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml"))
-		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))
+		r.mergeHooksFile(filepath.Join(root, ".dsh", "hooks.json"), hooks)
 		r.copyTree(skill, filepath.Join(root, ".agents", "skills", "boxer"))
 		r.Notes = append(r.Notes,
 			"DSH has no project-level plugin config: boot it with the patch layer, `dsh --profile headless --patch .dsh/cordis.patch.yml \"<task>\"`, or copy those rows into $DSH_HOME/cordis.patch.yml to apply them to every profile.",
@@ -374,6 +374,18 @@ func (r *Result) mergeJSON(path string, edit func(map[string]any)) error {
 	}
 	r.Written = append(r.Written, path)
 	return nil
+}
+
+// mergeHooksFile adds boxer's hooks to a harness's hooks file and keeps whatever the user already
+// has there. Copying the bundled file over it, as install once did, silently deleted the user's
+// own hooks.
+func (r *Result) mergeHooksFile(path string, hooks map[string]any) {
+	if r.err != nil {
+		return
+	}
+	if err := r.mergeJSON(path, func(m map[string]any) { mergeHooks(m, hooks["hooks"]) }); err != nil {
+		r.keep(err)
+	}
 }
 
 // mergeHooks adds boxer's hook groups to m["hooks"], event by event, skipping a group when one
