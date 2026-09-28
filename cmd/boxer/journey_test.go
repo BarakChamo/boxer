@@ -428,8 +428,20 @@ func TestWatchCarriesEventsAsWellAsStateChanges(t *testing.T) {
 	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[telemetry]\nenabled = true\n")
 
 	r, w := io.Pipe()
-	go func() { run([]string{"watch", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard) }()
-	t.Cleanup(func() { _ = r.Close() })
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"watch", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard)
+	}()
+	// Closing the reader must end the watch. Waiting for it here, before the temporary
+	// directories are removed, is what stops a still-polling watch from writing into them.
+	t.Cleanup(func() {
+		_ = r.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("watch kept running after its reader closed")
+		}
+	})
 	lines := make(chan string, 64)
 	go func() {
 		sc := bufio.NewScanner(r)

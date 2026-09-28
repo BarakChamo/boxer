@@ -1255,23 +1255,31 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 		for _, m := range ms {
 			now[m.Name] = m.State
 			row := machineRow(m)
+			var werr error
 			switch was, had := seen[m.Name]; {
 			case !had && first:
-				emitWatch(enc, stdout, *asJSON, "present", row)
+				werr = emitWatch(enc, stdout, *asJSON, "present", row)
 			case !had:
-				emitWatch(enc, stdout, *asJSON, "created", row)
+				werr = emitWatch(enc, stdout, *asJSON, "created", row)
 			case was != m.State:
-				emitWatch(enc, stdout, *asJSON, m.State, row)
+				werr = emitWatch(enc, stdout, *asJSON, m.State, row)
+			}
+			if werr != nil {
+				return 0 // the reader went away; nothing is left to watch for
 			}
 		}
 		for name := range seen {
 			if _, still := now[name]; !still {
-				emitWatch(enc, stdout, *asJSON, "gone", machineJSON{Scope: name, State: "gone"})
+				if emitWatch(enc, stdout, *asJSON, "gone", machineJSON{Scope: name, State: "gone"}) != nil {
+					return 0
+				}
 			}
 		}
 		if all, err := obs.Read(events, "", 0); err == nil && len(all) > sentEvents {
 			for _, e := range all[sentEvents:] {
-				emitEvent(enc, stdout, *asJSON, e)
+				if emitEvent(enc, stdout, *asJSON, e) != nil {
+					return 0
+				}
 			}
 			sentEvents = len(all)
 		}
@@ -1289,29 +1297,29 @@ type watchEvent struct {
 
 // emitEvent puts one event from the log into the same stream as the state changes, so a consumer
 // reads one thing rather than correlating two.
-func emitEvent(enc *json.Encoder, w io.Writer, asJSON bool, e obs.Event) {
+func emitEvent(enc *json.Encoder, w io.Writer, asJSON bool, e obs.Event) error {
 	if asJSON {
-		_ = enc.Encode(struct {
+		return enc.Encode(struct {
 			Time   string    `json:"time"`
 			Change string    `json:"change"`
 			Event  obs.Event `json:"event"`
 		}{Time: e.Time.UTC().Format(time.RFC3339), Change: "event", Event: e})
-		return
 	}
 	outcome := e.Outcome
 	if outcome == "" {
 		outcome = "-"
 	}
-	fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", e.Time.Format("15:04:05"), e.Name, e.Scope, e.Harness, outcome)
+	_, err := fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", e.Time.Format("15:04:05"), e.Name, e.Scope, e.Harness, outcome)
+	return err
 }
 
-func emitWatch(enc *json.Encoder, w io.Writer, asJSON bool, change string, row machineJSON) {
+func emitWatch(enc *json.Encoder, w io.Writer, asJSON bool, change string, row machineJSON) error {
 	if asJSON {
-		_ = enc.Encode(watchEvent{Time: time.Now().UTC().Format(time.RFC3339), Change: change, Sandbox: row})
-		return
+		return enc.Encode(watchEvent{Time: time.Now().UTC().Format(time.RFC3339), Change: change, Sandbox: row})
 	}
 	who := attachment(row)
-	fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", time.Now().Format("15:04:05"), change, row.Scope, who, row.Worktree)
+	_, err := fmt.Fprintf(w, "%s  %-9s %-16s %-14s %s\n", time.Now().Format("15:04:05"), change, row.Scope, who, row.Worktree)
+	return err
 }
 
 // junitPatterns is where a run should look for reports: the flag, then the task's own list, then
