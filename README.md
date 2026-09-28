@@ -1,67 +1,75 @@
 # boxer
 
-Run coding agents in parallel without them colliding. Install boxer into your agent once, and every
-worktree it works in gets its own sandbox, with its own dev server and its own URL.
+**Parallel coding agents, each in its own sandbox.** boxer gives every git worktree its own
+microVM, dev server and URL. Install it into your agent once, and every task it starts is isolated
+from your machine and from the others.
 
-```console
-$ boxer ls        # two agent sessions, two worktrees, two sandboxes (some columns left out)
-NAME         STATE    BRANCH    SERVES
-mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
-olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
-```
+[![CI](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml/badge.svg)](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BarakChamo/boxer)](https://github.com/BarakChamo/boxer/releases)
+[![License](https://img.shields.io/github/license/BarakChamo/boxer)](LICENSE)
 
-Each Claude Code session created its worktree's sandbox when it started. Both dev servers run on
-port 3000 without clashing. When the agent runs `npm test`, boxer's hook
-runs it in that worktree's sandbox and hands back the output.
+<p align="center">
+  <img src="site/public/hero.svg" alt="Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL" width="860">
+</p>
 
 **[Documentation](https://barakchamo.github.io/boxer/docs)** ·
 [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) ·
-[Set up your agent](https://barakchamo.github.io/boxer/docs/setup)
+[Compared with](https://barakchamo.github.io/boxer/docs/comparison)
 
-## Why
+## Highlights
 
-I built boxer to make parallel agent work easy. Several agents on several worktrees share one
-machine. Two dev servers want port 3000, one task's installs break another's, and every command
-runs against your own system. boxer gives each worktree its own sandbox on the same machine,
-without a hosted platform and without changing your tools. It plugs into the agent or orchestrator
-you already use.
+- **A sandbox per worktree**, created when an agent starts working there. This includes worktrees
+  the agent or an orchestrator creates.
+- **No change to your agent.** A hook rewrites `npm test` into the sandbox before the shell runs it.
+  Output and exit codes come back as usual.
+- **No more port clashes.** Every worktree serves port 3000 inside its sandbox, and gets its own
+  `https://<branch>.<repo>.localhost` outside.
+- **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree, and
+  reaches only the hosts you allow.
+- **33 ms per command** in a running sandbox, within 4 ms of `docker exec`. A Next.js session is
+  ready in 7.6 s, against 6.8 s with no sandbox.
+- **Works with 10 coding agents and 6 orchestrators**, including Claude Code, Codex, Gemini CLI,
+  OpenCode, Conductor and T3 Code. Most are tested with live models in a 55-setup matrix.
+- **Local and open source.** No account, no upload.
 
 ## Install
 
 ```sh
-curl -sSL https://smolmachines.com/install.sh | bash                            # smolvm, the sandbox
+curl -sSL https://smolmachines.com/install.sh | bash                            # smolvm, the microVM runtime
 curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
 ```
 
 Or `go install github.com/BarakChamo/boxer/cmd/boxer@latest`. macOS on Apple Silicon, Linux on
 x86-64 or arm64.
 
-## Quick start
+## Get started
 
 ```sh
 cd your-repo
-boxer install claude-code            # or codex, gemini-cli, opencode, pi, grok, ...
+boxer install claude-code
 git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
 ```
 
-That is the whole setup. `boxer install` writes hooks, an MCP server, a skill and a subagent into
-the repository. Committed, they are in every worktree, including the ones your agent or orchestrator
-creates. From then on:
+That is the setup. From then on:
 
 1. **A session starts in a worktree.** boxer creates that worktree's sandbox, runs your `setup`,
    starts your dev server, and tells the agent where it is.
-2. **The agent runs `npm test`.** The hook rewrites it to `boxer run -c 'npm test'`. It runs in the
-   sandbox, and the agent sees the normal output.
+2. **The agent runs `npm test`.** The hook runs it in the sandbox. The agent sees the normal output.
 3. **Another session starts in another worktree.** It gets its own sandbox, with its own ports,
    tools and processes.
 4. **A worktree is deleted.** boxer removes its sandbox in the background.
 
-Build tools (`npm`, `node`, `python`, `go`, `make` and more) run in the sandbox. `git`, `gh` and
-`ssh` stay on your machine. Add a `boxer.toml` (below) to tell boxer how to set up your project. Some orchestrators need one
-more line of setup; each has a page.
-The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) walks through it.
+```console
+$ boxer ls        # two agent sessions, two worktrees (some columns left out)
+NAME         STATE    BRANCH    SERVES
+mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
+olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
+```
 
-## Set up your agent
+`git`, `gh` and `ssh` stay on your machine. The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart)
+covers the details.
+
+## Works with
 
 | Agent | Setup |
 | --- | --- |
@@ -72,14 +80,11 @@ The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) walks throu
 | OpenCode | `boxer install opencode` |
 | pi | `boxer install pi` |
 | Grok | `boxer install grok` |
-| Kimi Code, DSH | `boxer install kimi`, `boxer install dsh`, then tool mode |
-| fx, or anything else | `boxer shell <harness>` runs the agent inside the sandbox |
+| Kimi Code, DSH | `boxer install kimi`, `boxer install dsh`, plus tool mode |
+| fx, or any other agent | `boxer shell <harness>` runs the agent itself in the sandbox |
 
-Each has a [setup page](https://barakchamo.github.io/boxer/docs/setup) with what it writes and how
-to check it.
-
-Using an orchestrator? [Conductor, T3 Code, Paperclip, herdr, Multica and
-OpenHands](https://barakchamo.github.io/boxer/docs/orchestrators) each have a page.
+Orchestrators: [Conductor, T3 Code, Paperclip, herdr, Multica and
+OpenHands](https://barakchamo.github.io/boxer/docs/orchestrators).
 
 ## Configure your project
 

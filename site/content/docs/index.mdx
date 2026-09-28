@@ -6,22 +6,23 @@ description: Install boxer into your coding agent once. Every worktree it works 
 boxer gives every git worktree its own sandbox and runs your coding agent's commands in it. You
 install it into your agent once. After that you work as usual, and boxer handles the sandboxes.
 
+![Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL](/hero.svg)
+
 ## Why
 
 Codex and Claude Code create worktrees themselves, and orchestrators like Conductor run a task per
-worktree. Each worktree has its own files, but every task still shares your machine: one port 3000, one set of global tools, one home directory and every process left running.
-Two dev servers collide, one task's install breaks another's, and everything runs against your own
-system.
+worktree. Each worktree has its own files, but every task still shares your machine. Two dev
+servers fight over port 3000, one task's install breaks another's, and every command runs against
+your own system. boxer gives each worktree its own sandbox:
 
-boxer gives each worktree its own sandbox: a microVM with its own kernel, the worktree mounted in,
-and its own dev server on its own URL.
-
-```console
-$ boxer ls                  # two agents, two worktrees, some columns left out
-NAME         STATE    BRANCH    SERVES
-mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
-olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
-```
+- **A sandbox per worktree**, created when an agent starts working there, including worktrees the
+  agent or an orchestrator creates.
+- **No change to your agent.** A hook rewrites `npm test` into the sandbox before the shell runs it.
+- **No port clashes.** Every worktree serves port 3000 inside its sandbox, and gets its own
+  `https://<branch>.<repo>.localhost` outside.
+- **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree.
+- **33 ms per command**, within 4 ms of `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
+- **Local.** No account, no upload. See how it [compares](/docs/comparison) with the alternatives.
 
 ## What happens while your agent works
 

@@ -1,0 +1,49 @@
+---
+title: Compared with
+description: How boxer differs from your agent's built-in sandbox, a container per worktree, and cloud sandboxes.
+---
+
+There are three things people use today to keep agents apart. Each solves part of the problem.
+
+| | boxer | Agent's built-in sandbox | A container per worktree | Cloud sandbox |
+| --- | --- | --- | --- | --- |
+| Separate ports and dev server per task | yes, automatic | no | yes, if you map ports | yes |
+| Own kernel per task | yes, on smolvm | no | no | yes |
+| Follows worktrees the agent creates | yes | not applicable | no, you start each one | no |
+| Your agent keeps its normal shell | yes | yes | no, it has to exec in | no, it uses an SDK |
+| Code stays on your machine | yes | yes | yes | no |
+| Cost of one command | 33 ms | ~8 ms | ~29 ms (`docker exec`) | a network round trip |
+| Setup | `boxer install <agent>` | built in | a container definition, started per worktree | an account, an API key and an SDK |
+
+Local figures are from [Benchmarks](/docs/evals/benchmarks), measured on one Apple M4 Mac.
+
+## Your agent's built-in sandbox
+
+Claude Code and Codex can confine their own shell with seatbelt on macOS or landlock on Linux. That
+limits what a command can write and reach. It is fast, because it adds no kernel.
+
+It does not separate tasks from each other. Every session still shares your machine's ports, global
+tools, home directory and running processes. Two dev servers on port 3000 still collide.
+
+Use boxer instead of it, not on top of it. A hypervisor cannot start inside seatbelt or landlock, so
+turn the agent's own sandbox off when boxer is on. The [Codex page](/docs/setup/codex) shows how.
+
+## A container per worktree
+
+A devcontainer or a Compose file per worktree gives each task its own environment. You have to start
+one for each worktree, map ports so they do not clash, and point the agent's commands at it.
+Worktrees the agent creates mid-session get nothing.
+
+boxer automates that. It creates the sandbox when the agent starts working in a worktree and routes
+the agent's commands into it. It can use docker or podman as its backend, and it reads an existing
+`.devcontainer/devcontainer.json`. On its default backend each sandbox is a microVM, so tasks do not
+share a kernel. See [Backends](/docs/backends).
+
+## A cloud sandbox
+
+E2B, Vercel Sandbox and similar services run code in remote microVMs. They suit agents that run in
+the cloud, or code you do not want on your machine at all.
+
+For a coding agent on your laptop, the code has to be uploaded, every command crosses the network,
+and the agent needs an SDK or tool to use it. boxer keeps the worktree on your disk, mounted into a
+local microVM, and the agent keeps using its normal shell.
