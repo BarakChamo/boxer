@@ -1,17 +1,33 @@
 import Link from 'next/link';
 
 // Real output from two worktrees of one app, each serving port 3000 from its own sandbox.
-const demo = `$ cd ~/code/myapp-fix-ui   && boxer up
-$ cd ~/code/myapp-add-auth && boxer up
-$ boxer ls
+const demo = `# Claude Code, in the fix-ui worktree, runs:   npm test
+# boxer's hook runs it in fix-ui's sandbox:     boxer run -c 'npm test'
+
+$ boxer ls        # two agent sessions, two worktrees, two sandboxes
 NAME         STATE    BRANCH    SERVES
 mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
 olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355`;
 
+const steps = [
+  {
+    title: '1. Install it into your agent',
+    body: 'boxer install claude-code writes hooks, an MCP server, a skill and a subagent into your repository. Commit them once.',
+  },
+  {
+    title: '2. Work as usual',
+    body: 'When a session starts, boxer creates that worktree\'s sandbox and starts your dev server. Build commands like npm, node and make run inside it.',
+  },
+  {
+    title: '3. Run as many as you like',
+    body: 'Every new worktree gets its own sandbox, whoever created it: you, the agent, or an orchestrator. Deleted worktrees are cleaned up.',
+  },
+];
+
 const features = [
   {
     title: 'One sandbox per worktree',
-    body: 'Each git worktree gets its own microVM on the first command. boxer gc removes it after you delete the worktree.',
+    body: 'Each git worktree gets its own microVM when an agent session starts in it. Delete the worktree and boxer cleans the sandbox up.',
   },
   {
     title: 'Your agent does not change',
@@ -68,9 +84,9 @@ export default function HomePage() {
           without them colliding
         </h1>
         <p className="text-fd-muted-foreground max-w-2xl text-lg">
-          boxer gives every git worktree its own sandbox and runs your agent&apos;s commands in it.
-          Each task gets its own dev server and its own installed tools, in a microVM with its own
-          kernel, apart from your machine and from the other tasks.
+          Install boxer into your coding agent once. From then on, every worktree your agents work
+          in gets its own sandbox, with its own dev server and its own URL. You keep working as
+          before.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <Link
@@ -96,8 +112,20 @@ export default function HomePage() {
           <code>{demo}</code>
         </pre>
         <p className="text-fd-muted-foreground text-center text-sm">
-          Two worktrees, both serving port 3000, each in its own sandbox with its own URL.
+          Each session created its own sandbox. Both dev servers run on port 3000 without clashing.
         </p>
+      </section>
+
+      <section className="flex flex-col gap-6">
+        <h2 className="text-center text-2xl font-semibold">How it works</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {steps.map((s) => (
+            <div key={s.title} className="flex flex-col gap-2">
+              <h3 className="font-semibold">{s.title}</h3>
+              <p className="text-fd-muted-foreground text-sm">{s.body}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
@@ -133,7 +161,7 @@ export default function HomePage() {
       </section>
 
       <section className="flex flex-col items-center gap-3 text-center">
-        <h2 className="text-lg font-semibold">Set up in one command per agent</h2>
+        <h2 className="text-lg font-semibold">One command per agent, then commit</h2>
         <pre className="bg-fd-card border-fd-border overflow-x-auto rounded-xl border p-5 text-left text-sm">
           <code>{`boxer install claude-code
 git add .claude .mcp.json && git commit -m "Run agent commands in boxer"`}</code>

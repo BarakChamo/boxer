@@ -1,19 +1,18 @@
 # boxer
 
-Run coding agents in parallel without them colliding. boxer gives every git worktree its own
-sandbox and runs your agent's commands in it.
+Run coding agents in parallel without them colliding. Install boxer into your agent once, and every
+worktree it works in gets its own sandbox, with its own dev server and its own URL.
 
 ```console
-$ cd ~/code/myapp-fix-ui   && boxer up
-$ cd ~/code/myapp-add-auth && boxer up
-$ boxer ls                  # some columns left out
+$ boxer ls        # two agent sessions, two worktrees, two sandboxes (some columns left out)
 NAME         STATE    BRANCH    SERVES
 mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
 olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
 ```
 
-Two worktrees, both running a dev server on port 3000, each in its own microVM with its own URL.
-Your agent does not change. It runs `npm test`, and boxer runs it in that worktree's sandbox.
+Each Claude Code session created its worktree's sandbox when it started. Both dev servers run on
+port 3000 without clashing. When the agent runs `npm test`, boxer's hook
+runs it in that worktree's sandbox and hands back the output.
 
 **[Documentation](https://barakchamo.github.io/boxer/docs)** ·
 [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) ·
@@ -43,13 +42,24 @@ x86-64 or arm64.
 cd your-repo
 boxer install claude-code            # or codex, gemini-cli, opencode, pi, grok, ...
 git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
-boxer doctor                         # checks the setup
 ```
 
-Start Claude Code and ask it to run `node -p process.platform`. It prints `linux`, from the
-sandbox. Build tools (`npm`, `node`, `python`, `go`, `make` and more) run in the sandbox. `git`,
-`gh` and `ssh` stay on your machine. The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) adds a `boxer.toml`
-for your dev server.
+That is the whole setup. `boxer install` writes hooks, an MCP server, a skill and a subagent into
+the repository. Committed, they are in every worktree, including the ones your agent or orchestrator
+creates. From then on:
+
+1. **A session starts in a worktree.** boxer creates that worktree's sandbox, runs your `setup`,
+   starts your dev server, and tells the agent where it is.
+2. **The agent runs `npm test`.** The hook rewrites it to `boxer run -c 'npm test'`. It runs in the
+   sandbox, and the agent sees the normal output.
+3. **Another session starts in another worktree.** It gets its own sandbox, with its own ports,
+   tools and processes.
+4. **A worktree is deleted.** boxer removes its sandbox in the background.
+
+Build tools (`npm`, `node`, `python`, `go`, `make` and more) run in the sandbox. `git`, `gh` and
+`ssh` stay on your machine. Add a `boxer.toml` (below) to tell boxer how to set up your project. Some orchestrators need one
+more line of setup; each has a page.
+The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) walks through it.
 
 ## Set up your agent
 
@@ -87,7 +97,7 @@ allow_hosts = ["registry.npmjs.org"]      # everything else is blocked
 ports = ["auto:3000"]                     # a free host port per worktree
 
 [urls]
-enabled = true                            # https://<branch>.<repo>.localhost:1355
+enabled = true                            # https://<branch>.<repo>.localhost:1355, needs portless
 ```
 
 [Examples](examples/) cover Next.js, Vite, Python, Go and monorepos.

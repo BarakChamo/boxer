@@ -1,60 +1,89 @@
 ---
 title: What is boxer
-description: One sandbox per git worktree, so parallel coding agents stop colliding on your machine.
+description: Install boxer into your coding agent once. Every worktree it works in gets its own sandbox, automatically.
 ---
 
-boxer gives every git worktree its own sandbox and runs your coding agent's commands in it.
+boxer gives every git worktree its own sandbox and runs your coding agent's commands in it. You
+install it into your agent once. After that you work as usual, and boxer handles the sandboxes.
 
-Run three agents on three worktrees and they share one machine. They share one port 3000, one set
-of global packages, one home directory and every process left running. boxer moves each worktree's commands
-into its own microVM. The agent works as before. It runs `npm test`, and the command runs in that
-worktree's sandbox.
+## Why
+
+Codex and Claude Code create worktrees themselves, and orchestrators like Conductor run a task per
+worktree. Each worktree has its own files, but every task still shares your machine: one port 3000, one set of global tools, one home directory and every process left running.
+Two dev servers collide, one task's install breaks another's, and everything runs against your own
+system.
+
+boxer gives each worktree its own sandbox: a microVM with its own kernel, the worktree mounted in,
+and its own dev server on its own URL.
 
 ```console
-$ cd ~/code/myapp-fix-ui   && boxer up
-$ cd ~/code/myapp-add-auth && boxer up
-$ boxer ls                  # some columns left out
+$ boxer ls                  # two agents, two worktrees, some columns left out
 NAME         STATE    BRANCH    SERVES
 mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
 olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
 ```
 
-Both worktrees run their dev server on port 3000. Each gets its own sandbox and its own URL.
+## What happens while your agent works
 
-## What you get
+Once boxer is installed into your agent, this happens on its own:
 
-- **A sandbox per worktree.** Created on the first command, reused after that, removed when the
-  worktree is gone.
-- **No change to your agent.** A hook rewrites `npm test` to `boxer run -c 'npm test'` before the
-  shell runs it. Exit codes and output come back unchanged.
-- **Isolated from your machine.** Each sandbox has its own kernel. It sees the worktree and
-  nothing else of your filesystem. On smolvm it reaches only the network hosts you list.
-- **Dev servers that do not clash.** Each worktree gets a free host port, and optionally a stable
-  `https://<branch>.<repo>.localhost` URL.
-- **Low overhead.** A command in a running sandbox takes about 33 ms, close to
-  `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
+1. **A session starts in a worktree.** boxer's `SessionStart` hook creates that worktree's sandbox. It
+   boots the image, runs your `setup` (such as `npm ci`) and starts your dev server. Then it tells
+   the agent that commands run in a sandbox, which ones stay on the host, and where its dev server
+   is.
+2. **The agent runs a command.** It types `npm test` as usual. boxer's `PreToolUse` hook rewrites it to
+   `boxer run -c 'npm test'` before the shell runs it. The command runs in the sandbox, and the
+   agent gets the normal output and exit code.
+3. **A new worktree appears.** It does not matter who creates it: `codex --worktree`, Claude Code's
+   `EnterWorktree`, `git worktree add` from the agent's shell, or an orchestrator. boxer picks the sandbox from the directory each command runs in. The first command in the new
+   worktree creates its sandbox, with the same `setup` and `start`. Two worktrees never share a
+   sandbox.
+4. **A worktree is deleted.** boxer removes its sandbox. Any boxer command starts this cleanup in the background, at most every 6 hours (`auto_reclaim`). `boxer gc` runs it now.
+
+`git`, `gh` and `ssh` always run on your machine, with your credentials. Everything in the
+`intercept` list (`npm`, `node`, `python`, `go`, `make`, `cargo` and more) runs in the sandbox.
+
+## What `boxer install` sets up
+
+`boxer install <harness>` writes the files your agent reads. For Claude Code:
+
+| Piece | What it does | Enforces |
+| --- | --- | --- |
+| Hooks, in `.claude/settings.json` | create the sandbox at session start, and rewrite each shell command into it | yes |
+| MCP server, in `.mcp.json` | gives the agent a `boxer_run` tool and a live description of its sandbox | in tool mode |
+| Skill, in `.claude/skills/boxer/` | explains to the agent how commands run here and what to do if one is refused | no |
+| Subagent, in `.claude/agents/boxed.md` | a subagent that runs everything through boxer | no |
+
+The hooks do the work. The other pieces help the agent understand the sandbox, so it does not
+fight it. Commit the files. A worktree is cut from a branch, and the hooks have to be on it.
+
+## How boxer connects to each agent
+
+Agents expose different extension points. boxer uses the best one each agent has. Best means the
+agent keeps working unchanged and a command cannot slip past to your machine. From best to
+weakest:
+
+| Level | How it works | Used for |
+| --- | --- | --- |
+| Hook rewrite | a hook changes the command before the shell runs it | Claude Code, Codex, Gemini CLI, Copilot CLI, Grok |
+| Plugin or extension | the same, from inside the agent's process | OpenCode, pi |
+| Tool mode | the hook blocks the shell, so the agent runs commands with `boxer_run` | Kimi Code, DSH |
+| Inside mode | the agent itself runs in the sandbox, so nothing runs on your machine | fx, any agent without hooks, or when you want the agent off your machine too |
+| PATH shims | files named `npm`, `node` and so on that forward to the sandbox | an extra layer, or agents without hooks |
+| Skill and MCP tool only | the agent is asked to use boxer, and nothing forces it | agents boxer has no integration for |
+
+`boxer install` sets up the level for your agent. Kimi Code and DSH also need one line in
+`boxer.toml` to turn on tool mode. Inside mode is the strictest, but the agent's login and config
+have to reach the sandbox, so it is opt-in. [Integration levels](/docs/setup/integration-levels) has
+the details, and where each level can be bypassed.
 
 ## Where to start
 
-| You use | Go to |
-| --- | --- |
-| Claude Code, Codex, Gemini CLI, Copilot CLI, OpenCode, pi, Grok, Kimi Code or DSH | [Set up your agent](/docs/setup) |
-| Conductor, T3 Code, Paperclip, herdr, Multica or OpenHands | [Orchestrators](/docs/orchestrators) |
-| Your own scripts or tools | [Build on boxer](/docs/reference/building-on-boxer) |
-
-New to boxer? Do the [Quickstart](/docs/quickstart) first.
-
-## What is included
-
-| Part | What it does |
-| --- | --- |
-| `boxer` CLI | Creates sandboxes, runs commands in them, and removes them. One Go binary. |
-| Integrations | Hooks, plugins and PATH shims that route an agent's commands. `boxer install` writes them. |
-| MCP server | `boxer mcp` gives an agent a `boxer_run` tool. |
-| Skill and plugin | Tell an agent how commands run in this repository. They do not enforce anything. |
-| Go package and `--json` | Drive sandboxes from your own program. |
+- [Quickstart](/docs/quickstart): install boxer and connect your agent.
+- [Set up your agent](/docs/setup): one page per harness.
+- [Orchestrators](/docs/orchestrators): Conductor, T3 Code, Paperclip, herdr, Multica, OpenHands.
+- [Security](/docs/concepts/security): what the sandbox isolates, and what it does not.
 
 The default sandbox is a [smolvm](https://smolmachines.com) microVM. Apple `container`, docker and
-podman also work, with less isolation. See [Backends](/docs/backends).
-
-Runs on macOS on Apple Silicon, and Linux on x86-64 or arm64.
+podman also work, with less isolation. See [Backends](/docs/backends). boxer runs on macOS on Apple
+Silicon, and Linux on x86-64 or arm64.
