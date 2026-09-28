@@ -432,10 +432,12 @@ func TestWatchCarriesEventsAsWellAsStateChanges(t *testing.T) {
 	go func() {
 		done <- run([]string{"watch", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard)
 	}()
-	// Closing the reader must end the watch. Waiting for it here, before the temporary
-	// directories are removed, is what stops a still-polling watch from writing into them.
+	// Closing the reader must end the watch. A watch only finds out on its next write, so remove
+	// the sandbox to give it one ("gone"), then wait for it to return before the temporary
+	// directories are removed; otherwise a still-polling watch writes into them.
 	t.Cleanup(func() {
 		_ = r.Close()
+		call(t, nil, "down")
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
