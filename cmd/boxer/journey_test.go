@@ -466,6 +466,33 @@ func TestWatchCarriesEventsAsWellAsStateChanges(t *testing.T) {
 	}
 }
 
+// A watch whose reader has gone away stops, in either output form, rather than polling forever.
+func TestWatchStopsWhenItsOutputFails(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	for _, args := range [][]string{{"watch", "--interval", "20ms"}, {"watch", "--json", "--interval", "20ms"}} {
+		done := make(chan int, 1)
+		go func() { done <- run(args, strings.NewReader(""), failingWriter{}, io.Discard) }()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("%v: exit %d, want 0", args, code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%v kept running after every write failed", args)
+		}
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
 // Where a forwarded port landed is only discoverable from status, and with "auto" it is the only
 // way to know at all.
 func TestStatusReportsForwardedPorts(t *testing.T) {
