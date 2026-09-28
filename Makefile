@@ -111,5 +111,6 @@ clean:            ## remove build output and coverage
 clean-evals:      ## reclaim what the evaluation suite leaves on this host: scratch repos and its pack cache
 	@bin/boxer gc --all >/dev/null 2>&1 || true
 	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs \
-	  "$${TMPDIR:-/tmp}"/boxer-sdlc-base-* "$${TMPDIR:-/tmp}"/bxm-*
+	  "$${TMPDIR:-/tmp}"/boxer-sdlc-base-* "$${TMPDIR:-/tmp}"/bxm-* \
+	  "$${TMPDIR:-/tmp}"/matrix-*.agent.log "$${TMPDIR:-/tmp}"/matrix-*.trace.log
 	@echo "reclaimed the eval scratch directories and pack cache"

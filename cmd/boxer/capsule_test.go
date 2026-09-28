@@ -44,6 +44,17 @@ func TestCapsuleRecordsAndReplaysAFailure(t *testing.T) {
 	if code, out := call(t, nil, "capsule", "inspect", "capsule.toml"); code != 0 || !strings.Contains(out, "expect:    exit 4") {
 		t.Fatalf("inspect: %d %s", code, out)
 	}
+	// --json uses the manifest's own snake_case names, like every other --json shape.
+	var m map[string]any
+	if code, _ := call(t, &m, "capsule", "inspect", "--json", "capsule.toml"); code != 0 || m["version"] == nil {
+		t.Fatalf("inspect --json: %d %v", code, m)
+	}
+	if run, _ := m["run"].(map[string]any); run["command"] == nil {
+		t.Fatalf("inspect --json run: %v", m)
+	}
+	if exp, _ := m["expect"].(map[string]any); exp["exit"] != float64(4) {
+		t.Fatalf("inspect --json expect: %v", m)
+	}
 	if code, out := call(t, nil, "capsule", "replay", "capsule.toml"); code != 0 || !strings.Contains(out, "reproduced") {
 		t.Fatalf("replay: %d %s", code, out)
 	}

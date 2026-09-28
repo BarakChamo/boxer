@@ -29,8 +29,7 @@ These commands have a JSON form.
 | [`capsule inspect`](#boxer-capsule-inspect---json) | An object |
 | [`watch`](#watching) | One object per line |
 
-`up` and `run` accept `--json` for the [refusal](#errors) only. Fields are snake_case except in
-`capsule inspect`. Fields are added, never renamed or removed; ignore fields you do not know.
+`up` and `run` accept `--json` for the [refusal](#errors) only. Fields are snake_case. Fields are added, never renamed or removed; ignore fields you do not know.
 
 ## `boxer status --json`
 
@@ -252,16 +251,16 @@ machine remembers; a failed `boxer run` reports only those during that command.
 
 ## `boxer capsule inspect --json`
 
-The manifest, with Go field names rather than snake_case.
+The manifest, with the same field names as `capsule.toml`. Empty optional fields are left out.
 
 ```json
 {
-  "Version": 1, "Created": "2026-09-20T14:35:02Z", "Scope": "sb-7e1852e4a3c3",
-  "Image": "node:24-bookworm-slim", "Pack": "",
-  "Run": { "Task": "test", "Command": "npm test", "Dir": "." },
-  "Git": { "Head": "9f3c1a…", "Dirty": true, "Patch": "capsule.patch" },
-  "Config": { "Image": "", "ImageSetup": null, "Setup": ["npm ci"], "Env": null, "Mounts": null, "NetworkMode": "allowlist", "AllowHosts": [] },
-  "Expect": { "Exit": 1, "FailingTests": ["cart/CheckoutTest.applies_discount"] }
+  "version": 1, "created": "2026-09-20T14:35:02Z", "scope": "sb-7e1852e4a3c3",
+  "image": "node:24-bookworm-slim",
+  "run": { "task": "test", "command": "npm test", "dir": "." },
+  "git": { "head": "9f3c1a…", "dirty": true, "patch": "capsule.patch" },
+  "config": { "setup": ["npm ci"], "network_mode": "allowlist" },
+  "expect": { "exit": 1, "failing_tests": ["cart/CheckoutTest.applies_discount"] }
 }
 ```
 

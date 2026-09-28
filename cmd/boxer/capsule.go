@@ -26,46 +26,46 @@ import (
 // It deliberately does not preserve a machine. A prepared machine is a named pack; this is the
 // recipe and the oracle.
 type capsule struct {
-	Version int       `toml:"version"`
-	Created time.Time `toml:"created"`
-	Scope   string    `toml:"scope"`
-	Image   string    `toml:"image,omitempty"`
-	Pack    string    `toml:"pack,omitempty"`
+	Version int       `toml:"version" json:"version"`
+	Created time.Time `toml:"created" json:"created"`
+	Scope   string    `toml:"scope" json:"scope"`
+	Image   string    `toml:"image,omitempty" json:"image,omitempty"`
+	Pack    string    `toml:"pack,omitempty" json:"pack,omitempty"`
 
-	Run    capsuleRun    `toml:"run"`
-	Git    capsuleGit    `toml:"git"`
-	Config capsuleConfig `toml:"config"`
-	Expect capsuleExpect `toml:"expect"`
+	Run    capsuleRun    `toml:"run" json:"run"`
+	Git    capsuleGit    `toml:"git" json:"git"`
+	Config capsuleConfig `toml:"config" json:"config"`
+	Expect capsuleExpect `toml:"expect" json:"expect"`
 }
 
 type capsuleRun struct {
-	Task    string `toml:"task,omitempty"`
-	Command string `toml:"command"`
-	Dir     string `toml:"dir"`
+	Task    string `toml:"task,omitempty" json:"task,omitempty"`
+	Command string `toml:"command" json:"command"`
+	Dir     string `toml:"dir" json:"dir"`
 }
 
 type capsuleGit struct {
-	Head  string `toml:"head,omitempty"`
-	Dirty bool   `toml:"dirty"`
-	Patch string `toml:"patch,omitempty"`
+	Head  string `toml:"head,omitempty" json:"head,omitempty"`
+	Dirty bool   `toml:"dirty" json:"dirty"`
+	Patch string `toml:"patch,omitempty" json:"patch,omitempty"`
 }
 
 // capsuleConfig is only the configuration that changes what a command does. Replaying overlays
 // these onto the resolved config instead of re-reading boxer.toml: a capsule that picked up
 // whatever the repository says today would reproduce a different run.
 type capsuleConfig struct {
-	Image       string            `toml:"image,omitempty"`
-	ImageSetup  []string          `toml:"image_setup,omitempty"`
-	Setup       []string          `toml:"setup,omitempty"`
-	Env         map[string]string `toml:"env,omitempty"`
-	Mounts      []string          `toml:"mounts,omitempty"`
-	NetworkMode string            `toml:"network_mode,omitempty"`
-	AllowHosts  []string          `toml:"allow_hosts,omitempty"`
+	Image       string            `toml:"image,omitempty" json:"image,omitempty"`
+	ImageSetup  []string          `toml:"image_setup,omitempty" json:"image_setup,omitempty"`
+	Setup       []string          `toml:"setup,omitempty" json:"setup,omitempty"`
+	Env         map[string]string `toml:"env,omitempty" json:"env,omitempty"`
+	Mounts      []string          `toml:"mounts,omitempty" json:"mounts,omitempty"`
+	NetworkMode string            `toml:"network_mode,omitempty" json:"network_mode,omitempty"`
+	AllowHosts  []string          `toml:"allow_hosts,omitempty" json:"allow_hosts,omitempty"`
 }
 
 type capsuleExpect struct {
-	Exit         int      `toml:"exit"`
-	FailingTests []string `toml:"failing_tests,omitempty"`
+	Exit         int      `toml:"exit" json:"exit"`
+	FailingTests []string `toml:"failing_tests,omitempty" json:"failing_tests,omitempty"`
 }
 
 func capsuleCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {

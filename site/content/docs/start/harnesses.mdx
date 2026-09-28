@@ -52,7 +52,8 @@ Some harnesses need one more step, which `boxer install` prints as a note:
   repository. The hooks load without a prompt once the folder is trusted.
 - **Codex**: add the MCP server to `.codex/config.toml`, and trust the project hooks (see below).
 - **Kimi**: its hooks live only in the user config; append the printed block to
-  `~/.kimi-code/config.toml` and set `[harness.kimi] mode = "tool"` in `boxer.toml`.
+  `~/.kimi-code/config.toml` and set `[harness.kimi] mode = "tool"` in `boxer.toml`. PATH shims
+  also work in Kimi's shell ([Enforcement](/docs/guides/enforcement#path-shims)).
 - **DSH**: start it with `--patch .dsh/cordis.patch.yml`, and set `[harness.dsh] mode = "tool"`.
 - **Grok** and **pi**: trust the project folder once, or project hooks and extensions do not load.
 

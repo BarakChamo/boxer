@@ -165,13 +165,12 @@ type Results struct {
 
 // Config is the fully resolved configuration.
 type Config struct {
-	Isolation             string   `toml:"isolation"`
-	OnMissingID           string   `toml:"on_missing_id"`
-	RequireWorktree       string   `toml:"require_worktree"`
-	RequireLinkedWorktree bool     `toml:"require_linked_worktree"`
-	CreateOn              []string `toml:"create_on"`
-	DestroyOn             []string `toml:"destroy_on"`
-	IdleTimeout           string   `toml:"idle_timeout"`
+	Isolation       string   `toml:"isolation"`
+	OnMissingID     string   `toml:"on_missing_id"`
+	RequireWorktree string   `toml:"require_worktree"`
+	CreateOn        []string `toml:"create_on"`
+	DestroyOn       []string `toml:"destroy_on"`
+	IdleTimeout     string   `toml:"idle_timeout"`
 	// AutoReclaim lets an ordinary command sweep what it no longer needs — sandboxes whose
 	// worktree is gone, sandboxes idle past idle_timeout, and unreferenced packs — at most once
 	// every reclaim_every. Without it nothing reclaims anything until someone runs `boxer gc` by
@@ -185,8 +184,7 @@ type Config struct {
 	// PacksKeepLast bounds the pack cache by count as well as by age: an environment that changes
 	// often leaves a pack per version, each of them hundreds of megabytes, and all of them younger
 	// than idle_timeout. 0 keeps every pack the idle rule allows.
-	PacksKeepLast int  `toml:"packs_keep_last"`
-	ReuseExisting bool `toml:"reuse_existing"`
+	PacksKeepLast int `toml:"packs_keep_last"`
 	// WarmOnSessionStart makes the SessionStart hook provision in a detached `boxer up` and
 	// return at once, so the session is never blocked on a VM create.
 	WarmOnSessionStart bool `toml:"warm_on_session_start"`
@@ -284,39 +282,37 @@ type Config struct {
 // Defaults are the values with no file present.
 func Defaults() Config {
 	return Config{
-		Backend:               "smolvm",
-		Cache:                 CacheConfig{Enabled: true, Managers: []string{"auto"}},
-		Prep:                  PrepConfig{Target: "auto"},
-		URLs:                  URLsConfig{Provider: "portless"},
-		Isolation:             "worktree",
-		OnMissingID:           "degrade",
-		RequireWorktree:       "warn",
-		CreateOn:              []string{"session_start", "run", "mcp"},
-		DestroyOn:             []string{},
-		IdleTimeout:           "2h",
-		AutoReclaim:           true,
-		ReclaimEvery:          "6h",
-		MinFreeGB:             5,
-		PacksKeepLast:         5,
-		ReadyTimeout:          "60s",
-		ReuseExisting:         true,
-		Integration:           "outside",
-		Mode:                  "rewrite",
-		Enforcement:           "both",
-		OnSandboxUnavailable:  "fail",
-		Intercept:             []string{"npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno", "python", "python3", "pip", "uv", "pytest", "cargo", "rustc", "go", "make", "cmake"},
-		Passthrough:           []string{"git", "gh", "ssh", "boxer", "smolvm"},
-		MountAt:               "/workspace",
-		CPUs:                  4,
-		Memory:                "4G",
-		EnvPassthrough:        []string{"CI"},
-		Network:               Network{Mode: "allowlist", AllowHosts: []string{}},
-		Telemetry:             Telemetry{Sink: "none"},
-		Worktree:              Worktree{Manage: "off"},
-		Harness:               map[string]Override{},
-		Tasks:                 map[string]Task{},
-		Sources:               map[string]string{},
-		RequireLinkedWorktree: false,
+		Backend:              "smolvm",
+		Cache:                CacheConfig{Enabled: true, Managers: []string{"auto"}},
+		Prep:                 PrepConfig{Target: "auto"},
+		URLs:                 URLsConfig{Provider: "portless"},
+		Isolation:            "worktree",
+		OnMissingID:          "degrade",
+		RequireWorktree:      "warn",
+		CreateOn:             []string{"session_start", "run", "mcp"},
+		DestroyOn:            []string{},
+		IdleTimeout:          "2h",
+		AutoReclaim:          true,
+		ReclaimEvery:         "6h",
+		MinFreeGB:            5,
+		PacksKeepLast:        5,
+		ReadyTimeout:         "60s",
+		Integration:          "outside",
+		Mode:                 "rewrite",
+		Enforcement:          "both",
+		OnSandboxUnavailable: "fail",
+		Intercept:            []string{"npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno", "python", "python3", "pip", "uv", "pytest", "cargo", "rustc", "go", "make", "cmake"},
+		Passthrough:          []string{"git", "gh", "ssh", "boxer", "smolvm"},
+		MountAt:              "/workspace",
+		CPUs:                 4,
+		Memory:               "4G",
+		EnvPassthrough:       []string{"CI"},
+		Network:              Network{Mode: "allowlist", AllowHosts: []string{}},
+		Telemetry:            Telemetry{Sink: "none"},
+		Worktree:             Worktree{Manage: "off"},
+		Harness:              map[string]Override{},
+		Tasks:                map[string]Task{},
+		Sources:              map[string]string{},
 	}
 }
 
@@ -577,8 +573,11 @@ func (c Config) Validate() error {
 		}
 	}
 	for name, o := range c.Harness {
-		if o.Mode != "" && !slices.Contains([]string{"rewrite", "tool", "off"}, o.Mode) {
-			return fmt.Errorf("harness.%s.mode = %q", name, o.Mode)
+		for _, ch := range checks {
+			val := map[string]string{"mode": o.Mode, "enforcement": o.Enforcement, "isolation": o.Isolation}[ch.key]
+			if val != "" && !slices.Contains(ch.allowed, val) {
+				return fmt.Errorf("harness.%s.%s = %q; allowed: %s", name, ch.key, val, strings.Join(ch.allowed, " | "))
+			}
 		}
 	}
 	for _, name := range c.TaskNames() {

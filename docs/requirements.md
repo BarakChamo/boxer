@@ -169,8 +169,8 @@ Requirements:
 - **R-WT-2.** Under `require`, a command issued from a path that is not inside a git worktree is
   refused, and under a hook-capable harness the refusal happens in `PreToolUse` with an explanation,
   not as a shell error.
-- **R-WT-3.** The main checkout counts as a worktree unless `require_linked_worktree` is set, which
-  demands a linked worktree specifically.
+- **R-WT-3.** The main checkout counts as a worktree. `require_worktree = "require"` refuses it and
+  demands a linked worktree; `"warn"`, the default, runs and warns.
 - **R-WT-4.** The worktree root is mounted into the guest at a fixed path (`/workspace` by default),
   and cwd is translated on every `run`: host `<worktree>/a/b` becomes guest `/workspace/a/b`.
 
@@ -369,7 +369,6 @@ variable for harnesses that only offer environment control.
 isolation          = "worktree"   # repo | worktree | session | subagent
 on_missing_id      = "degrade"    # degrade | fail
 require_worktree   = "warn"       # off | warn | require
-require_linked_worktree = false
 
 # Lifecycle
 create_on          = ["session_start", "run", "mcp"]  # run = lazily on first sandboxed command; mcp = on MCP initialize
@@ -379,7 +378,6 @@ auto_reclaim       = true                  # an ordinary command sweeps in the b
 reclaim_every      = "6h"
 min_free_gb        = 5                     # below this, pull the image rather than caching it
 packs_keep_last    = 5                     # unreferenced packs kept, newest first
-reuse_existing     = true
 
 # Enforcement
 mode               = "rewrite"    # rewrite | tool | off  (per-harness override: [harness.<name>].mode)
@@ -752,8 +750,8 @@ available there, so DSH is a tool-mode harness. All of this is **verified 2026-0
   supports and rewriting is what that integration does wherever hooks accept one. `tool` is the
   default only for the harnesses whose hooks cannot rewrite, through `[harness.<name>]`.
 - **R-LVL-2.** Command rewrite is the default mode, active where a harness's hooks accept a
-  rewritten command: Claude Code, Codex, Gemini CLI, OpenCode, pi, Grok, Copilot CLI. Kimi ignores `updatedInput` and its shell ignores PATH
-  shims (verified 0.43.1); DSH's hook bridge logs and ignores `updatedInput` (verified 0.1.5-rc.2,
+  rewritten command: Claude Code, Codex, Gemini CLI, OpenCode, pi, Grok, Copilot CLI. Kimi ignores `updatedInput` (verified 0.43.1; its
+  shell does honour PATH shims, measured by the matrix); DSH's hook bridge logs and ignores `updatedInput` (verified 0.1.5-rc.2,
   2026-09-18). Both are tool-mode harnesses. DSH keeps its hook bundle — the bridge's deny and its
   `UserPromptSubmit` provisioning are real — while Kimi's is dropped.
 - **R-LVL-3.** Gap closure in tool mode prefers the harness's native shell-tool removal (Claude

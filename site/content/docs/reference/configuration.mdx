@@ -77,12 +77,6 @@ refuses with `WORKTREE_REQUIRED`, `off` says nothing.
 require_worktree = "require"
 ```
 
-### `require_linked_worktree`
-
-`bool`, default `false`.
-
-Accepted and has no effect in this release. Use `require_worktree = "require"`.
-
 ### `worktree.manage`
 
 `string`, default `"off"`. One of `off`, `detect`. Env `BOXER_WORKTREE_MANAGE`.
@@ -618,12 +612,6 @@ the sandbox after the session, for `gc` to reclaim when idle.
 destroy_on = ["session_end"]
 ```
 
-### `reuse_existing`
-
-`bool`, default `true`.
-
-Accepted and has no effect in this release. A scope always reuses its sandbox.
-
 ### `warm_on_session_start`
 
 `bool`, default `false`. Env `BOXER_WARM_ON_SESSION_START`.
@@ -698,7 +686,7 @@ packs_keep_last = 2
 `table`, default none.
 
 Overrides for one harness, applied after every file and variable. Only `mode`, `enforcement` and
-`isolation` are accepted. `<name>` is the harness name `boxer install` takes, and the call selects
+`isolation` are accepted, each checked against the same values as the top-level key. `<name>` is the harness name `boxer install` takes, and the call selects
 it with `--harness` or `BOXER_HARNESS`.
 
 ```toml

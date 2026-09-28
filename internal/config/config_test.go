@@ -57,6 +57,37 @@ func TestUnknownKeyIsError(t *testing.T) {
 	}
 }
 
+// A [harness.<name>] override is held to the same enumerations as the top-level key it replaces:
+// a typo in its enforcement or isolation must not quietly fall back to something weaker.
+func TestHarnessOverrideEnumsAreChecked(t *testing.T) {
+	d := t.TempDir()
+	for _, c := range []struct{ body, want string }{
+		{"[harness.claude-code]\nenforcement = \"hoook\"\n", "harness.claude-code.enforcement"},
+		{"[harness.codex]\nisolation = \"sesion\"\n", "harness.codex.isolation"},
+		{"[harness.kimi]\nmode = \"tools\"\n", "harness.kimi.mode"},
+	} {
+		p := write(t, d, "h.toml", c.body)
+		if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "allowed:") {
+			t.Errorf("%q: want %s error with the allowed values, got %v", c.body, c.want, err)
+		}
+	}
+	p := write(t, d, "ok.toml", "[harness.codex]\nenforcement = \"hook\"\nisolation = \"session\"\nmode = \"tool\"\n")
+	if _, err := LoadFiles(p); err != nil {
+		t.Fatalf("valid override refused: %v", err)
+	}
+}
+
+// Keys that were accepted and did nothing are gone; naming one is the same error as a typo.
+func TestRemovedKeysAreErrors(t *testing.T) {
+	d := t.TempDir()
+	for _, k := range []string{"require_linked_worktree = true", "reuse_existing = false"} {
+		p := write(t, d, "r.toml", k+"\n")
+		if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "unknown key") {
+			t.Errorf("%s: want unknown key error, got %v", k, err)
+		}
+	}
+}
+
 func TestEnumIsError(t *testing.T) {
 	d := t.TempDir()
 	p := write(t, d, "b.toml", "mode = \"rewrtie\"\n")

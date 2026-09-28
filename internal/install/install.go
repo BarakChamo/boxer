@@ -164,7 +164,7 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 		toml, _ := os.ReadFile(filepath.Join(ns, "hooks.toml"))
 		r.Notes = append(r.Notes,
 			"Kimi hooks live in the user config only; append this to ~/.kimi-code/config.toml:\n"+strings.TrimSpace(string(toml)),
-			"Kimi cannot rewrite tool input and its Bash tool ignores PATH shims: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in.")
+			"Kimi cannot rewrite tool input: set [harness.kimi] mode = \"tool\" in boxer.toml so the hook denies shell use and boxer_run is the way in, or run `boxer shim install` and prepend the directory to PATH.")
 	case "dsh":
 		r.copy(filepath.Join(ns, "cordis.patch.yml"), filepath.Join(root, ".dsh", "cordis.patch.yml"))
 		r.copy(hooksFile, filepath.Join(root, ".dsh", "hooks.json"))

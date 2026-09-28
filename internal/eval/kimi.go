@@ -31,8 +31,9 @@ func (Kimi) Available(tier string) (bool, string) {
 
 func (Kimi) Cells(tier string) []Cell {
 	h := "kimi"
-	// Kimi cannot rewrite tool input and its Bash tool ignores a prepended PATH, so neither the hook
-	// nor shims can put a bare command in the guest (verified 2026-09-17). Kimi is tool-mode only.
+	// Kimi cannot rewrite tool input, so the hook can only deny: these cells are tool mode. PATH
+	// shims do reach the guest from Kimi's Bash tool (0.43.1; the matrix's kimi/shims cells), which
+	// corrects an earlier note here that said they did not.
 	only := []string{"uname"}
 	return []Cell{
 		{Harness: h, Mode: "tool", Entry: "user", Isolation: "worktree", Compliant: true, Tier: tier, Intercept: only},
