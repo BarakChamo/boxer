@@ -1,0 +1,18 @@
+---
+title: OpenHands
+description: Make OpenHands' whole terminal a boxer sandbox by setting its shell.
+---
+
+OpenHands lets you choose its terminal's shell. Point it at `boxer-bash` and every command the
+agent types runs in the sandbox, with no integration in the agent itself.
+
+```sh
+boxer shim install --shell
+```
+
+This writes `~/.local/share/boxer/shims/boxer-bash`. Set it as the terminal tool's `shell_path`.
+
+For code that calls `workspace.execute_command` directly, `adapters/openhands` has a
+`BoxerWorkspace`.
+
+Tested in the matrix, 1 of 1 cells.

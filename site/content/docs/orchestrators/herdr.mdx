@@ -1,0 +1,38 @@
+---
+title: herdr
+description: Sandbox herdr panes with the committed project layer.
+---
+
+herdr runs an agent interactively in a terminal pane. The pane inherits herdr's environment, so
+the committed project layer applies.
+
+## Set up
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
+```
+
+herdr starts the agent itself, so you cannot pass `--permission-mode`. Grant permissions in the
+project settings, and include `Skill`. Using boxer's skill needs its own permission, and a pane
+waiting on `Use skill "boxer"?` looks like a hang.
+
+## Run the agent itself in the sandbox
+
+Put the directory from `boxer shim install --harness claude,codex` first on herdr's `PATH`. Then
+`herdr agent start --kind claude` runs `boxer shell claude`.
+
+The repository has a herdr plugin in `adapters/herdr` that adds a pane action for
+`boxer shell claude` and warms the sandbox when herdr creates a worktree:
+
+```sh
+herdr plugin link adapters/herdr
+```
+
+## A sandboxed shell in every pane
+
+`boxer shim install --shell` writes `boxer-bash`, a shell whose commands all run in the sandbox.
+Set herdr's `terminal.default_shell` to it for panes you type in. herdr cannot attach its own agent
+to such a pane, because it identifies a pane by its foreground process, which is then `boxer`.
+
+Tested in the matrix, 2 of 2 cells.

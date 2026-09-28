@@ -1,0 +1,151 @@
+---
+title: Manage sandboxes
+description: List every sandbox on the machine, remove the ones you do not need, and check that backends and integrations work.
+---
+
+List, remove and check the sandboxes on your machine.
+
+| Command | What it does |
+| --- | --- |
+| `boxer ls` | List every sandbox and its worktree |
+| `boxer rm`, `boxer gc` | Remove sandboxes |
+| `boxer backends` | Check the backends |
+| `boxer integrations` | Check the harness and orchestrator integrations |
+
+## List sandboxes
+
+```console
+$ boxer ls -A
+NAME          SCOPE            STATE    BACKEND  BRANCH            GIT       ATTACHED     SERVES                              WORKTREE
+swift-crab    sb-7e1852e4a3c3  running  smolvm   fix-ui ↑2↓0 #42   dirty(3)  claude-code  https://fix-ui.myapp.localhost:1355  ~/src/myapp-fix-ui
+olive-fern    sb-2b107321041f  running  docker   main              gone      codex        -                                   ~/src/old-task
+→ boxer rm --gone  1 sandbox serves a worktree that no longer exists
+```
+
+| Column or flag | Meaning |
+| --- | --- |
+| `-A`, `--all-backends` | Look on every installed backend. Without it, boxer looks only on the configured one. |
+| `SCOPE` | The sandbox's key. See [scopes](/docs/concepts/scopes-and-packs). |
+| `BRANCH` | The worktree's branch and its distance from upstream. |
+| `--pr` | Add the branch's pull request, through `gh`. It makes one network call per worktree, so it is off by default. |
+| `GIT` | `clean`, `dirty(n)` or `gone`. `gone` means the worktree was deleted and the sandbox is waiting to be reclaimed. |
+| `ATTACHED` | The harness and session that created the sandbox, if they reported one. |
+| `SERVES` | The sandbox's [URL](/docs/configure/urls) or forwarded port. |
+| `--resources` | Add memory, CPU and disk. |
+
+For the current worktree only, run `boxer status`. To print only its address, run `boxer url`.
+
+## Remove sandboxes
+
+```sh
+boxer rm swift-crab             # by name or scope key
+boxer rm --gone                 # every sandbox whose worktree no longer exists
+boxer rm --stopped              # every one that is not running
+boxer rm --all                  # every one on the configured backend (-A: every backend)
+boxer rm -i                     # choose from a list
+boxer stop swift-crab           # stop without removing
+```
+
+`rm` also deletes everything boxer kept about the sandbox, including its run record, its lock and
+its URL.
+
+- With a filter (`--gone`, `--stopped`, `--all`), boxer asks before it removes anything. Pass `-y`
+  to skip the question.
+- A sandbox you name on the command line is removed without asking.
+
+## Reclaim space
+
+```sh
+boxer gc --dry-run    # print what would go
+boxer gc              # sandboxes whose worktree is gone or unused past idle_timeout, and old packs
+boxer gc --all        # also every stopped sandbox and every unreferenced pack (running ones stay)
+```
+
+`idle_timeout` defaults to `2h`. `auto_reclaim` is on by default. With it on, ordinary commands run
+the same sweep in the background, at most once every `reclaim_every` (`6h`).
+
+## Check the backends
+
+```console
+$ boxer backends --probe
+BACKEND    STATUS  VERSION  BOUNDARY   ALLOWLIST  SANDBOXES  PROBE
+smolvm *   ready   1.16.1   kernel     yes        0          ok 7.0s
+docker     ready   29.4.0   namespace  no         0          ok 0.3s
+podman     ready   5.8.7    namespace  no         0          ok 0.5s
+container  ready   1.4.1    kernel     no         0          ok 1.0s
+```
+
+This output is from an Apple Silicon Mac with every image cached. A first probe also pulls an
+image.
+
+`*` marks the configured backend.
+
+- Without `--probe`, boxer only asks each runtime whether it answers.
+- With `--probe`, boxer creates a sandbox on each backend, runs a command, checks that the write
+  reached the host, and removes the sandbox.
+
+Known misconfigurations are listed under the table. See
+[Backends](/docs/backends#known-runtime-problems).
+
+## Check the integrations
+
+```console
+$ boxer integrations
+INTEGRATION  KIND          ON PATH  THIS REPO  USER  SKILL
+claude-code  harness       yes      yes        -     yes
+codex        harness       yes      -          yes   yes
+copilot      harness       yes      -          -     -
+conductor    orchestrator  -        -          -     -
+git-hook     orchestrator  -        yes        -     -
+portless     tool          yes      -          -     -
+→ boxer integrations add <name>  on PATH and not wired to boxer: copilot
+```
+
+For each integration, the table shows:
+
+- whether its program is on `PATH`
+- whether boxer's hooks, skill and MCP entry are installed in this repository (`THIS REPO`) and for
+  your user (`USER`)
+- `stale` if the installed files came from another boxer release
+
+
+
+To install one:
+
+```sh
+boxer integrations add claude-code    # the same as boxer install claude-code
+```
+
+To install the skill or the plugin package, see [Skills and plugins](/docs/setup/skills-and-plugins).
+
+## Choose the output format
+
+boxer picks its output format from who is reading.
+
+| Reader | Output |
+| --- | --- |
+| A person at a terminal | Colour, aligned tables, a `→` hint about what to run next, and a question before anything destructive |
+| An agent or a pipe | Plain text, a `next:` line with the exact command, and no prompts. A command that would have asked refuses instead and names the flag to pass. |
+| A program | `--json` |
+
+To override the choice:
+
+| Setting | Effect |
+| --- | --- |
+| `--json` | One JSON document on stdout, on any command that has a JSON form |
+| `BOXER_OUTPUT=json` | The same, for a caller that cannot add a flag |
+| `BOXER_OUTPUT=text` / `human` | Force plain or human output |
+| `BOXER_AGENT=1` | Mark an agent whose shell runs on a terminal |
+| `NO_COLOR` | No colour, even for a person |
+
+boxer recognises Claude Code by the `CLAUDECODE` variable it sets. Other agents run commands
+without a terminal, and boxer detects that.
+
+The table layout can change between releases. Parse `--json` instead. The shapes are in the
+[JSON reference](/docs/reference/json).
+
+## Shell completion
+
+```sh
+boxer completion zsh > "${fpath[1]}/_boxer"    # or bash, fish
+```

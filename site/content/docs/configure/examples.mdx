@@ -1,25 +1,35 @@
 ---
-title: Start from an example
+title: Examples
 description: Working boxer.toml files for Next.js, Vite, Python, Go, monorepos, devcontainers and other backends, and a Go program that embeds boxer.
 ---
 
+Start from a working `boxer.toml` for your stack.
+
 The repository's [`examples/`](https://github.com/BarakChamo/boxer/tree/main/examples) directory
-has a `boxer.toml` for each common setup. Each is a **runnable** project, a **config** to drop into
-an existing one, or a **program** that uses boxer as a library. The test suite loads every
-`boxer.toml` and `devcontainer.json` there, and every `boxer.toml` except `monorepo`'s has been run
-on a real sandbox.
+has one for each common setup:
 
 | example | kind | shows |
 | --- | --- | --- |
 | `nextjs` | config | a Next.js dev server per worktree, `[urls]`, `allowedDevOrigins`, tasks |
-| `nextjs-devcontainer` | config | the same from `devcontainer.json` plus a short `boxer.toml`: users, port labels, variables |
+| `nextjs-devcontainer` | config | the same from `devcontainer.json` plus a short `boxer.toml`, with users, port labels and variables |
 | `vite` | runnable | Vite with `--strictPort`, a name per worktree |
-| `python-fastapi` | runnable | uv: a tool in `image_setup`, the project in `setup` |
+| `python-fastapi` | runnable | uv, with a tool in `image_setup` and the project in `setup` |
 | `go-api` | runnable | a Go service, tasks for test and vet |
 | `monorepo` | config | two services in one sandbox, named ports, JUnit-reporting tasks |
 | `host-prep` | config | installing on the host with `[prep]`, and when not to |
 | `docker-backend` | config | the same project on docker or podman, and what that gives up |
 | `go-embed` | program | `pkg/boxer` running one command in several worktrees at once |
+
+| kind | what it is |
+| --- | --- |
+| runnable | a project you can run as is |
+| config | a `boxer.toml` to drop into an existing project |
+| program | a Go program that uses boxer as a library |
+
+The test suite loads every `boxer.toml` and `devcontainer.json` there. Every `boxer.toml` except
+`monorepo`'s has been run on a real sandbox.
+
+## Run an example
 
 A runnable example must be its own git repository, because boxer keys a sandbox to a worktree:
 
@@ -29,7 +39,7 @@ git init -q && git add -A && git commit -qm init
 boxer up && curl -sk "$(boxer url)"
 ```
 
-The snippets below are trimmed. The files carry comments and more tasks, and each directory's
+The snippets below are trimmed. The files have comments and more tasks. Each directory's
 `README.md` lists its gotchas.
 
 ## Next.js
@@ -59,7 +69,7 @@ const nextConfig = { allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"
 export default nextConfig;
 ```
 
-`boxer up`, then `boxer url`. In a second worktree the same file gives a second server at
+Run `boxer up`, then `boxer url`. A second worktree gets a second server at
 `https://<branch>.<repo>.localhost:1355`, with its own `node_modules` and `.next`.
 
 ## Python with uv
@@ -80,9 +90,11 @@ ports = ["auto:8000"]
 enabled = true
 ```
 
-Installing uv changes the image, so it is `image_setup`: run once and cached for every worktree.
-The project's dependencies land in this worktree's `.venv`, so they are `setup`. See
-[environment](/docs/guides/environment).
+- uv goes in `image_setup` because installing it changes the image. It runs once and is cached
+  for every worktree.
+- The project's dependencies go in `setup` because they land in this worktree's `.venv`.
+
+See [Install dependencies](/docs/configure/environment#install-dependencies).
 
 ## Go
 
@@ -108,9 +120,9 @@ With module dependencies, add `go mod download` to `setup` and `"proxy.golang.or
 
 ## From a devcontainer
 
-boxer reads `.devcontainer/devcontainer.json` as its first layer. A short `boxer.toml` beside it
-adds what devcontainer has no key for, above all the allowlist, since boxer's default network
-reaches only the image registry:
+boxer reads `.devcontainer/devcontainer.json` first. Add a short `boxer.toml` beside it for what
+devcontainer has no key for. The main one is the allowlist, because boxer's default network reaches
+only the image registry:
 
 ```toml
 [network]
@@ -122,22 +134,22 @@ enabled = true
 
 ## Embedding boxer in Go
 
-`go-embed` opens a sandbox per worktree with `pkg/boxer`, runs one shell line in all of them at
-once, and prints each exit code. Run it from a boxer checkout:
+`go-embed` uses `pkg/boxer` to open a sandbox per worktree. It runs one shell line in all of them
+at once and prints each exit code. Run it from a boxer checkout:
 
 ```sh
 go run ./examples/go-embed -- 'npm test' ~/code/app-wt1 ~/code/app-wt2
 ```
 
-Each directory must be a git worktree, and each reads its own `boxer.toml`.
-[Building on boxer](/docs/guides/building-on-boxer) and the [Go reference](/docs/reference/go) cover
-the API.
+Each directory must be a git worktree. Each reads its own `boxer.toml`.
+[Building on boxer](/docs/reference/building-on-boxer) and the [Go reference](/docs/reference/go)
+cover the API.
 
-## What every example has in common
+## Rules every example follows
 
-- **The server binds `0.0.0.0`.** A forwarded port arrives on the guest's interface, so a server
-  on `127.0.0.1` never sees it.
+- **The server binds `0.0.0.0`.** A forwarded port arrives on the guest's interface. A server on
+  `127.0.0.1` never sees it.
 - **Ports are `auto:`.** A fixed host port makes the second worktree fail to start.
 - **`ready` probes the server.** `boxer up` returns when the server answers.
-- **The allowlist names only the package registry.** The image registry is allowed
-  automatically, and a failed install names any host that is missing.
+- **The allowlist names only the package registry.** boxer allows the image registry itself. A
+  failed install names any host that is missing.

@@ -1,0 +1,55 @@
+---
+title: Overview
+description: Orchestrators create a worktree per task. boxer gives each one its own sandbox.
+---
+
+An orchestrator creates a git worktree for each task and starts an agent in it. boxer keys a
+sandbox to each worktree, so every task gets its own, and `boxer gc` removes it once the worktree
+is gone.
+
+| Orchestrator | Setup | Tested |
+| --- | --- | --- |
+| [Conductor](/docs/orchestrators/conductor) | committed project layer, or `boxer install conductor` | by hand |
+| [T3 Code](/docs/orchestrators/t3-code) | committed project layer | matrix, 2 of 2 |
+| [Paperclip](/docs/orchestrators/paperclip) | committed project layer (Claude Code), user layer (Codex) | matrix, 2 of 2 |
+| [herdr](/docs/orchestrators/herdr) | committed project layer | matrix, 2 of 2 |
+| [Multica](/docs/orchestrators/multica) | a runtime profile pointed at a boxer shim | not tested |
+| [OpenHands](/docs/orchestrators/openhands) | `boxer-bash` as the terminal shell | matrix, 1 of 1 |
+
+## Three things every orchestrator needs
+
+**1. Commit the integration.** The orchestrator cuts each worktree from a branch. If the files
+`boxer install` writes are not on that branch, the task runs on your machine.
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
+```
+
+**2. Warm the sandbox when the worktree is created.**
+
+```sh
+boxer install git
+```
+
+This adds a `post-checkout` hook that runs `boxer up --detach` in every new worktree, so the
+sandbox is booting before the agent starts. Without it, the first command waits for a cold boot,
+and some orchestrators time out. `boxer install all` does not do this, so run it separately.
+
+**3. Put `boxer` on the orchestrator's `PATH`.** Hooks and shims call `boxer`. A GUI app does not
+read your shell profile, so check the orchestrator can find it.
+
+## Clean up
+
+Orchestrators delete worktrees without telling boxer. boxer's background sweep (`auto_reclaim`,
+every 6 hours by default) removes their sandboxes. To do it now:
+
+```sh
+boxer rm --gone -A
+```
+
+## Why not a user-level plugin?
+
+Several orchestrators give each agent its own config directory (`CLAUDE_CONFIG_DIR`,
+`CODEX_HOME`), which does not include your `~/.claude/plugins`. The committed project layer is in
+the worktree itself, so it applies whatever config directory the agent gets.

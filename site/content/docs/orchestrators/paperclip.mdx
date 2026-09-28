@@ -1,0 +1,34 @@
+---
+title: Paperclip
+description: Sandbox Paperclip runs with the project layer for Claude Code and the user layer for Codex.
+---
+
+Paperclip starts its agent over ACP with a managed config directory.
+
+## Claude Code
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
+```
+
+`claude-agent-acp` loads the project layer, so this is enough.
+
+## Codex
+
+```sh
+boxer install codex --user
+```
+
+Use the user layer. Paperclip does not bypass Codex's hook trust, and it builds its managed
+`CODEX_HOME` from `~/.codex/config.toml`, which is where `--user` writes.
+
+## Check it
+
+Paperclip does not pass boxer's trace variable through, so run `boxer doctor` in the task's
+worktree to confirm the integration is active.
+
+Turn on isolated workspaces in Paperclip's experimental settings. Without them, every run shares
+the project checkout, and so shares one sandbox.
+
+Tested in the matrix, 2 of 2 cells.

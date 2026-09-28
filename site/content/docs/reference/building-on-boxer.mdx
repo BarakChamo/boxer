@@ -1,16 +1,18 @@
 ---
-title: Building on boxer
+title: Build on boxer
 description: Drive sandboxes from your own program with the Go package, the JSON output, or the CLI.
 ---
 
-Orchestrators, dashboards and harness integrations drive boxer through three interfaces. All three
-are covered by the 1.0 stability contract: fields and flags are added, never renamed or removed.
+Use this page to drive boxer sandboxes from an orchestrator, dashboard or harness integration.
 
 | You are writing | Use |
 | --- | --- |
 | A Go program that owns sandbox lifecycle | [`pkg/boxer`](#go) |
 | A program in any other language, or a script | [`--json`](#json) |
 | An integration for a new harness | [`boxer hook`, `boxer mcp`, `boxer brief`](#a-harness-integration) |
+
+All three interfaces are covered by the 1.0 stability contract. Fields and flags are added, never
+renamed or removed.
 
 ## Go
 
@@ -67,8 +69,8 @@ go run ./examples/go-embed -- 'npm test' ~/code/app-wt1 ~/code/app-wt2
 
 ### Errors
 
-Every refusal is a `*boxer.Error`. `Reason` and `Fix` are for a person, `Cause` is for a program,
-and `Scope` says which sandbox. Match on `Cause`: the values are listed in
+Every refusal is a `*boxer.Error`. `Reason` and `Fix` are for a person. `Cause` is for a program.
+`Scope` names the sandbox. Match on `Cause`. Its values are listed in
 [JSON output](/docs/reference/json#errors) and do not change.
 
 ### Host-wide functions
@@ -80,7 +82,7 @@ _ = boxer.Delete("sb-7e1852e4a3c3")
 t := boxer.LastUsed("sb-7e1852e4a3c3")
 ```
 
-These take a sandbox name, because the worktree may already be gone. The [Go
+These take a sandbox name because the worktree may already be gone. The [Go
 reference](/docs/reference/go) lists every function and type.
 
 ## JSON
@@ -108,7 +110,8 @@ for s in json.load(sys.stdin):
 
 `boxer watch --json` prints one object per line for each state change (created, running, stopped,
 gone) as it happens, so a dashboard does not have to poll. [JSON output](/docs/reference/json) has
-every shape. Parse `--json` output, never a table: the human columns are not part of the contract.
+every shape. Parse `--json` output, never a table. The human-readable columns are not part of the
+contract.
 
 ## A harness integration
 
@@ -121,17 +124,17 @@ boxer brief --json      # the mount, mode, intercept list and tasks, for a syste
 boxer run -c '<line>'   # a shell line in the guest, with its exit code
 ```
 
-`boxer hook` speaks nine dialects. If your harness resembles one, add a row to boxer's tables
-instead of writing a bridge: [Adding a
-harness](https://github.com/BarakChamo/boxer/blob/main/docs/adding-a-harness.md). If it has no hook
-API, `boxer run` is a stdio pipe you can put behind any shell tool.
+`boxer hook` supports nine hook formats. If your harness uses one of them, add a row to boxer's
+tables instead of writing a bridge. See [Adding a
+harness](https://github.com/BarakChamo/boxer/blob/main/docs/adding-a-harness.md). If your harness
+has no hook API, put `boxer run` behind any shell tool. It passes stdio through.
 
 ## Before you ship
 
-- `Ensure` and `boxer up` do nothing on a running sandbox. Call them before every run rather than
-  tracking state.
-- A sandbox costs about 700 MB of disk and around a gigabyte of memory in use. A tool that opens one
-  per task should remove them: `Down()`, `boxer rm`, or `auto_reclaim` and `boxer gc` for idle ones.
+- `Ensure` and `boxer up` do nothing on a running sandbox. Call them before every run instead of
+  tracking state yourself.
+- A sandbox uses about 700 MB of disk and around 1 GB of memory while running. If your tool opens one
+  per task, remove them with `Down()` or `boxer rm`. Use `auto_reclaim` and `boxer gc` for idle ones.
 - Use `auto:` ports in any `boxer.toml` you generate. A fixed host port fails in the second worktree.
 - boxer removes its own shim directories from `PATH` before it runs anything. Do not add them back
-  around a boxer call: a `uname` shim would call boxer inside boxer and deadlock the session.
+  around a boxer call. A `uname` shim would then call boxer inside boxer and deadlock the session.

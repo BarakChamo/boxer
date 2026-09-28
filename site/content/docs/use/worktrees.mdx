@@ -1,0 +1,84 @@
+---
+title: Parallel worktrees
+description: Run several agents at once, one git worktree and one sandbox each.
+---
+
+Run several agents at once by giving each one a git worktree. boxer gives each worktree its own
+sandbox.
+
+```sh
+git worktree add ../myapp-feature -b feature
+cd ../myapp-feature
+boxer run -c 'npm test'      # its own sandbox, host port and node_modules
+```
+
+The default is `isolation = "worktree"`. Two worktrees never share a sandbox, so two agents cannot
+overwrite each other's `node_modules` or race on a port.
+
+## Commit a boxer.toml
+
+Every worktree cut from a branch inherits that branch's `boxer.toml`. Keep host-specific values out
+of it. Ports are the usual problem:
+
+```toml
+[network]
+ports = ["auto:3000"]     # not "3000:3000"
+```
+
+A fixed host port fails with a busy-address error as soon as a second worktree starts.
+
+## Find each worktree's dev server
+
+With `auto:`, every worktree gets its own host port, and none of them is at `localhost:3000`. Run
+`boxer status` to see the port for the current worktree.
+
+To give each worktree a name instead, turn on `[urls]`:
+
+```toml
+[network]
+ports = ["auto:3000"]
+
+[urls]
+enabled = true            # needs portless: npm install -g portless
+```
+
+```console
+$ boxer up
+boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
+```
+
+Agents read the name with `boxer url`. For setup and naming rules, see
+[Dev server URLs](/docs/configure/urls).
+
+## Size the sandboxes
+
+Each sandbox has its own memory and disk. The default is `cpus = 4` and `memory = "4G"`, so four
+sandboxes ask for 16 GB.
+
+In a measured run, four concurrent node sandboxes used about 4 GB resident memory and 2.7 GB of
+disk. That is roughly 1 GB and 700 MB each. The host has to cover the allocation, so lower it if
+you run several:
+
+```toml
+cpus   = 2
+memory = "2G"
+```
+
+| To check or limit | Use |
+| --- | --- |
+| Allocation and use side by side | `boxer ls --resources` |
+| Packs, 130 to 365 MB each | `packs_keep_last` (default 5) caps how many are kept |
+| Sandboxes whose worktree is gone or unused past `idle_timeout` (2h), and packs unused as long | `boxer gc` |
+
+See [Manage sandboxes](/docs/use/managing) for the rest.
+
+## Orchestrators
+
+Tools that cut a worktree per task (Conductor, T3 Code, Paperclip, herdr) get a sandbox per task.
+They need three things set up: the integration committed on the branch, `boxer install git`, and
+`boxer` on their `PATH`. See [Orchestrators](/docs/orchestrators).
+
+<Callout type="warn">
+Codex reads hooks from the main repository, not the linked worktree. Run `boxer install codex`
+instead of copying hooks into a worktree. See [Choose your setup](/docs/setup).
+</Callout>

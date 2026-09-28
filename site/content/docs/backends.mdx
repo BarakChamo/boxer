@@ -1,0 +1,186 @@
+---
+title: Backends
+description: smolvm, Apple container, docker and podman compared by isolation boundary, enforced features and start-up time.
+---
+
+Choose the runtime that runs each sandbox.
+
+```toml
+backend = "smolvm"     # smolvm | container | docker | podman
+```
+
+`BOXER_BACKEND` overrides it for one command.
+
+## Compare backends
+
+| backend | a sandbox is | kernel | egress allowlist | packs | fork |
+| --- | --- | --- | --- | --- | --- |
+| `smolvm` (default) | a microVM | one per sandbox | yes | yes | yes |
+| `container` (Apple, macOS 26 on Apple Silicon) | a lightweight VM per container | one per sandbox | no | no | no |
+| `docker` | a container | shared by every sandbox on the machine | no | no | no |
+| `podman` | a container | shared by every sandbox on the machine | no | no | no |
+
+- **Kernel.** An escape from a microVM lands in one guest. An escape from a container lands in the
+  kernel every other sandbox on the machine uses. On a Mac, docker and podman run their containers
+  in one Linux VM, so the sandboxes share that VM's kernel. On Linux they share the host's kernel.
+- **Egress allowlist.** Only smolvm enforces `network.mode = "allowlist"`, the default. The other
+  backends refuse it. Set `network.mode` to `"on"` or `"off"` for them.
+- **Packs.** smolvm caches each [environment pack](/docs/concepts/scopes-and-packs#packs), so
+  `image_setup` runs once per host. On the other backends it runs once per sandbox.
+- **Fork.** `boxer fork` needs copy-on-write VM branching. Only smolvm has it.
+
+All four keep secrets off argv and mark the sandboxes they own with labels. Only smolvm has an
+egress log.
+
+When a backend lacks a feature, boxer refuses with an error that names it.
+
+Everything else works the same on all four: hooks, shims, the MCP server, tasks, URLs, devcontainer
+support, `[prep]` and cache mounts. On every backend the sandbox sees the worktree, read-only
+package caches and your `mounts`. `git`, `gh` and `ssh` run on the host. Forwarded ports and the
+portless proxy bind `127.0.0.1`. See the [security model](/docs/concepts/security).
+
+## Choose a backend
+
+| use | when |
+| --- | --- |
+| `smolvm` | The default. You want the egress allowlist, packs or forks. |
+| `container` | You want a kernel per sandbox from ordinary OCI images, on macOS 26. |
+| `docker` or `podman` | You already run one, or you are on Linux without KVM. The sandboxes share a kernel. |
+| a container backend | You start many short-lived sandboxes and start-up time matters most. One starts 1 to 2 s sooner. |
+
+boxer's threat model is a careless agent. If containment is why you use boxer, keep a
+kernel-per-sandbox backend.
+
+The smoke suite passes 88 of 88 cells on smolvm. On docker, podman and Apple `container` it passes
+79, with 9 skipped by capability. This holds on macOS, and on Linux where the backend exists
+([results](/docs/evals/results#on-each-backend)).
+
+## Set the backend
+
+```toml
+backend = "docker"
+
+[network]
+mode = "on"      # or "off"
+```
+
+Check the result:
+
+```sh
+boxer doctor              # the backend in use, with its boundary
+boxer backends            # every installed backend compared
+```
+
+## Install a backend
+
+### smolvm
+
+```sh
+curl -sSL https://smolmachines.com/install.sh | bash
+smolvm --version
+```
+
+On Linux, smolvm needs a `/dev/kvm` your user can open. Run `sudo usermod -aG kvm $USER`, then log
+in again. Inside a Linux VM, that VM needs nested virtualisation.
+
+### Apple container
+
+Requires macOS 26 on Apple Silicon.
+
+```sh
+brew install container
+container system start
+container system kernel set --recommended
+```
+
+```toml
+backend = "container"
+
+[network]
+mode = "on"
+```
+
+### docker
+
+Install Docker Desktop or OrbStack on macOS, or the docker engine on Linux.
+
+```toml
+backend = "docker"
+
+[network]
+mode = "on"
+```
+
+### podman
+
+Install with `brew install podman`, or your distribution's package. On macOS, create and start a
+machine with the `applehv` provider:
+
+```sh
+export CONTAINERS_MACHINE_PROVIDER=applehv
+podman machine init && podman machine start
+```
+
+```toml
+backend = "podman"
+
+[network]
+mode = "on"
+```
+
+## Start-up time
+
+Time for a Next.js dev server to answer HTTP 200. Measured one backend at a time on a wiped host,
+three samples each, 2 vCPU and 4 GB per sandbox, on a 10-core Apple Silicon Mac (2026-09-28):
+
+| backend | one worktree | three worktrees at once |
+| --- | ---: | ---: |
+| `docker` (OrbStack) | **4.3 s** | **10.9 s** |
+| `container` | 5.3 s | 14.4 s |
+| `smolvm` | 6.4 s | 15.6 s |
+
+- A kernel per sandbox costs smolvm and `container` 1 to 2 s at one worktree and 3.5 to 4.7 s at
+  three.
+- Podman was not measured on 2026-09-28. [Benchmarks](/docs/evals/benchmarks) has its 2026-09-25
+  figures.
+- A warm `boxer run` on smolvm takes 33 ms. `docker exec` into a running container takes 29 ms.
+- Memory is not compared. See [Benchmarks](/docs/evals/benchmarks#memory).
+
+The [benchmarks](/docs/evals/benchmarks) have the method and caveats.
+
+## Known runtime problems
+
+`boxer backends` checks for the ones it can detect. `boxer backends --probe` creates, uses and
+deletes a real sandbox on each backend.
+
+| problem | what happens | what to do |
+| --- | --- | --- |
+| podman on the `libkrun` provider | It cannot bind-mount host paths, so no worktree can be mounted. A machine created under one provider is invisible to `podman machine` commands run under another. | Use the `applehv` provider on a Mac: `CONTAINERS_MACHINE_PROVIDER=applehv podman machine init`. |
+| Apple `container` without its service or kernel | Every create fails. | Run `container system start`, then `container system kernel set --recommended`. |
+| podman storage errors | After heavy use, overlay mounts fail with `input/output error`, from the Mac client and inside the VM. | Run `podman machine stop && podman machine start`. This cleared it without losing anything. |
+
+boxer handles these itself:
+
+- **OrbStack stale mounts.** OrbStack can give a new container a stale mount when the same
+  worktree path was removed and added again moments earlier. Orchestrators do this when they reuse
+  a task name. boxer writes through the mount before running anything, and recreates the sandbox
+  once if that fails.
+- **SELinux.** On Fedora, RHEL and CoreOS, SELinux denies an unlabelled bind mount and the guest
+  sees `Permission denied` on `/workspace`. When SELinux is enforcing on a Linux host, boxer adds
+  the shared relabel (`:z`) to every mount on docker and podman. This relabels the worktree and the
+  package caches as container-shared on the host. boxer never does this on macOS.
+- **Rootless podman.** Rootless podman maps you to the container's root. A non-root `user`, such as
+  a devcontainer's `remoteUser`, then sees the worktree as root's and cannot write it. boxer reads
+  that user's uid from the image and recreates the sandbox once with `--userns=keep-id`. Files the
+  user writes are owned by you on the host.
+- **Runtime errors.** "No such container" exits 1 and "OCI runtime exec failed" exits 127. boxer
+  reads the runtime's message and reports a boxer error instead. A command that never ran is not
+  reported as a failed command.
+
+## Not supported
+
+| backend | why |
+| --- | --- |
+| Firecracker | It needs `/dev/kvm`, which macOS does not have. Its maintainers declined a Virtualization.framework port. |
+| Docker Sandboxes (`sbx`) | It has a per-host allowlist, but no labels on any object and no way to inspect a sandbox. boxer cannot prove which sandboxes it owns. |
+| Remote backends, such as Vercel Sandbox | They copy the workspace instead of mounting it. No boxer backend copies a workspace yet. |

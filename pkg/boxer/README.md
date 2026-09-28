@@ -19,4 +19,4 @@ contract](../../docs/release.md) covers this package's exported functions, types
 alongside the CLI and the JSON output. Until the 1.0 tag, it may change.
 
 Reference: `site/content/docs/reference/go.mdx`. Worked examples and the decisions around them:
-`site/content/docs/guides/building-on-boxer.mdx`.
+`site/content/docs/reference/building-on-boxer.mdx`.

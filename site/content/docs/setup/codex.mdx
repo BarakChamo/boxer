@@ -1,0 +1,62 @@
+---
+title: Codex
+description: Route Codex's shell commands into the sandbox with a project hook.
+---
+
+boxer adds a hook to Codex that rewrites each intercepted command to `boxer run`. Codex sees the
+normal output and exit code.
+
+## Set up
+
+```sh
+boxer install codex
+git add .codex .agents
+git commit -m "Run Codex's commands in boxer"
+```
+
+Then do two things `boxer install` cannot:
+
+1. **Trust the project hooks.** Codex loads project hooks only from a trusted project. Run `/hooks`
+   once in Codex. For `codex exec`, pass `--dangerously-bypass-hook-trust`.
+2. **Turn off Codex's own sandbox.** A hypervisor cannot start inside Codex's seatbelt or landlock
+   sandbox, so boxer cannot create one from there. boxer replaces it: intercepted commands run in
+   the microVM. Run Codex with `--sandbox danger-full-access`, or
+   `--dangerously-bypass-approvals-and-sandbox` under `codex exec`.
+
+<Callout>
+Codex reads project configuration from the main checkout, not from a linked worktree. Run from a
+linked worktree, `boxer install codex` writes its hooks to both.
+</Callout>
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.codex/hooks.json` | the hook that rewrites commands |
+| `.agents/skills/boxer/` | the skill that tells Codex how commands run here |
+
+To give Codex the `boxer_run` tool, add the MCP server to `.codex/config.toml`:
+
+```toml title=".codex/config.toml"
+[mcp_servers.boxer]
+command = "boxer"
+args = ["mcp", "--harness", "codex"]
+```
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask Codex to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **No trust step:** `boxer install codex --user` writes the hooks to `~/.codex/config.toml`, which
+  Codex trusts. Use this under an orchestrator, where no one can approve project hooks.
+- **Run Codex itself in the sandbox:** `boxer shell codex`. See [Inside mode](/docs/use/inside).
+- **Block the shell instead:** set `[harness.codex] mode = "tool"`.
+
+Tested in the matrix with hook rewrite, tool mode, PATH shims and inside mode. PATH shims do not
+work if Codex starts a login shell.

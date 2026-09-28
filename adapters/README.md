@@ -14,5 +14,5 @@ through inside mode — so neither needs code. Each file carries a comment namin
 its schema was verified against, because these formats change and a silently rejected plugin looks
 exactly like one that is not doing anything.
 
-User-facing setup for both: `site/content/docs/guides/orchestrators.mdx`. The research behind each
+User-facing setup for both: `site/content/docs/orchestrators/`. The research behind each
 one, including what was tried and rejected: [../docs/orchestrators.md](../docs/orchestrators.md).

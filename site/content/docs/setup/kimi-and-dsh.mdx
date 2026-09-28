@@ -1,0 +1,56 @@
+---
+title: Kimi Code and DSH
+description: Sandbox Kimi Code and DSH, whose hooks can block a command but not rewrite it.
+---
+
+Kimi Code's hooks and DSH's hook bridge can allow or block a command, but not change it. So boxer
+uses tool mode. The hook blocks the shell, and the agent runs commands through the `boxer_run` MCP
+tool instead. An agent that uses the tool is never blocked.
+
+## Kimi Code
+
+```sh
+boxer install kimi
+git add .kimi-code .agents
+git commit -m "Run Kimi's commands in boxer"
+```
+
+Then:
+
+1. Append the block `boxer install` prints to `~/.kimi-code/config.toml`. Kimi reads hooks only from
+   the user config.
+2. Add this to `boxer.toml`:
+
+   ```toml
+   [harness.kimi]
+   mode = "tool"
+   ```
+
+PATH shims also work in Kimi's shell. See [PATH shims](/docs/setup/integration-levels#path-shims).
+
+Tested in the matrix with tool mode, PATH shims and inside mode.
+
+## DSH
+
+```sh
+boxer install dsh
+git add .dsh .agents
+git commit -m "Run DSH's commands in boxer"
+```
+
+Then start DSH with `--patch .dsh/cordis.patch.yml`, and add this to `boxer.toml`:
+
+```toml
+[harness.dsh]
+mode = "tool"
+```
+
+Tested in the matrix with tool mode.
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask the agent to run `node -p process.platform`. It uses `boxer_run`, and prints `linux`.

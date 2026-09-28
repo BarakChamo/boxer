@@ -1,0 +1,127 @@
+---
+title: Tasks
+description: Name the commands an agent should run, so it runs them in the sandbox by name instead of composing its own.
+---
+
+Name the commands an agent should run, so they always run in the sandbox.
+
+```toml
+[tasks]
+test    = "npm test"
+build   = "npm run build"
+lint    = "npm run lint"
+migrate = "npm run db:migrate"
+```
+
+```sh
+boxer run --task test
+```
+
+boxer looks the name up in `boxer.toml` and runs that command in the guest.
+
+Hooks and shims catch a command by its first word. `npm test` is caught, but
+`NODE_ENV=test ./node_modules/.bin/jest` runs on the host. A task does not depend on that match.
+
+## Describe a task
+
+Write a task as a table to add details. You can mix both forms in one `[tasks]` table:
+
+```toml
+[tasks]
+lint = "npm run lint"
+
+[tasks.test]
+cmd         = "npm test"
+description = "the unit suite; no services needed"
+junit       = ["reports/junit.xml"]
+timeout     = "10m"
+```
+
+| key | what it does |
+| --- | --- |
+| `cmd` | the command line, as in the string form |
+| `description` | what the task is for. `boxer tasks` prints it and the brief gives it to the agent, which uses it to choose between tasks. |
+| `junit` | where this task's JUnit XML lands. `boxer run --task test` summarises it. |
+| `timeout` | a Go duration that bounds the command. A hung task fails instead of holding the session. |
+| `env` | variables for this task only, on top of `[env]`. For example, `env = { NODE_ENV = "test" }`. |
+
+A misspelled key inside a task table is an error, like every other key in `boxer.toml`.
+
+## Write the command line
+
+boxer runs a task with `sh -c`, in the guest directory that matches your current one. Pipes, `&&`
+and environment prefixes work:
+
+```toml
+[tasks]
+test-one = "npm test -- --runTestsByPath"
+ci       = "npm run lint && npm test && npm run build"
+seed     = "DATABASE_URL=postgres://localhost/dev npm run seed"
+```
+
+`--task` names the whole command. boxer refuses `-c` or trailing arguments:
+
+```console
+$ boxer run --task test -- --watch
+boxer run: --task names the whole command; do not add -c or arguments
+```
+
+Declare a separate task for each variant you need.
+
+## Choose what to declare
+
+Declare the commands an agent reaches for and would get wrong by guessing:
+
+- test, build, lint and typecheck
+- steps such as a migration, codegen or a fixture reset
+
+Leave out anything destructive you would rather approve by hand. An agent runs a declared task
+without asking.
+
+## List tasks
+
+```sh
+boxer tasks           # name and description, or the command line when there is no description
+boxer tasks --json    # the same, for a tool
+boxer brief           # the mount, the mode, the intercept list, and the tasks with what they are for
+```
+
+`boxer brief --json` keeps `tasks` as a map of name to command line. It puts descriptions, JUnit
+paths and timeouts in `task_details`.
+
+The boxer skill tells the agent to use tasks first. The **brief** is the summary of this worktree's
+sandbox that hooks inject at session start. It lists each task with its description.
+
+boxer refuses an unknown name and lists the real ones. Nothing runs on the host:
+
+```console
+$ boxer run --task tests
+boxer: no task named "tests" in boxer.toml
+  scope:     swift-crab (sb-7e1852e4a3c3, worktree)
+  worktree:  /Users/me/src/demo
+  cause:     NO_SUCH_TASK
+  fix:       boxer run --task build | lint | migrate | test
+```
+
+Every boxer error has this shape. The `fix:` line is the next command to try.
+
+## How often agents use tasks
+
+The adherence evaluation gives an agent a repository with one described task and a prompt that
+never mentions boxer. It then checks whether the agent ran the task or composed its own command.
+Results from 2026-09-25, across four models per harness:
+
+| harness | used the task |
+| --- | --- |
+| Claude Code, Codex, Pi | 3 of 4 models |
+| DSH, OpenCode | 2 of 4 |
+| Copilot, Grok, Kimi | 0 of 4 |
+
+On Copilot, Grok and Kimi the brief does not reliably reach the model. An agent there runs a task
+only when the prompt names it.
+
+A declared task does not stop an agent composing its own command. Hooks and shims keep that command
+in the sandbox.
+
+The per-cell results are in `docs/eval-adherence.md`. The method is in
+[Results](/docs/evals/results#when-boxer-only-asks).

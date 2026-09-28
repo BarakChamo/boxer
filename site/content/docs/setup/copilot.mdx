@@ -1,0 +1,41 @@
+---
+title: Copilot CLI
+description: Route GitHub Copilot CLI's shell commands into the sandbox with a user-level hook.
+---
+
+boxer adds a hook to Copilot CLI that rewrites each intercepted command to `boxer run`.
+
+## Set up
+
+```sh
+boxer install copilot --user
+```
+
+Copilot CLI loads repository hooks only from a trusted directory, and a headless `copilot -p` run
+is never trusted. So boxer writes to `~/.copilot` instead. The hook applies to every repository, and
+there is nothing to commit.
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `~/.copilot/hooks/boxer.json` | the hook that rewrites commands |
+| `~/.copilot/mcp-config.json` | the `boxer` MCP server |
+| `~/.copilot/skills/boxer/` | the skill that tells Copilot how commands run here |
+
+In a repository with no `boxer.toml`, boxer still sandboxes the intercepted commands, using an image
+picked from the lockfile.
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask Copilot to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Run Copilot itself in the sandbox:** `boxer shell copilot`. See [Inside mode](/docs/use/inside).
+
+Tested in the matrix with hook rewrite and PATH shims.

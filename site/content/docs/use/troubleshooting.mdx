@@ -1,0 +1,174 @@
+---
+title: Troubleshooting
+description: Common boxer failures, with the symptom, the cause and the fix for each.
+---
+
+Find the cause and the fix for common boxer failures.
+
+Run `boxer doctor` first. It resolves the same configuration a real command would, and reports
+configurations that load but do not keep commands in the sandbox.
+
+```sh
+boxer doctor
+```
+
+## A command ran on the host
+
+`uname` in the agent prints `Darwin`, or a file the command wrote appears outside the worktree.
+
+Check these causes in order:
+
+| Cause | Fix |
+| --- | --- |
+| No integration is in effect. `boxer doctor` shows whether one is installed for this harness and enforcing. | Run `boxer install <harness>`. |
+| The program is not on `intercept`. Only listed programs are sandboxed. | Add it to `intercept` in `boxer.toml`. |
+| The harness uses a login shell. `zsh -lc` rebuilds `PATH` and puts system binaries ahead of shims. `boxer doctor` reports this. | Switch to hooks or tool mode. See [integration levels](/docs/setup/integration-levels). |
+| Codex in a linked worktree. Codex reads project config from the main repository, so it never reads a `.codex/` in the worktree alone. | Run `boxer install codex` from the worktree, which writes both. Or run `boxer install codex --user`. |
+| Project hooks are not trusted. Codex and Grok ignore project hooks until the folder is trusted. | Run `/hooks` once in Codex, or launch Grok once with `--trust`. |
+
+## The sandbox will not start
+
+### `read checkpoint footer: I/O error`
+
+**Cause.** A truncated environment pack, left by an interrupted `pack create`. boxer usually
+detects and rebuilds it.
+
+**Fix.** Run `boxer up --rebuild`.
+
+### `exit 137` during setup
+
+**Cause.** The guest's out-of-memory killer stopped the process.
+
+**Fix.** Raise `memory` in `boxer.toml` (default `4G`), or run fewer sandboxes at once.
+
+### docker, podman or Apple `container` refuses the default configuration
+
+**Cause.** Those backends cannot enforce `network.mode = "allowlist"`, which is the default.
+
+**Fix.** Set `network.mode` to `"on"` or `"off"`. See [backends](/docs/backends).
+
+## A download or install fails inside the sandbox
+
+The guest shows an ordinary DNS or connect error, and boxer adds a line after it:
+
+```console
+$ boxer run -c 'npm ci'
+npm error network request to https://registry.npmjs.org/... failed
+boxer: the egress allowlist refused registry.npmjs.org during this command
+boxer: fix: add it to network.allow_hosts in boxer.toml, or set network.mode = "on"
+```
+
+**Cause.** The allowlist refused the host.
+
+**Fix.** Follow the `fix:` line. `boxer doctor` lists every host the allowlist refused, under
+`denied:`.
+
+## Setup ran but dependencies are missing
+
+A second worktree starts with no `node_modules`.
+
+**Cause.** The install is in `image_setup`. `image_setup` is saved in the pack, and the worktree is
+not.
+
+**Fix.** Move dependency installs to `setup`. See
+[environment](/docs/configure/environment#install-dependencies).
+
+## The dev server does not answer
+
+### `boxer up` passed but the server is not ready
+
+**Cause.** The `ready` probe passed before the server could serve. boxer runs `start` once per boot
+and does not restart a service that dies.
+
+**Fix.** Make `ready` probe the real endpoint. The server's output is in `/tmp/boxer-start.log` in
+the guest, and boxer quotes its tail in the error.
+
+### The forwarded port does not answer, but `ready` passes
+
+**Cause.** The server is bound to `127.0.0.1` in the guest.
+
+**Fix.** Bind it to `0.0.0.0` in the guest. The host side stays on `127.0.0.1`.
+
+### An agent started a second server
+
+**Cause.** The agent could not reach the server you told it about. Inside the guest the server is
+at `127.0.0.1:<guest port>`. The host-forwarded port does not exist there.
+
+**Fix.** Give the agent the guest port. Or turn on [`[urls]`](/docs/configure/urls) and have the
+agent run `boxer url`.
+
+### A `[urls]` name refuses the connection
+
+**Cause.** The portless proxy is down, for example after a reboot.
+
+**Fix.** The next `boxer up` or `boxer run` in that worktree restarts it on port 1355. To start it
+by hand, run `portless proxy start --port 1355`.
+
+### A `[urls]` name answers 404
+
+**Cause.** The name is not registered. Either the sandbox predates `[urls]`, or its route was
+removed by hand.
+
+**Fix.** Run `boxer down && boxer up`. `boxer status` prints the name.
+
+### `boxer: warning: urls.enabled is set but portless is not installed`
+
+**Cause.** portless is not on `PATH`. Ports are still forwarded.
+
+**Fix.** Run `npm install -g portless`.
+
+### Next.js refuses or warns about its dev chunks
+
+**Cause.** The request's origin is not in `allowedDevOrigins`.
+
+**Fix.** Add `'127.0.0.1'` and `'localhost'` for a forwarded port, and `'*.localhost'` for a
+`[urls]` name. See [URLs](/docs/configure/urls#nextjs).
+
+## An interactive harness hangs
+
+A harness in a terminal pane (herdr, for example) stops with no output.
+
+**Cause.** It is waiting on a dialog that headless runs never show. This can be a permission
+prompt, a bypass-permissions confirmation, or a skill approval such as `Use skill "boxer"?`.
+
+**Fix.** Read the pane. Grant every tool the agent needs in project settings, including `Skill`.
+
+## The harness fails to start in inside mode
+
+### `boxer shell claude` stops with a message about the macOS Keychain
+
+**Cause.** The Linux guest has no Keychain, so a Keychain login does not reach it.
+
+**Fix.** Run `claude setup-token` on the host and export `CLAUDE_CODE_OAUTH_TOKEN`. See
+[inside mode](/docs/use/inside#what-it-costs).
+
+### The harness is missing or broken after an interrupted first run
+
+**Cause.** The one-time install in the guest did not finish.
+
+**Fix.** Run `boxer up --recreate`, then `boxer shell <harness>` again.
+
+## The first run is slow
+
+The first `boxer up` in a repository takes minutes, and so does the second.
+
+**Cause.** The first run pulls the image and runs `image_setup`. Later starts reuse the pack. If
+the second run is also slow, the pack key changed. The key includes `image_setup`, `env`, `mounts`,
+`start` and `ready`. See [packs](/docs/concepts/scopes-and-packs#the-key).
+
+**Fix.** Keep those keys stable. Packs exist on smolvm only. On other backends `image_setup` runs
+once per sandbox.
+
+## The disk is full
+
+boxer skips packing with a free-space message, or the host runs out of disk.
+
+**Cause.** Stopped sandboxes and old packs.
+
+**Fix.** Check what boxer uses, then remove stopped sandboxes and unreferenced packs. Running
+sandboxes are kept.
+
+```sh
+boxer ls --resources
+boxer gc --all
+```

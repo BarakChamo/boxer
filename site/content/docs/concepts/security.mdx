@@ -1,71 +1,72 @@
 ---
-title: Security model
+title: Security
 description: What the sandbox isolates on each backend, what it does not, and the paths that stay on the host on purpose.
 ---
 
-boxer protects your machine from what a careless agent runs: a dependency's postinstall script, a
-`rm -rf` in the wrong directory, a change to system configuration. It is not built to stop an agent
-that sets out to reach the host. The paths below are where that line is.
+This page covers what the sandbox isolates, what stays on the host, and what each backend changes.
 
-## What the boundary is
+## Summary
+
+| | |
+| --- | --- |
+| **Isolated** | Commands on `intercept` run in the guest. They cannot read your home directory, SSH keys, cloud credentials or any other host path boxer does not mount. |
+| **On the host on purpose** | `git`, `gh`, `ssh`, `boxer` and `smolvm` (`passthrough`). Hooks and MCP servers named in the harness's configuration. Commands not on `intercept`. `[prep]` commands. |
+| **Exposed to the guest** | The worktree, read-write. Host package caches, read-only. Anything in `mounts`. |
+| **Exposed to the host** | Ports in `network.ports`, bound to `127.0.0.1`. |
+| **Threat model** | A careless or destructive agent. boxer is not built to stop an agent that sets out to reach the host. |
+
+boxer protects your machine from what a careless agent runs. Examples are a dependency's
+postinstall script, an `rm -rf` in the wrong directory, and a change to system configuration. A postinstall script in the sandbox cannot read your home directory. A command that changes system
+configuration changes only the sandbox, and `boxer down` deletes it.
+
+<Callout type="warn">
+The worktree is your real worktree, mounted read-write. `rm -rf` inside it deletes your files from
+the guest the same as from the host. The sandbox protects the rest of your machine. It does not
+protect the code the agent is working on.
+</Callout>
+
+## What the guest can reach
 
 A sandbox sees only what boxer mounts into it:
 
-- the git worktree, read-write;
+- the git worktree, read-write
 - the host's package caches for the lockfiles the worktree has (`~/.npm` for `package-lock.json`,
-  and so on), read-only, unless `[cache] enabled = false`;
-- anything you list in `mounts`.
+  and so on), read-only, unless `[cache] enabled = false`
+- anything you list in `mounts`
 
-A command in the guest cannot read the rest of your home directory, your SSH keys, your cloud credentials or
-any other host path. On the default backend, smolvm, the network is an allowlist of the registry
-hosts the image needs plus whatever you name in `network.allow_hosts`.
+On the default backend, smolvm, the network is an allowlist. It holds the registry hosts the image
+needs plus the hosts in `network.allow_hosts`.
 
-How strong the boundary is depends on the [backend](/docs/concepts/backends). `boxer doctor`
-prints which one you have:
+## Backends
 
-| backend | boundary | egress |
+The strength of the boundary depends on the [backend](/docs/backends). `boxer doctor`
+prints which one you have.
+
+| Backend | Boundary | Egress |
 | --- | --- | --- |
 | `smolvm` (default) | a kernel per sandbox | allowlist by default |
 | Apple `container` | a kernel per sandbox | on or off, no allowlist |
 | `docker`, `podman` | **one kernel shared by every sandbox on the machine** | on or off, no allowlist |
 
-A backend that cannot enforce the allowlist **refuses** `network.mode = "allowlist"` instead of
-running with a network boxer said it would deny. A container escape on a shared-kernel backend reaches
-every sandbox on that machine. On a kernel-per-sandbox backend it reaches one guest. If
-containment is why you use boxer, keep the default.
+- A backend that cannot enforce the allowlist **refuses** `network.mode = "allowlist"`. It does not
+  run with a network boxer said it would deny.
+- A container escape on a shared-kernel backend reaches every sandbox on the machine. On a
+  kernel-per-sandbox backend it reaches one guest.
 
-Within that boundary, a dependency's postinstall script runs where there is nothing worth taking,
-and a command that reconfigures the machine reconfigures a sandbox you can delete with
-`boxer down`.
+If containment is why you use boxer, keep the default backend.
 
-<Callout type="warn">
-The worktree is your real worktree, mounted read-write. `rm -rf` inside it deletes your files from
-the guest exactly as from the host. The boundary protects everything else on your machine, not the
-code the agent is working on.
-</Callout>
+## What runs on the host
 
-## What it is not
+These run on the host. A hostile agent can use any of them to reach your machine.
 
-boxer is not a defence against an agent that can choose to run something on the host. These paths
-stay on the host by design, and each is a hole if your threat model is adversarial:
-
-**`passthrough` programs.** `git`, `gh`, `ssh`, `boxer` and `smolvm` run unsandboxed by default,
-because they need your credentials and your real repository. `gh` alone reaches anything your
-GitHub token reaches.
-
-**The skill on its own.** A skill or plugin installed without `boxer install` only asks the agent
-to use boxer ([skills and plugins](/docs/guides/skills-and-plugins)).
-
-**`mode = "off"` and `enforcement = "audit"`.** Neither sandboxes anything. `audit` prints what boxer
-would have rewritten or blocked, and runs the command on the host.
-
-**Commands `intercept` does not name.** In `rewrite` mode boxer rewrites the commands it
-recognises, and anything else runs on the host. PATH shims and `tool` mode narrow this gap, which is
-why `enforcement = "both"` is the default, but they do not close it. See
-[integration levels](/docs/guides/enforcement).
-
-**`on_sandbox_unavailable = "passthrough"`.** Off by default (`"fail"`). When set, a command whose
-sandbox cannot be provisioned runs on the host instead of failing.
+| Path | Why it is on the host |
+| --- | --- |
+| `passthrough` programs | `git`, `gh`, `ssh`, `boxer` and `smolvm` run unsandboxed by default. They need your credentials and your real repository. `gh` alone reaches anything your GitHub token reaches. |
+| Commands `intercept` does not name | In `rewrite` mode boxer rewrites the commands it recognises. Anything else runs on the host. PATH shims and `tool` mode catch some of these commands, but not all. `enforcement = "both"`, the default, turns on both. See [integration levels](/docs/setup/integration-levels). |
+| `[prep]` commands, hooks and MCP servers | These run on the host. See [Repository configuration is executable input](#repository-configuration-is-executable-input). |
+| The skill on its own | A skill or plugin installed without `boxer install` only asks the agent to use boxer. See [skills and plugins](/docs/setup/skills-and-plugins). |
+| `mode = "off"` and `enforcement = "audit"` | Neither sandboxes anything. `audit` prints what boxer would have rewritten or blocked, and runs the command on the host. |
+| `on_sandbox_unavailable = "passthrough"` | Off by default (`"fail"`). When set, a command whose sandbox cannot be provisioned runs on the host instead of failing. |
 
 ## If the threat model is adversarial
 
@@ -79,43 +80,52 @@ integration = "inside"
 boxer shell claude
 ```
 
-The agent is not on the host, so it has no host shell to reach and boxer has nothing to intercept.
-In exchange, every harness config directory that exists on the host (`~/.claude`, `~/.codex`, and
-so on) is mounted read-write into the guest, so the harness's credentials are inside the sandbox.
-See [Run the harness inside](/docs/guides/inside).
+The agent is not on the host. It cannot run commands on the host.
 
-## What the boundary costs
+The harness's credentials are then inside the sandbox. Every harness config directory that exists on the host (`~/.claude`,
+`~/.codex`, and so on) is mounted read-write into the guest. The harness's credentials are inside
+the sandbox. See [Run the harness inside](/docs/use/inside).
 
-A kernel per sandbox costs start-up time. smolvm and Apple `container` take 1 to 2 s longer than
-docker to bring one Next.js worktree to HTTP 200, and 3.5 to 4.7 s longer at three. A warm command
-costs about the same as on a container, 33 ms on smolvm against 29 ms for `docker exec`. File-heavy
-commands pay for the mount, for example a recursive grep at 2.4x a warm container. The numbers and method are in [Benchmarks](/docs/evals/benchmarks).
+## Start-up and command cost
+
+A kernel per sandbox costs start-up time.
+
+| Measure | Result |
+| --- | --- |
+| One Next.js worktree to HTTP 200 | smolvm and Apple `container` take 1 to 2 s longer than docker |
+| Three worktrees to HTTP 200 | smolvm and Apple `container` take 3.5 to 4.7 s longer than docker |
+| A warm command | 33 ms on smolvm against 29 ms for `docker exec` |
+| A file-heavy command, such as a recursive grep | 2.4x a warm container, because of the mount |
+
+The numbers and method are in [Benchmarks](/docs/evals/benchmarks).
 
 ## Repository configuration is executable input
 
-A `boxer.toml`, a skill or a plugin in a repository is code you are about to run. `setup`,
-`image_setup`, `start` and `[tasks]` execute in the guest. `[prep]` commands, and hooks and MCP
-servers named in a harness's configuration, execute **on the host**.
+A `boxer.toml`, a skill or a plugin in a repository is code you are about to run.
+
+| Runs in the guest | Runs **on the host** |
+| --- | --- |
+| `setup`, `image_setup`, `start`, `[tasks]` | `[prep]` commands, and hooks and MCP servers named in a harness's configuration |
 
 Treat a repository's boxer configuration like its `Makefile` or its `package.json` install
-scripts. boxer never fetches configuration or content from the network, so what runs is what is
-in the checkout.
+scripts. boxer never fetches configuration or content from the network. 
 
 ## Forwarded ports and URLs
 
-A port in `network.ports` is a way in from the host to the guest. boxer binds it to `127.0.0.1`
-on every backend, so processes on this machine can reach it and the local network cannot. docker,
-podman and Apple `container` publish on every interface by default, so boxer passes the loopback
-address to them explicitly. On those three, a spec that names an address passes through unchanged,
-so `"0.0.0.0:3000:3000"` exposes the port on purpose.
+A port in `network.ports` lets the host reach the guest. boxer binds it to `127.0.0.1` on every
+backend. Processes on this machine can reach it, and the local network cannot.
 
-The portless proxy behind [`[urls]`](/docs/guides/urls) listens on `127.0.0.1` as well. boxer starts
-it on port 1355 when a sandbox needs a name, and stops it once no route is left. A proxy you started
-yourself keeps the options you gave it, and boxer never stops it.
+docker, podman and Apple `container` publish on every interface by default, so boxer passes the
+loopback address to them explicitly. On those three, a spec that names an address passes through
+unchanged. `"0.0.0.0:3000:3000"` exposes the port on purpose.
 
-Anything on this machine can reach a forwarded port, including other users' processes and a
-browser tab that is sent to a `localhost` URL. A dev server in the sandbox should not be treated
-as private to the agent.
+The portless proxy behind [`[urls]`](/docs/configure/urls) also listens on `127.0.0.1`. boxer starts
+it on port 1355 when a sandbox needs a name, and stops it once no route is left. A proxy you
+started yourself keeps the options you gave it, and boxer never stops it.
+
+Anything on this machine can reach a forwarded port. That includes other users' processes and a
+browser tab sent to a `localhost` URL. Do not treat a dev server in the sandbox as private to the
+agent.
 
 ## Secrets
 
@@ -127,22 +137,23 @@ env_passthrough = ["CI"]       # read from the host at run time
 secrets         = ["NPM_TOKEN"]# same, and never written anywhere
 ```
 
-`env` is snapshotted into the environment pack, which persists on disk. Put anything you would not
-want in a snapshot in the other two lists. boxer resolves them on the host at run time and passes
-them to the guest process, and stores them in no VM metadata and no file it keeps.
+`env` is saved into the environment pack, which persists on disk. Put anything you would not want
+in a snapshot in the other two lists. boxer resolves them on the host at run time and passes them
+to the guest process. It stores them in no VM metadata and no file it keeps.
 
 `env_passthrough` is an explicit allowlist, `["CI"]` by default. No other host variable reaches the
 guest.
 
-Both lists are forwarded **by name**. On smolvm, boxer passes `--secret-env NPM_TOKEN=NPM_TOKEN`
-and smolvm reads the value from its own environment, so the value never appears in an argument
-vector, which `ps` shows to every process on the host. The container backends have no such flag,
-so the values go through an `--env-file` readable only by your user and deleted as soon as the
-command returns.
+Both lists are forwarded **by name**:
 
-They reach `setup` and `image_setup` as well as ordinary commands, so an install that needs a
-registry token has it. They never reach the pack, because the pack is a filesystem snapshot and a
-variable resolved per invocation is not in the filesystem.
+- On smolvm, boxer passes `--secret-env NPM_TOKEN=NPM_TOKEN`, and smolvm reads the value from its
+  own environment. The value never appears in an argument vector, which `ps` shows to every process
+  on the host.
+- The container backends have no such flag. The values go through an `--env-file` that only your
+  user can read. boxer deletes it as soon as the command returns.
+
+Both lists reach `setup` and `image_setup` as well as ordinary commands, so an install that needs a
+registry token has it. They never reach the pack. 
 
 ## What boxer records
 
@@ -150,19 +161,21 @@ With no `[telemetry]` table and no `BOXER_TRACE`, boxer writes no log, no metric
 the network. When enabled, [events](/docs/reference/events) carry scope names, harness names,
 durations and outcomes. Command lines are left out unless you also set `record_commands = true`.
 
-One local file is always written: after every command, boxer writes
-`$XDG_STATE_HOME/boxer/runs/<scope>.json`, mode 0600, holding that command verbatim, its exit
+boxer always writes one local file. After every command it writes
+`$XDG_STATE_HOME/boxer/runs/<scope>.json`, mode 0600. The file holds that command verbatim, its exit
 code, and a bounded tail of its output. `boxer capsule new` captures it and `boxer status --json`
-reports it. `record_commands` does not gate it, because that setting guards the event sink (a file
-or an OTLP endpoint, either of which can be shipped off the host). You can delete the directory at
-any time, since boxer reads it only to report.
+reports it.
 
-Nothing leaves the machine unless you set an `endpoint`, which only a binary built with
-`-tags otel` can use. The default build contains no exporter.
+`record_commands` does not control this file. That setting guards the event sink (a file or an
+OTLP endpoint), and either sink can be shipped off the host. You can delete the runs directory at
+any time. boxer reads it only to report.
 
-## Reporting a vulnerability
+Nothing leaves the machine unless you set an `endpoint`. Only a binary built with `-tags otel` can
+use one. The default build contains no exporter.
 
-Privately, through [GitHub's private vulnerability
+## Report a vulnerability
+
+Report it privately through [GitHub's private vulnerability
 reporting](https://github.com/BarakChamo/boxer/security/advisories/new). Expect an acknowledgement
 within three working days and a fix or a plan within fourteen. The latest minor release of the
 current major version is supported.

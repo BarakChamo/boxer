@@ -1,4 +1,31 @@
 {
   "title": "boxer",
-  "pages": ["index", "---Getting started---", "start", "---Guides---", "guides", "---Concepts---", "concepts", "---Reference---", "reference", "---Evaluations---", "evals"]
+  "pages": [
+    "---Get started---",
+    "index",
+    "quickstart",
+    "backends",
+    "---Set up your agent---",
+    "...setup",
+    "---Orchestrators---",
+    "...orchestrators",
+    "---Set up your project---",
+    "...configure",
+    "---Work with sandboxes---",
+    "...use",
+    "---How it works---",
+    "...concepts",
+    "---Build on boxer---",
+    "reference/building-on-boxer",
+    "reference/go",
+    "reference/json",
+    "reference/mcp",
+    "reference/events",
+    "---Reference---",
+    "reference/cli",
+    "reference/configuration",
+    "reference/glossary",
+    "---Evaluations---",
+    "...evals"
+  ]
 }

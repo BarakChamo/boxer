@@ -1,0 +1,39 @@
+---
+title: Gemini CLI
+description: Route Gemini CLI's shell commands into the sandbox with a project hook.
+---
+
+boxer adds a hook to Gemini CLI that rewrites each intercepted command to `boxer run`.
+
+## Set up
+
+```sh
+boxer install gemini-cli
+git add .gemini GEMINI.md
+git commit -m "Run Gemini CLI's commands in boxer"
+```
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.gemini/settings.json` | the hook, and the `boxer` MCP server |
+| `GEMINI.md` | a section telling Gemini how commands run here |
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask Gemini to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Run Gemini itself in the sandbox:** `boxer shell gemini`. See [Inside mode](/docs/use/inside).
+- **Block the shell instead:** set `[harness.gemini-cli] mode = "tool"`.
+
+<Callout type="warn">
+Gemini CLI is not in the evaluation matrix, because the runs need a Gemini API key. The integration
+is covered by the scripted-model tier only.
+</Callout>

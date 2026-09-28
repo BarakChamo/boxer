@@ -1,0 +1,43 @@
+---
+title: Choose your setup
+description: Which boxer integration your coding agent gets, and where its setup page is.
+---
+
+`boxer install <harness>` writes the files your agent reads, so its shell commands go to the
+sandbox. Find your agent, run its command, commit the result.
+
+| Agent | Command | How commands reach the sandbox |
+| --- | --- | --- |
+| [Claude Code](/docs/setup/claude-code) | `boxer install claude-code` | hook rewrites each command |
+| [Codex](/docs/setup/codex) | `boxer install codex` | hook rewrites each command |
+| [Gemini CLI](/docs/setup/gemini-cli) | `boxer install gemini-cli` | hook rewrites each command |
+| [Copilot CLI](/docs/setup/copilot) | `boxer install copilot --user` | hook rewrites each command |
+| [OpenCode](/docs/setup/opencode) | `boxer install opencode` | plugin rewrites each command |
+| [pi](/docs/setup/pi) | `boxer install pi` | extension rewrites each command |
+| [Grok](/docs/setup/grok) | `boxer install grok` | hook rewrites each command |
+| [Kimi Code, DSH](/docs/setup/kimi-and-dsh) | `boxer install kimi`, `boxer install dsh` | shell is blocked; the agent uses the `boxer_run` tool |
+| [fx, or any other agent](/docs/setup/other-agents) | `boxer shell <harness>` | the agent itself runs in the sandbox |
+
+Running several agents? `boxer install all` sets up all of the project-level ones at once.
+
+If an orchestrator starts your agent (Conductor, T3 Code and others), set up the agent here, then
+follow its [orchestrator page](/docs/orchestrators).
+
+## What every setup has in common
+
+1. **Commit what `boxer install` writes.** A worktree is cut from a branch. If the integration is
+   not on the branch, the agent in that worktree runs on your machine.
+2. **Run `boxer doctor`.** It lists the integrations it finds and warns about any that will not
+   hold.
+3. **Check with a real command.** Ask the agent to run `node -p process.platform` (or
+   `python3 -c 'import sys; print(sys.platform)'`). It prints `linux` from the sandbox, even on a
+   Mac.
+
+Only the programs in `intercept` go to the sandbox. The default list covers the usual build tools
+(`npm`, `node`, `python`, `go`, `make`, `cargo` and more). `git`, `gh` and `ssh` always stay on your
+machine. See [what gets sandboxed](/docs/reference/configuration#what-gets-sandboxed).
+
+## Skill or plugin only
+
+`npx skills add BarakChamo/boxer --skill boxer` or `npx plugins add BarakChamo/boxer` teach an
+agent about boxer without enforcing anything. See [Skill and plugin](/docs/setup/skills-and-plugins).

@@ -1,0 +1,119 @@
+---
+title: Dev server URLs
+description: Give each worktree's dev server a stable hostname, and tell every agent where its own one is.
+---
+
+Give each worktree's dev server a stable hostname, such as `https://fix-ui.myapp.localhost:1355`.
+
+Without `[urls]`, each worktree's `auto:` port is a different number that a person or agent has to
+look up. With it, boxer registers a name for each forwarded port with
+[portless](https://github.com/vercel-labs/portless), a local reverse proxy that routes by hostname.
+
+## Turn on URLs
+
+Install portless:
+
+```sh
+npm install -g portless
+```
+
+Turn on `[urls]` in `boxer.toml`:
+
+```toml
+start = ["npx next dev -p 3000 -H 0.0.0.0"]
+
+[network]
+ports = ["auto:3000"]
+
+[urls]
+enabled = true
+```
+
+```console
+$ boxer up
+boxer: url: https://fix-ui.myapp.localhost:1355 -> guest port 3000
+```
+
+The server must listen on `0.0.0.0` inside the guest. See
+[Forward ports](/docs/configure/environment#forward-ports).
+
+Without portless installed, `boxer up` prints a warning and everything else works. Ports are still
+forwarded, and `boxer url` prints `http://127.0.0.1:<host port>`.
+
+## Hostnames
+
+| worktree | URL |
+| --- | --- |
+| the main checkout | `https://myapp.localhost:1355` |
+| a linked worktree on branch `fix-ui` | `https://fix-ui.myapp.localhost:1355` |
+| a detached worktree, or one whose name is taken | `https://swift-crab.myapp.localhost:1355` |
+
+- `myapp` is the repository's directory name. Set `urls.name` to change it.
+- portless supplies the branch prefix.
+- portless gives a detached worktree no prefix. Most orchestrators create detached worktrees.
+- portless gives two branches ending in the same segment the same prefix, such as `feat/login` and
+  `fix/login`.
+- In those two cases boxer uses the sandbox's two-word name, such as `swift-crab`.
+- boxer never takes a name another sandbox or a person registered.
+
+## Name several ports
+
+With several ports, each is named `<label>.<repo>`, after the branch prefix. The label comes from
+`urls.names`, a devcontainer's `portsAttributes.label`, or the port number:
+
+```toml
+[network]
+ports = ["auto:3000", "auto:8080"]
+
+[urls]
+enabled = true
+names   = { "3000" = "web", "8080" = "api" }   # fix-ui.web.myapp.localhost, fix-ui.api.myapp.localhost
+```
+
+## Find a URL
+
+```sh
+boxer url          # the first forwarded port's address
+boxer url 8080     # a specific guest port
+boxer open         # open it in a browser
+```
+
+- The brief, the skill and `AGENTS.md` tell the agent to run `boxer url` instead of assuming
+  `localhost:<port>`.
+- The `boxer_status` MCP tool returns each port's URL.
+- `boxer status --json` and `boxer ls --json` list them under `urls`.
+
+A harness running [inside](/docs/use/inside) the sandbox cannot reach the names, because the proxy
+is on the host's loopback. boxer tells it the server is at `127.0.0.1:<port>`. The address a person
+should open is in `$BOXER_URLS` (`3000=https://…`).
+
+In the adherence evaluation, an agent is told only that a dev server is running and asked to fetch
+its home page. Five of eight harnesses reached it by name on all four models. See
+[Results](/docs/evals/results#when-boxer-only-asks).
+
+## Name lifecycle
+
+- boxer registers a name when the sandbox starts.
+- boxer removes it when `down`, `rm` or `gc` deletes the sandbox.
+- `gc` also removes a route whose sandbox disappeared some other way.
+
+If the portless proxy is not running, boxer starts it on port 1355. Set `PORTLESS_PORT` to 1024 or
+above to use that port instead. boxer stops the proxy when the last route goes. A proxy you started
+yourself is left running.
+
+The proxy binds `127.0.0.1`. See
+[forwarded ports and URLs](/docs/concepts/security#forwarded-ports-and-urls).
+
+## Next.js
+
+Next.js 15 serves the page, its chunks and hot reload through the name. It warns that a future
+version will refuse cross-origin dev requests. Add `*.localhost` to `allowedDevOrigins` to cover
+every worktree's name:
+
+```ts
+// next.config.ts
+const nextConfig = { allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"] };
+export default nextConfig;
+```
+
+[`examples/nextjs`](/docs/configure/examples#nextjs) is a complete setup.

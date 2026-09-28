@@ -34,4 +34,4 @@ Every example follows these rules:
 - The allowlist names only the package registry. The image registry is allowed automatically.
 
 The [configuration reference](../site/content/docs/reference/configuration.mdx) lists every key,
-and [the guides](../site/content/docs/guides/) cover each task.
+and [the guides](../site/content/docs/configure/) cover each task.

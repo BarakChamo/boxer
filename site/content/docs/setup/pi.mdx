@@ -1,0 +1,39 @@
+---
+title: pi
+description: Route pi's shell commands into the sandbox with an extension.
+---
+
+pi loads TypeScript extensions. boxer's extension rewrites each intercepted command to `boxer run`
+before pi runs it.
+
+## Set up
+
+```sh
+boxer install pi
+git add .pi AGENTS.md
+git commit -m "Run pi's commands in boxer"
+```
+
+pi loads project extensions only once you trust the project. Trust it the first time you open it.
+For a one-off run without trusting, use `pi -e .pi/extensions/boxer.ts`.
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.pi/extensions/boxer.ts` | the extension that rewrites commands |
+| `AGENTS.md` | a section telling pi how commands run here |
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask pi to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Run pi itself in the sandbox:** `boxer shell pi`. See [Inside mode](/docs/use/inside).
+
+Tested in the matrix with extension rewrite.

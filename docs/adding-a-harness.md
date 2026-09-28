@@ -145,7 +145,7 @@ make eval-t2                                  # live models, cents
 
 ## Documenting it
 
-- `site/content/docs/start/harnesses.mdx` — the what-lands-where table.
+- `site/content/docs/setup/<harness>.mdx` — the harness's setup page, with its "What it writes" table, and a row in `setup/index.mdx`.
 - `site/content/docs/evals/results.mdx` — only after a matrix run scores it.
 - `docs/status.md` — the run that scored it, with its date and any skip reason.
 

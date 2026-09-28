@@ -1,0 +1,93 @@
+---
+title: How a command runs
+description: What boxer does between an agent typing a command and the command running in the sandbox.
+---
+
+This page covers what boxer does when a command runs, from the working directory to the sandbox.
+
+```sh
+boxer run -c 'npm test'
+```
+
+boxer finds the sandbox for the working directory, creates and prepares it if needed, and runs the
+command in it. The worktree is mounted at `/workspace`.
+
+## Scope
+
+A **scope** is the key boxer gives a sandbox. By default it is the git worktree that contains the
+current directory.
+
+- Two worktrees of one repository get two sandboxes.
+- Two directories in one worktree share one sandbox.
+
+```toml
+isolation = "worktree"   # the default. Also: repo, session, subagent
+```
+
+| `isolation` | Sandbox per |
+| --- | --- |
+| `worktree` | git worktree |
+| `repo` | repository, shared by all its worktrees |
+| `session`, `subagent` | an id the harness supplies. Falls back to the next wider scope when there is none. |
+
+See [Scopes and packs](/docs/concepts/scopes-and-packs) for the rules.
+
+## What the first command does
+
+1. Resolve the scope from the working directory.
+2. Read configuration. `boxer.toml` in the worktree wins over the one at the repository root. That
+   wins over `~/.config/boxer/boxer.toml`, which wins over `.devcontainer/devcontainer.json`.
+3. Create the sandbox on the configured backend (smolvm by default) with the image, `cpus`,
+   `memory` and the worktree mounted at `mount_at`. Any `[prep]` commands start on the host at the
+   same time.
+4. Run `image_setup` if this sandbox has not run it. Then run `setup` if this worktree has not.
+5. Launch `start` and poll `ready` until it passes.
+6. Run the command.
+
+Steps 3 to 5 run only when the sandbox is missing or stopped. Later commands go straight to step 6.
+See [Environment](/docs/configure/environment) for each key.
+
+### Environment packs
+
+On smolvm, boxer snapshots the sandbox after `image_setup` into an **environment pack**. The next
+worktree with the same image and `image_setup` starts from the pack and skips `image_setup`.
+
+`boxer up --rebuild` drops the pack and prepares from scratch.
+[Scopes and packs](/docs/concepts/scopes-and-packs#packs) lists what the pack key includes.
+
+## How a command reaches the sandbox
+
+The **integration level** is how an agent's command gets to boxer.
+[Integration levels](/docs/setup/integration-levels) shows which levels each harness supports.
+
+| Level | Mechanism | Enforces |
+| --- | --- | --- |
+| Skill and MCP tool | the agent chooses to use `boxer_run` | no |
+| Tool mode | the hook blocks the shell, so the agent must use `boxer_run` | yes |
+| Hooks | boxer rewrites the command before the harness runs it | yes |
+| Plugin or extension | the same, in-process (OpenCode, pi) | yes |
+| PATH shims | a file named `npm` that re-runs the command through boxer | yes, while `PATH` holds |
+| Inside | the harness itself runs in the sandbox | yes |
+
+All but the last run the harness on the host. boxer calls this **outside**. See
+[Run the harness inside](/docs/use/inside) for the fifth.
+
+`mode` sets what a hook does:
+
+| `mode` | Effect |
+| --- | --- |
+| `rewrite` (default) | Turns `npm test` into `boxer run -c 'npm test'`. |
+| `tool` | Denies the shell command and points the agent at `boxer_run`. For harnesses that can block a command but not rewrite one. |
+| `off` | Leaves boxer installed and does nothing. |
+
+Hooks and shims act only on commands whose first word is on `intercept`. The default list is
+`npm`, `npx`, `pnpm`, `yarn`, `bun`, `node`, `python`, `pip`, `uv`, `pytest`, `cargo`, `go`, `make`
+and a few more. See [Integration levels](/docs/setup/integration-levels) for each level.
+
+## What runs on the host
+
+`git`, `gh`, `ssh`, `boxer` and `smolvm` stay on the host. They need your credentials and the real
+repository. That list is `passthrough`.
+
+A command on neither `intercept` nor `passthrough` also runs on the host. Use
+[tasks](/docs/configure/tasks) to run other commands in the sandbox.

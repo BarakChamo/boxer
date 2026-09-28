@@ -1,23 +1,23 @@
 ---
-title: Skills and plugins
+title: Skill and plugin only
 description: "What the boxer skill and plugin contain, the ways to install them, and what each way enforces."
 ---
 
-The boxer skill tells an agent how commands run in this repository and what to do when one is
-refused. The plugin package bundles that skill with the `boxed` subagent and, for clients whose
-plugin format carries them, the hooks and the `boxer_run` MCP tool. Which of those an agent
-actually gets depends on how you install it:
+The skill tells an agent how commands run in this repository and what to do when a command is
+refused. The plugin package bundles the skill with the `boxed` subagent. For clients whose plugin
+format supports them, the package also carries the hooks and the `boxer_run` MCP tool. What an
+agent gets depends on how you install it.
 
 | You want | Run | What the agent gets |
 | --- | --- | --- |
-| The sandbox enforced in one repository | `boxer install <harness>` | hooks or plugin, MCP tool, skill; written into the repository |
-| The same for every repository you open | `boxer install <harness> --user` | the same, in your user config (Claude Code, Codex, Copilot) |
-| Only the instructions, through the skills ecosystem | `npx skills add BarakChamo/boxer --skill boxer` | the skill; nothing is enforced |
-| The Agent Plugins package, through `npx plugins` | `npx plugins add BarakChamo/boxer` | the skill and the `boxed` agent; no hooks |
-| A native plugin install | `claude plugin install <dir>` and the other clients' equivalents | everything the client's plugin format carries, hooks included |
+| The sandbox enforced in one repository | `boxer install <harness>` | Hooks or plugin, MCP tool and skill, written into the repository |
+| The same for every repository you open | `boxer install <harness> --user` | The same, in your user config (Claude Code, Codex, Copilot) |
+| Only the instructions, through the skills ecosystem | `npx skills add BarakChamo/boxer --skill boxer` | The skill. Nothing is enforced |
+| The Agent Plugins package, through `npx plugins` | `npx plugins add BarakChamo/boxer` | The skill and the `boxed` agent. No hooks |
+| A native plugin install | `claude plugin install <dir>` and the other clients' equivalents | Everything the client's plugin format carries, hooks included |
 
-`boxer install` is the route that enforces. The skill and `npx plugins` only ask, and a model
-follows a request most of the time, not always:
+Only `boxer install` enforces the sandbox. The skill and `npx plugins` only ask the agent to use
+it. Models follow that request most of the time, but not always.
 [Results](/docs/evals/results#when-boxer-only-asks) has the rates.
 
 ## The skill
@@ -45,7 +45,7 @@ npx skills add BarakChamo/boxer --skill boxer -g         # for your user
 boxer integrations add skill --agent claude-code         # the same, through boxer
 ```
 
-`boxer install <harness>` also copies the skill, into `.claude/skills/boxer/` for Claude Code and
+`boxer install <harness>` also copies the skill into `.claude/skills/boxer/` for Claude Code and
 `.agents/skills/boxer/` for the others. Commit it with the rest of the integration so every
 worktree has it.
 
@@ -93,7 +93,7 @@ hooks are client-specific, so they come from the client's own plugin install or 
 
 ```sh
 boxer integrations          # every harness and tool, and whether boxer is wired into each
-boxer doctor                # the same for this checkout, with warnings for anything that will not hold
+boxer doctor                # the same for this checkout, with warnings for anything that will not work
 ```
 
 ```
@@ -104,11 +104,11 @@ copilot      harness       yes      -          -     yes
 ```
 
 `THIS REPO` and `USER` are the enforcing integration, from `boxer install`. A row with only `SKILL`
-means the agent is told how to use the sandbox and nothing stops it running a command on the host. [Enforcement](/docs/guides/enforcement) covers what each
-integration level holds.
+means the agent is told how to use the sandbox, but nothing stops it running a command on the host.
+[Enforcement](/docs/setup/integration-levels) covers what each integration level enforces.
 
 ## Updating
 
 The skill and plugin carry the release version in their metadata. After upgrading boxer, run the
-same install command again: `boxer install <harness>` rewrites its files, and `npx skills add` and
+same install command again. `boxer install <harness>` rewrites its files, and `npx skills add` and
 `npx plugins add` replace theirs.

@@ -1,0 +1,244 @@
+---
+title: Environment
+description: Choose an image, install dependencies with image_setup, setup or prep, run services, forward ports, and set environment and network.
+---
+
+Set up what runs in each sandbox with keys in `boxer.toml`.
+
+```toml
+image       = "mirror.gcr.io/library/node:24-alpine"
+image_setup = ["apk add --no-cache git"]
+setup       = ["npm ci"]
+start       = ["npx next dev -p 3000 -H 0.0.0.0"]
+ready       = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""
+
+[network]
+allow_hosts = ["registry.npmjs.org"]
+ports       = ["auto:3000"]
+```
+
+This page covers each key in the order boxer uses it. The
+[configuration reference](/docs/reference/configuration) lists every key and its default.
+
+## Choose an image
+
+```toml
+image = "node:24-bookworm-slim"
+```
+
+Any OCI reference works. Without `image`, boxer picks one from the worktree's lockfile:
+
+| lockfile | image |
+| --- | --- |
+| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` | `node:24-bookworm-slim` |
+| `uv.lock`, `requirements.txt`, `pyproject.toml` | `python:3.12-slim-bookworm` |
+| `bun.lock` | `oven/bun:1-slim` |
+| `Cargo.lock` | `rust:1-slim-bookworm` |
+| `go.mod` | `golang:1-alpine` |
+| none of these | `debian:bookworm-slim` |
+
+A smaller image starts faster. A microVM attaches the image's filesystem on every `boxer up`.
+Measured on an M4 with the pack already built:
+
+| image | `boxer up` | first pack build |
+| --- | ---: | ---: |
+| `alpine:3.21` | 0.6s | 8.6s |
+| `node:24-alpine` | 1.7s | 10.9s |
+| `node:24-bookworm-slim` | 2.5s | 13.4s |
+| `node:24-bookworm` | 9.5s | 26.2s |
+
+- Alpine uses musl, not glibc. A dependency that ships only a glibc prebuilt fails there.
+- A slim image has no compiler. If a dependency builds from source, install the toolchain in
+  `image_setup`. You do not need the full image.
+
+You can also use a local image. boxer pulls nothing for it, so you do not need to allow a registry
+host:
+
+```toml
+image = "./dev.tar"        # a docker save archive
+image = "./rootfs"         # an extracted rootfs directory
+image = "-"                # read from stdin
+```
+
+<Callout>
+Docker Hub allows 100 anonymous pulls an hour. Several sandboxes can use that up. Pull public
+images through `mirror.gcr.io/library/`, which has no quota.
+</Callout>
+
+## Install dependencies
+
+Three keys install things:
+
+| key | runs | how often | use it for |
+| --- | --- | --- | --- |
+| `image_setup` | in the guest, as root | once per sandbox. On smolvm, once per host, because the result goes into the [environment pack](/docs/concepts/scopes-and-packs#packs) | system packages, global tools, compilers |
+| `setup` | in the guest, in the mounted worktree | once per worktree, and again after the list changes | `npm ci`, `uv sync`, anything that writes into the worktree |
+| `[prep] commands` | on the host, in the worktree | once per worktree, and again after the list changes | installing packages that ship prebuilt binaries, faster than the guest can |
+
+```toml
+image_setup = ["npm i -g typescript"]   # changes the guest image
+setup       = ["npm ci"]                # writes node_modules into this worktree
+```
+
+<Callout type="warn">
+Do not put `npm ci` in `image_setup`. The pack records it as done, but `node_modules` lives in the
+worktree and the pack does not carry it. The next worktree starts with no dependencies.
+</Callout>
+
+Run `boxer up --rebuild` when something outside these keys changed, such as a base image tag that
+moved. It recreates the sandbox and drops its pack, if it has one, along with the `setup` record.
+Both run again.
+
+### Host package caches
+
+boxer mounts the host's package cache into the guest read-only. It picks the cache by lockfile:
+`~/.npm` for `package-lock.json`, and the pnpm, yarn, bun, uv, poetry, cargo and Go caches for
+theirs. The install still runs in the guest, so native binaries are built for the guest.
+
+```toml
+[cache]
+enabled  = true          # the default
+managers = ["auto"]      # or a list: npm, pnpm, yarn, bun, uv, poetry, cargo, go
+```
+
+### Install on the host with prep
+
+`[prep]` runs on the host while the sandbox boots. boxer waits for it before `setup` starts. It
+matches devcontainer's `initializeCommand`.
+
+`$BOXER_TARGET_FLAGS` carries the guest's platform, so npm, pnpm and bun fetch the Linux binaries:
+
+```toml
+[prep]
+commands = ["npm ci $BOXER_TARGET_FLAGS"]   # --os=linux --cpu=arm64 --libc=musl on alpine, Apple Silicon
+target   = "auto"                           # the default; or "none", or "linux/arm64/musl"
+```
+
+A package that compiles at install time, such as `better-sqlite3` or `node-pty`, builds for the host
+whatever the flags say. It then fails in the guest with `invalid ELF header`. Install those projects
+with `setup`.
+
+`boxer up` and `boxer doctor` warn when `package-lock.json` has one of the common ones. The list is
+not complete. [`examples/host-prep`](/docs/configure/examples) is a working config.
+
+### From a devcontainer
+
+If the repository has `.devcontainer/devcontainer.json`, boxer reads it first:
+
+| devcontainer | boxer |
+| --- | --- |
+| `onCreateCommand` | `image_setup` |
+| `postCreateCommand` | `setup` |
+| `postStartCommand` | `start` |
+| `initializeCommand` | `[prep]` |
+
+boxer also reads the image, ports, environment, bind mounts and `remoteUser`. It names anything it
+will not do, such as `features` or `runArgs`. Any key in `boxer.toml` overrides the devcontainer.
+The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
+
+You still need a short `boxer.toml` for the allowlist. devcontainer has no key for it, and boxer's
+default network reaches only the image registry.
+
+## Run services
+
+Use `start` for long-running processes. Use `ready` for a command boxer polls until it exits 0.
+
+```toml
+start = ["npm run dev"]
+ready = "curl -sf http://127.0.0.1:3000/ >/dev/null"
+ready_timeout = "120s"     # the default is 60s
+```
+
+- Each `start` line runs detached in the worktree, after `setup`, every time the sandbox starts.
+- A process that exits is not restarted.
+- Service output goes to `/tmp/boxer-start.log`. When `ready` does not pass in time, boxer prints
+  the end of that log.
+
+## Forward ports
+
+```toml
+[network]
+ports = ["auto:3000"]
+```
+
+| entry | host port |
+| --- | --- |
+| `"auto:3000"` | a free host port, forwarded to 3000 in the guest |
+| `"8080:3000"` | always 8080. A second worktree then fails to start. |
+
+Use `auto:` in anything you commit. Forwards bind `127.0.0.1` on the host. Ports are fixed when the
+sandbox is created, so run `boxer up --recreate` after you change the list.
+
+<Callout type="warn">
+The server must listen on `0.0.0.0` in the guest. A forward arrives on the guest's network
+interface, so a server bound to `127.0.0.1` never sees it. A `ready` probe in the guest does not
+catch this.
+</Callout>
+
+```toml
+start = ["npx next dev -H 0.0.0.0"]       # next
+start = ["npx vite --host 0.0.0.0"]       # vite
+```
+
+`boxer status` prints where each guest port landed:
+
+```console
+$ boxer status
+boxer: swift-crab (sb-7e1852e4a3c3) running, image node:24-bookworm-slim, mounted /Users/me/src/myapp -> /workspace
+  port:      guest 3000 -> http://127.0.0.1:61234
+```
+
+Next.js 15 warns about every dev chunk served through a forwarded port, and says a future version
+will refuse them. Add this to `next.config.ts`:
+
+```ts
+allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"]
+```
+
+To give each worktree's server a name instead of a port number, turn on
+[`[urls]`](/docs/configure/urls).
+
+## Set environment variables and secrets
+
+```toml
+[env]
+NODE_ENV = "development"          # stored in the pack
+
+env_passthrough = ["CI"]          # copied from the host on each run; the default
+secrets = ["NPM_TOKEN"]           # the same, and kept out of argv
+```
+
+- `[env]` is part of the pack key. Put nothing secret there.
+- boxer reads `env_passthrough` and `secrets` from the host every time.
+
+[Security](/docs/concepts/security#secrets) explains how secrets reach the guest.
+
+## Add mounts and choose the user
+
+```toml
+mounts = ["~/datasets:/data:ro"]   # host:guest, or host:guest:ro
+user   = "node"                    # a name or uid[:gid]; the default is the image's USER
+```
+
+- The worktree is always mounted at `mount_at`, which defaults to `/workspace`.
+- `user` runs `setup`, `start` and every command.
+- `image_setup` always runs as root.
+
+## Control the network
+
+```toml
+[network]
+mode = "allowlist"
+allow_hosts = ["registry.npmjs.org"]
+```
+
+| `mode` | allows |
+| --- | --- |
+| `"allowlist"` (default) | the image registry and the hosts in `allow_hosts` |
+| `"on"` | everything |
+| `"off"` | nothing |
+
+Only smolvm enforces `allowlist`. docker, podman and Apple `container` refuse it, so set `"on"` or
+`"off"` there. See [Backends](/docs/backends).
+
+When an install fails because a host is missing, boxer's error names the host.

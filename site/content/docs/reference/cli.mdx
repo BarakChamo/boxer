@@ -9,7 +9,7 @@ boxer <command> [flags] [args]
 
 A command with no sandbox name acts on the current [scope](/docs/concepts/scopes-and-packs), which
 is the git worktree you are in by default. `boxer`, `boxer help`, `-h` and `--help` print the usage
-text; `boxer` with no arguments prints it to stderr and exits 2.
+text. `boxer` with no arguments prints it to stderr and exits 2.
 
 `stop`, `rm`, `backends`, `integrations add`, `install` and `package` accept flags anywhere among
 their arguments. `capsule inspect`, `capsule replay`, `fork rm` and `pack` take the name first or
@@ -82,14 +82,14 @@ boxer run [flags] -- <program> [args...]
 boxer run --task <name>
 ```
 
-Runs one command in the sandbox and exits with its exit code. `-c` runs the line with `sh -c`;
+Runs one command in the sandbox and exits with its exit code. `-c` runs the line with `sh -c`.
 `--` runs a program with no shell. Stdin, stdout and stderr pass through unchanged. The sandbox is
 created first when [`create_on`](/docs/reference/configuration#create_on) includes `run`.
 
 | Flag | Default | |
 | --- | --- | --- |
 | `-c LINE` | | A shell line, run with `sh -c`. Not with `--` arguments |
-| `--task NAME` | | A [`[tasks]`](/docs/guides/tasks) entry. Not with `-c` or arguments. Unknown names fail with `NO_SUCH_TASK` |
+| `--task NAME` | | A [`[tasks]`](/docs/configure/tasks) entry. Not with `-c` or arguments. Unknown names fail with `NO_SUCH_TASK` |
 | `--scope NAME` | | Run in another sandbox, such as a fork child, by key or two-word name. The current directory must still be in a repository |
 | `--tty` | `false` | Allocate a terminal in the guest when stdin is not one. Input written before the guest attaches is kept |
 | `--junit PATHS` | | Comma-separated JUnit XML paths, relative to the worktree, to summarise after the run. Overrides the task's `junit` and [`results.auto`](/docs/reference/configuration#results) |
@@ -97,8 +97,8 @@ created first when [`create_on`](/docs/reference/configuration#create_on) includ
 | `--json` | `false` | Print a refusal as [JSON](/docs/reference/json#errors) on stdout |
 
 Without `--tty`, boxer allocates a terminal when both stdin and stdout are terminals. Inside a boxer
-guest, `run` executes the command directly. Prefer `--task` from an agent, because it runs a command the
-repository declared whatever [`intercept`](/docs/reference/configuration#intercept) catches.
+guest, `run` executes the command directly. From an agent, prefer `--task`. It runs a command the
+repository declared, regardless of what [`intercept`](/docs/reference/configuration#intercept) catches.
 
 ## `boxer down`
 
@@ -159,7 +159,7 @@ boxer stop [NAME...] [--all | --gone | --stopped] [-A] [-i] [-y] [--json]
 boxer rm   [NAME...] [--all | --gone | --stopped] [-A] [-i] [-y] [--json]
 ```
 
-`stop` halts sandboxes and keeps them. `rm` deletes them and everything boxer kept about them: the
+`stop` stops sandboxes without deleting them. `rm` deletes them and everything boxer kept about them: the
 run record, the last-used stamp, the lock and any URL. `NAME` is a key (`sb-7e1852e4a3c3`) or a
 two-word name (`swift-crab`).
 
@@ -200,10 +200,11 @@ boxer url [PORT]
 boxer open [PORT]
 ```
 
-Prints the address of this worktree's server, which is its [`[urls]`](/docs/guides/urls) name or else
-`http://127.0.0.1:<host port>`. `PORT` is the guest port; the default is the first forwarded one, sorted as text.
-`open` also opens it in a browser when a person is at the terminal. Exit 4 when this scope has no
-sandbox, 1 when it forwards no ports or not that one.
+Prints the address of this worktree's server, which is its [`[urls]`](/docs/configure/urls) name or else
+`http://127.0.0.1:<host port>`. `PORT` is the guest port. The default is the first forwarded port, sorted as text.
+`open` also opens the address in a browser when a person is at the terminal. The command exits 4
+when this scope has no sandbox. It exits 1 when the sandbox forwards no ports, or not the one you
+named.
 
 ## `boxer backends`
 
@@ -212,9 +213,9 @@ boxer backends [NAME] [--probe] [--json]
 ```
 
 Lists `smolvm`, `docker`, `podman` and `container`: installed or not, version, answering or not,
-[boundary](/docs/concepts/backends#the-boundary), allowlist support, sandbox count, and known
+[boundary](/docs/backends#compare-backends), allowlist support, sandbox count, and known
 misconfigurations. `NAME` shows one. Exit 1 when the configured backend is missing or not
-answering, or a probe failed; exit 2 for an unknown name.
+answering, or a probe failed. Exit 2 for an unknown name.
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -228,19 +229,23 @@ boxer integrations [--json]
 boxer integrations add <name> [--user] [--agent NAME] [--source REPO]
 ```
 
-Alias `boxer harnesses`. Lists every harness with its program on `PATH` or not and whether boxer's
-files are installed in this repository and for this user; the orchestrators `conductor` and
-`git-hook`; and the tools `portless`, `gh` and `npx`. Files written by another boxer release are
-marked stale.
+Alias `boxer harnesses`. It lists:
 
-`add` installs one. A harness name, `all`, `git` or `conductor` runs
+- every harness, with whether its program is on `PATH` and whether boxer's files are installed in
+  this repository and for this user
+- the orchestrators `conductor` and `git-hook`
+- the tools `portless`, `gh` and `npx`
+
+Files written by another boxer release are marked stale.
+
+`add` installs one integration. A harness name, `all`, `git` or `conductor` runs
 [`boxer install`](#boxer-install). `skill` runs `npx skills add <source> --skill boxer`, and
-`plugin` runs `npx plugins add <source>`; see [skills and plugins](/docs/guides/skills-and-plugins).
+`plugin` runs `npx plugins add <source>`. See [skills and plugins](/docs/setup/skills-and-plugins).
 
 | Flag | Default | |
 | --- | --- | --- |
-| `--user` | `false` | Install for this user. For `skill`, passes `-g`; for `plugin`, drops `-s project`; for a harness, `boxer install --user` |
-| `--agent NAME` | | `skill`: the agents, passed as `npx skills -a`. `plugin`: the target, passed as `-t` |
+| `--user` | `false` | Install for this user. For `skill`, passes `-g`. For `plugin`, drops `-s project`. For a harness, runs `boxer install --user` |
+| `--agent NAME` | | For `skill`, the agents, passed as `npx skills -a`. For `plugin`, the target, passed as `-t` |
 | `--source REPO` | `BarakChamo/boxer` | Where the skill and plugin are published |
 | `--json` | `false` | The [integration array](/docs/reference/json#boxer-integrations---json). Not with `add` |
 
@@ -252,8 +257,8 @@ boxer doctor [--json]
 
 Prints the version, the backend's capabilities, the git checkout, every configuration file read,
 each resolved setting with the file or variable it came from, the scope, the image, the sandbox,
-the environment pack, shims, hook signals, disk use, refused hosts, and warnings about setups that
-look right and do not hold. Exit 1 when the configuration could not be resolved.
+the environment pack, shims, hook signals, disk use, refused hosts, and warnings about configurations
+that look correct but do not work. Exit 1 when the configuration could not be resolved.
 
 ## `boxer brief`
 
@@ -270,7 +275,7 @@ the mount, the mode, the intercept and passthrough lists, and each declared task
 boxer tasks [--json]
 ```
 
-Prints each [`[tasks]`](/docs/guides/tasks) entry's name and description, or its command when it
+Prints each [`[tasks]`](/docs/configure/tasks) entry's name and description, or its command when it
 has none.
 
 ## `boxer fork`
@@ -283,7 +288,7 @@ boxer fork rm <name> | --all
 ```
 
 Branches copy-on-write children off this scope's smolvm sandbox. Children share this worktree. See
-[forking](/docs/guides/forking). Stdout carries only the children's names.
+[forking](/docs/use/forking). Stdout carries only the children's names.
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -313,7 +318,7 @@ A named pack is a snapshot of a sandbox's filesystem, not its processes. See
 | `use <name>` | Recreate this scope's sandbox from one. `NO_SUCH_PACK` when it was never saved |
 | `rm <name>` | Delete one. Exit 1 when there is no such pack |
 
-A name is checked before use, because it becomes a path segment; an invalid one exits 2.
+boxer checks a pack name before use because it becomes a path segment. An invalid name exits 2.
 
 ## `boxer capsule`
 
@@ -324,14 +329,14 @@ boxer capsule replay <path> [--allow-dirty] [--allow-drift] [--apply-patch]
 ```
 
 A capsule records the last command run in this scope well enough to run it again. See
-[capsules](/docs/guides/results#save-a-failure-as-a-capsule).
+[capsules](/docs/use/results#save-a-failure-as-a-capsule).
 
 | Flag | Default | |
 | --- | --- | --- |
 | `new -o PATH` | `capsule.toml` | Where to write it. A dirty worktree also gets `<name>.patch` beside it |
 | `inspect --json` | `false` | Print the manifest as JSON |
-| `replay --allow-dirty` | `false` | Replay although this worktree has uncommitted changes |
-| `replay --allow-drift` | `false` | Replay although `HEAD` differs from the captured one |
+| `replay --allow-dirty` | `false` | Replay even though this worktree has uncommitted changes |
+| `replay --allow-drift` | `false` | Replay even though `HEAD` differs from the captured one |
 | `replay --apply-patch` | `false` | Apply the capsule's patch with `git apply` first |
 
 `replay` exits 0 when the failure reproduced, which means the same exit code and, when the capsule lists
@@ -376,12 +381,12 @@ boxer install conductor
 ```
 
 Writes this repository's hooks, MCP entry, instruction and skill for a harness. Run it inside the
-repository. See [harnesses](/docs/start/harnesses).
+repository. See [harnesses](/docs/setup).
 
 | Target | Writes |
 | --- | --- |
 | `claude-code`, `codex`, `gemini-cli`, `grok`, `kimi`, `dsh`, `opencode`, `pi` | That harness's project files |
-| `copilot` | Nothing at project level; use `--user` |
+| `copilot` | Nothing at project level. Use `--user` |
 | `all` | Every harness above except `copilot` |
 | `git` | A `post-checkout` hook running `boxer up --detach` in each new worktree. Not part of `all` |
 | `conductor` | `.conductor/settings.toml` with harness shims and a setup script that warms the sandbox |
@@ -403,7 +408,7 @@ boxer shim install --harness a,b [dir]
 boxer shim install --shell [dir]
 ```
 
-Writes files on `PATH` that forward to boxer. See [PATH shims](/docs/guides/enforcement#path-shims).
+Writes files on `PATH` that forward to boxer. See [PATH shims](/docs/setup/integration-levels#path-shims).
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -424,7 +429,7 @@ boxer acp <harness> [-e KEY=VALUE]...
 
 `shell` runs the harness itself in the sandbox, with a terminal when you have one. `acp` runs its
 ACP server in the sandbox with stdio piped. Both set `integration = "inside"`. See
-[running the harness inside](/docs/guides/inside).
+[running the harness inside](/docs/use/inside).
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -440,8 +445,8 @@ boxer hook <harness>
 ```
 
 The command a harness hook runs. It reads the hook's JSON on stdin and answers on stdout. Harnesses
-are the `install` names above plus `copilot`. An unknown harness exits 1; input that is not JSON
-exits 0, so a session never breaks on boxer's parse failure. Inside a guest it does nothing.
+are the `install` names above plus `copilot`. An unknown harness exits 1. Input that is not JSON
+exits 0, so a parse failure in boxer never breaks a session. Inside a guest it does nothing.
 
 ## `boxer mcp`
 
@@ -500,10 +505,10 @@ recorded, else `dev`.
 | --- | --- |
 | `0` | Success. For `status`, running. For `capsule replay`, the failure reproduced |
 | `1` | Refused or failed |
-| `2` | Usage error: unknown command, bad flag, missing argument |
-| `3` | `status`: the sandbox exists and is stopped |
-| `4` | `status`, `url`, `open`: this scope has no sandbox |
-| *n* | `run`: the command's own exit code |
+| `2` | Usage error, such as an unknown command, a bad flag or a missing argument |
+| `3` | For `status`, the sandbox exists and is stopped |
+| `4` | For `status`, `url` and `open`, this scope has no sandbox |
+| *n* | For `run`, the command's own exit code |
 
 A refusal prints `boxer: <reason>` on stderr with `scope`, `worktree`, `cause` and `fix` lines. The
 causes are listed under [errors](/docs/reference/json#errors). With
@@ -513,7 +518,7 @@ program cannot be started there.
 
 ## Output modes
 
-`ls`, `stop`, `rm`, `backends` and `integrations` format their output for one of three readers.
+`ls`, `stop`, `rm`, `backends` and `integrations` format their output in one of three modes.
 `open` starts a browser only in human mode.
 
 | Mode | When | Output |
@@ -522,7 +527,7 @@ program cannot be started there.
 | agent | an agent is detected, `CI` is set, or stdout is not a terminal | Plain text, hints as `next: <command>` lines, never a prompt |
 | json | `--json` or `BOXER_OUTPUT=json` | One JSON document on stdout |
 
-An agent is detected by `CLAUDECODE`, `BOXER_AGENT` or `BOXER_INSIDE` being set. A command that
+boxer detects an agent when `CLAUDECODE`, `BOXER_AGENT` or `BOXER_INSIDE` is set. A command that
 would have asked a person refuses in agent mode and says what to pass. `BOXER_OUTPUT=json` also
 switches every other command that has a [JSON form](/docs/reference/json).
 
@@ -539,7 +544,7 @@ Variables that set a `boxer.toml` key, such as `BOXER_BACKEND`, are listed in th
 | `BOXER_HARNESS`, `BOXER_SESSION_ID`, `BOXER_AGENT_ID` | Defaults for the [identity flags](#identity-flags) |
 | `BOXER_SMOLVM` | Path to the `smolvm` binary. Default `smolvm` on `PATH` |
 | `BOXER_PORTLESS` | Path to the `portless` binary. Default `portless` on `PATH` |
-| `PORTLESS_PORT` | Port boxer starts the portless proxy on. Default `1355`; below 1024 boxer refuses and asks you to start it |
+| `PORTLESS_PORT` | Port boxer starts the portless proxy on. Default `1355`. Below 1024, boxer refuses and asks you to start the proxy yourself |
 | `BOXER_PACKS` | Directory for environment packs. Default `$XDG_STATE_HOME/boxer/packs`, else `~/.local/state/boxer/packs` |
 | `BOXER_TRACE` | A path. Turns the event file sink on there, whatever `[telemetry]` says. See [events](/docs/reference/events) |
 | `BOXER_NO_RECLAIM` | `1` skips the background sweep [`auto_reclaim`](/docs/reference/configuration#auto_reclaim) starts |

@@ -3,22 +3,25 @@ title: Scopes and packs
 description: How boxer decides which sandbox a command runs in, and how it caches built environments.
 ---
 
-A **scope** is the identity of one sandbox, and decides which sandbox a command runs in. A **pack**
-is a cached snapshot of a built environment, and decides whether a new sandbox has to be built. An
-unexpected new sandbox, a missing one, or a setup step that ran again usually traces to one of the
-two.
+| Term | What it is | What it decides |
+| --- | --- | --- |
+| **Scope** | The identity of one sandbox | Which sandbox a command runs in |
+| **Pack** | A cached snapshot of a built environment | Whether a new sandbox has to be built |
+
+An unexpected new sandbox, a missing sandbox, or a setup step that ran again usually comes from one
+of these two.
 
 ## Scope
 
-A scope is a name derived from the working directory and, for finer isolation, the agent's session
-or subagent id.
+A scope is a name derived from the working directory. For finer isolation, boxer also uses the
+agent's session or subagent id.
 
 ```
 sb-7e1852e4a3c3
 ```
 
-`sb-` plus twelve hex characters of a SHA-256. It is also the sandbox's name on the backend. What
-goes into the hash is set by `isolation`:
+The name is `sb-` plus twelve hex characters of a SHA-256. It is also the sandbox's name on the
+backend. `isolation` sets what goes into the hash:
 
 | `isolation` | Hashed | One VM per |
 | --- | --- | --- |
@@ -28,51 +31,57 @@ goes into the hash is set by `isolation`:
 | `subagent` | the worktree root, the session id and the agent id | subagent |
 
 `worktree` is the default because orchestrators already create one worktree per task. Parallel
-agents get separate sandboxes with no extra setup, and `boxer gc` reclaims a sandbox once its
-worktree is gone.
+agents get separate sandboxes with no extra setup. `boxer gc` reclaims a sandbox once its worktree
+is gone.
 
 ### Degradation
 
-`session` and `subagent` need an id the harness supplies. Not every harness supplies one, and one
-configuration may be read by several harnesses.
+`session` and `subagent` need an id from the harness. Not every harness supplies one, and several
+harnesses may read one configuration.
 
 ```toml
 isolation     = "session"
 on_missing_id = "degrade"    # degrade | fail
 ```
 
-`degrade` falls back one step (subagent to session, session to worktree) and prints a warning.
-`fail` refuses to run. `boxer doctor` shows whether resolution degraded.
+| `on_missing_id` | When the id is missing |
+| --- | --- |
+| `degrade` (default) | Fall back one step (subagent to session, session to worktree) and print a warning. |
+| `fail` | Refuse to run. |
+
+`boxer doctor` shows whether resolution degraded.
 
 ### Placement is part of the key
 
-Running the harness inside the guest ([inside mode](/docs/guides/inside)) and outside it produces
-two different scopes for the same worktree, because one sandbox carries the harness and the other
-does not.
+Running the harness inside the guest ([inside mode](/docs/use/inside)) and outside it produces two
+different scopes for the same worktree. One sandbox carries the harness and the other does not.
 
 ## Packs
 
 A pack is a snapshot of a guest after `image_setup` has run, taken with `smolvm pack create`. The
-next sandbox with the same environment starts from the snapshot instead of rebuilding it. Packs
-exist on smolvm only; on other [backends](/docs/concepts/backends) `image_setup` runs once per
-sandbox.
+next sandbox with the same environment starts from the snapshot and skips the rebuild.
+
+Packs exist on smolvm only. On other [backends](/docs/backends), `image_setup` runs once
+per sandbox.
 
 ### The key
 
 A pack is keyed on the image plus a hash of everything that shaped it:
 
-- `image_setup`, the commands that changed the guest
-- `env`, the variables baked into it
-- `mounts`, what else is attached
-- `start` and `ready`, what a VM from this pack is expected to be running
+| Key | Why |
+| --- | --- |
+| `image_setup` | the commands that changed the guest |
+| `env` | the variables baked into it |
+| `mounts` | what else is attached |
+| `start`, `ready` | what a VM from this pack is expected to be running |
 
 Change any of them and the next sandbox builds a new pack.
 
-`setup` is not in the key. It prepares the worktree, which no pack carries.
+`setup` is not in the key. It prepares the worktree, and no pack carries the worktree.
 
 ### `image_setup` versus `setup`
 
-Put a command that changes the guest in `image_setup`, and one that changes the worktree in
+Put a command that changes the guest in `image_setup`. Put a command that changes the worktree in
 `setup`.
 
 ```toml
@@ -81,21 +90,26 @@ setup       = ["npm ci"]                          # changes the worktree, so it 
 ```
 
 A pack carries the guest's filesystem. The worktree is mounted from the host, so it is not in the
-snapshot. Put `npm install` in `image_setup` and the second worktree starts from a pack that marks
-the install done, with no `node_modules` in its worktree. Dependency installs belong in `setup`.
-[Environment](/docs/guides/environment#install-dependencies) covers both lists and `[prep]`.
+snapshot.
+
+<Callout type="warn">
+Do not put `npm install` in `image_setup`. The second worktree starts from a pack that marks the
+install done, with no `node_modules` in its worktree. Put dependency installs in `setup`.
+</Callout>
+
+See [Environment](/docs/configure/environment#install-dependencies) for both lists and `[prep]`.
 
 ### Cache management
 
-Packs are hundreds of megabytes each, and an environment that changes often leaves one per
-version. Two settings bound the cache:
+Packs are hundreds of megabytes each. An environment that changes often leaves one pack per
+version. Two settings limit the cache:
 
 ```toml
 packs_keep_last = 5      # bound by count, not only by age
 min_free_gb     = 5      # below this much free disk, skip packing
 ```
 
-Below `min_free_gb`, boxer does not write a pack and says so; the next worktree runs its setup
+Below `min_free_gb`, boxer does not write a pack and says so. The next worktree runs its setup
 again.
 
 ```sh
@@ -110,7 +124,7 @@ dependency resolved at install time.
 
 ### Packs you name
 
-The packs above are a cache boxer manages. A named pack is one you manage:
+boxer manages the packs above as a cache. You manage a named pack yourself:
 
 ```sh
 boxer pack save base     # snapshot this sandbox as it stands
@@ -119,18 +133,16 @@ boxer pack use base      # recreate this scope's sandbox from it
 boxer pack rm base
 ```
 
-Use one for a guest that took a long time to prepare, such as a toolchain assembled by hand, or a
-base several worktrees should start from.
+Use one for a guest that took a long time to prepare, such as a toolchain assembled by hand. Or use
+one as a base that several worktrees start from.
 
-`gc` never touches a named pack. It sweeps the automatic cache by age and by `packs_keep_last`.
+`gc` never removes a named pack. It clears the automatic cache by age and by `packs_keep_last`.
 
-<Callout>
-A named pack is a filesystem snapshot: what is installed, not what is running. smolvm cannot
-checkpoint RAM on a machine with a host mount, and boxer always mounts the worktree. The nearest
-live snapshot is a [fork](/docs/guides/forking).
-</Callout>
+A named pack is a filesystem snapshot. It keeps installed files. It does not keep running processes. smolvm
+cannot checkpoint RAM on a machine with a host mount, and boxer always mounts the worktree. For a
+live copy, use a [fork](/docs/use/forking).
 
-## Reading the current state
+## Read the current state
 
 ```sh
 boxer status     # this scope: state, image, ports, mount
@@ -143,14 +155,14 @@ the resolved scope, and whether resolution degraded.
 
 ### Names
 
-A scope key is a hash so that it is a legal machine name whatever the worktree path contains. For
-readability, boxer also derives two words from the same hash and prints them beside it:
+A scope key is a hash, which makes it a legal machine name whatever the worktree path contains.
+boxer also derives two words from the same hash and prints them next to it:
 
 ```console
 NAME               SCOPE            STATE     ISOLATION  WORKTREE
 swift-crab         sb-7e1852e4a3c3  running   worktree   /Users/me/src/demo
 ```
 
-The name is computed from the key and never stored, so the same worktree always gets the same
-words. Two keys can share a name; the key is always printed beside it. `--scope` accepts either
-form.
+- The name is computed from the key and never stored. The same worktree always gets the same words.
+- Two keys can share a name. The key is always printed next to it.
+- `--scope` accepts either form.

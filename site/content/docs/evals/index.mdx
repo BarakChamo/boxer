@@ -1,12 +1,21 @@
 ---
-title: Evaluations
+title: Overview
 description: The evaluation tiers that check boxer's claims against real agents and runtimes, and what each costs.
 ---
 
-The evaluation tiers run real coding agents against real runtimes to check what unit tests cannot:
-that a harness's commands run in the sandbox, that an integration level holds, that each worktree
-gets its own sandbox, and that an agent finds its own dev server. Every result is published with
-the conditions it was measured under.
+boxer's evaluations run real coding agents against real runtimes to check what unit tests cannot.
+They test that:
+
+- a harness's commands run in the sandbox
+- each integration level holds
+- each worktree gets its own sandbox
+- an agent finds its own dev server
+
+The latest two [matrix](/docs/evals/matrix) passes, on 2026-09-25, scored 99.4% of weighted checks by
+default and 98.7% in URLs mode. [Results](/docs/evals/results) has every tier's latest numbers.
+
+
+## Tiers
 
 | Tier | What it asks | Cost |
 | --- | --- | --- |
@@ -19,8 +28,10 @@ the conditions it was measured under.
 | `matrix` | The same workload at every integration level | $2 to $3 |
 
 An integration level is how boxer routes a harness's commands into the sandbox: a hook rewrite, a
-PATH shim, or running the harness inside the guest. [Enforcement](/docs/guides/enforcement) lists
+PATH shim, or running the harness inside the guest. [Enforcement](/docs/setup/integration-levels) lists
 them.
+
+## Run the tiers
 
 ```sh
 make smoke          # one backend; BOXER_BACKEND=docker make smoke for another

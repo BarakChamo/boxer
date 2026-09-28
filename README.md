@@ -1,199 +1,128 @@
 # boxer
 
-Run a coding agent's shell commands in a sandbox, one per git worktree. For Claude Code, Codex,
-Gemini CLI, Copilot, OpenCode and the agents and orchestrators around them.
+Run coding agents in parallel without them colliding. boxer gives every git worktree its own
+sandbox and runs your agent's commands in it.
 
 ```console
-$ boxer run -c 'uname -s && pwd'
-Linux
-/workspace
+$ cd ~/code/myapp-fix-ui   && boxer up
+$ cd ~/code/myapp-add-auth && boxer up
+$ boxer ls                  # some columns left out
+NAME         STATE    BRANCH    SERVES
+mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
+olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
 ```
 
-The agent keeps working as before. It runs `npm test`, boxer runs it in the worktree's sandbox from
-the matching directory, and the exit code, stdout and stderr come back unchanged. The default
-sandbox is a [smolvm](https://smolmachines.com) microVM with its own kernel. Apple `container`,
-docker and podman are also supported.
+Two worktrees, both running a dev server on port 3000, each in its own microVM with its own URL.
+Your agent does not change. It runs `npm test`, and boxer runs it in that worktree's sandbox.
 
-macOS on Apple Silicon and Linux on x86-64 and arm64.
+**[Documentation](https://barakchamo.github.io/boxer/docs)** ·
+[Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) ·
+[Set up your agent](https://barakchamo.github.io/boxer/docs/setup)
 
-## Motivation
+## Why
 
-I built boxer to make parallel agent work easy. Running several agents at once, each on its own
-worktree, works until their environments collide: two dev servers want the same port, one task's
-dependency install breaks another's, and every task shares the host system. Each workstream needed
-its own isolated environment on the same machine, without a hosted platform or a change of tools.
-
-boxer is a single, self-contained utility for that. It gives each git worktree its own local
-sandbox and runs the agent's commands inside it. It does not replace a harness, orchestrator or
-editor. It integrates with them through hooks, PATH shims, an MCP tool or a Go package, so the same
-isolation applies whether the agent is Claude Code in a terminal, a task in an orchestrator, or
-your own automation.
+I built boxer to make parallel agent work easy. Several agents on several worktrees share one
+machine. Two dev servers want port 3000, one task's installs break another's, and every command
+runs against your own system. boxer gives each worktree its own sandbox on the same machine,
+without a hosted platform and without changing your tools. It plugs into the agent or orchestrator
+you already use.
 
 ## Install
 
 ```sh
-curl -sSL https://smolmachines.com/install.sh | bash                                     # smolvm, the default backend
-curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh       # boxer, into ~/.local/bin
+curl -sSL https://smolmachines.com/install.sh | bash                            # smolvm, the sandbox
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
 ```
 
-Or with Go, or from the npm tarball on the release:
-
-```sh
-go install github.com/BarakChamo/boxer/cmd/boxer@latest
-npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.0.0/boxer-cli-1.0.0.tgz
-```
-
-To use docker, podman or Apple `container` instead of smolvm, install it and set
-`backend = "docker"` in `boxer.toml`, with `network.mode = "on"` or `"off"`: only smolvm enforces
-the default allowlist, and the others refuse it rather than open the network. [Install](site/content/docs/start/install.mdx) has the
-details for each.
+Or `go install github.com/BarakChamo/boxer/cmd/boxer@latest`. macOS on Apple Silicon, Linux on
+x86-64 or arm64.
 
 ## Quick start
 
 ```sh
-cd your-repository
-boxer doctor                        # what boxer resolved here, and anything wrong
-boxer run -c 'uname -a'             # Linux: the first command creates the sandbox
-boxer install claude-code           # hooks, MCP tool and skill for your agent
-git add .claude .mcp.json && git commit -m 'Use boxer'
+cd your-repo
+boxer install claude-code            # or codex, gemini-cli, opencode, pi, grok, ...
+git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
+boxer doctor                         # checks the setup
 ```
 
-Commit what `boxer install` writes. A worktree is cut from a branch, so an integration that is
-not committed is not in the next worktree.
+Start Claude Code and ask it to run `node -p process.platform`. It prints `linux`, from the
+sandbox. Build tools (`npm`, `node`, `python`, `go`, `make` and more) run in the sandbox. `git`,
+`gh` and `ssh` stay on your machine. The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart) adds a `boxer.toml`
+for your dev server.
 
-From then on, the agent's `npm`, `node`, `python`, `go`, `make` and the rest of the intercept list
-run in the sandbox. `git`, `gh` and `ssh` stay on the host.
+## Set up your agent
 
-## Connect your agent
+| Agent | Setup |
+| --- | --- |
+| Claude Code | `boxer install claude-code` |
+| Codex | `boxer install codex` |
+| Gemini CLI | `boxer install gemini-cli` |
+| Copilot CLI | `boxer install copilot --user` |
+| OpenCode | `boxer install opencode` |
+| pi | `boxer install pi` |
+| Grok | `boxer install grok` |
+| Kimi Code, DSH | `boxer install kimi`, `boxer install dsh`, then tool mode |
+| fx, or anything else | `boxer shell <harness>` runs the agent inside the sandbox |
 
-| Agent | Command | How it is enforced |
-| --- | --- | --- |
-| Claude Code, Codex, Gemini CLI, Grok | `boxer install <harness>` | hooks rewrite each intercepted command |
-| Copilot CLI | `boxer install copilot --user` | the same, in `~/.copilot` |
-| OpenCode, pi | `boxer install opencode`, `boxer install pi` | a plugin or extension rewrites it in-process |
-| Kimi Code, DSH | `boxer install <harness>` and `mode = "tool"` | shell calls are denied; the `boxer_run` tool is the way in |
-| fx, or any agent you want off the host | `boxer shell <harness>` | the agent itself runs in the sandbox |
-| Any agent that loads skills | `npx skills add BarakChamo/boxer --skill boxer` | instructions only, not enforced |
+Each has a [setup page](https://barakchamo.github.io/boxer/docs/setup) with what it writes and how
+to check it.
 
-Orchestrators (T3 Code, Paperclip, herdr, Conductor, Multica, OpenHands) create a worktree per task
-and use the same integrations. [Orchestrators](site/content/docs/guides/orchestrators.mdx) has the
-setup for each. [Skills and plugins](site/content/docs/guides/skills-and-plugins.mdx) covers the skill,
-the plugin package, and `npx plugins`.
+Using an orchestrator? [Conductor, T3 Code, Paperclip, herdr, Multica and
+OpenHands](https://barakchamo.github.io/boxer/docs/orchestrators) each have a page.
 
-## Configure
+## Configure your project
 
-A `boxer.toml` at the repository root describes the guest. Without one, boxer picks an image from
+A `boxer.toml` at the repository root describes the sandbox. Without one, boxer picks an image from
 your lockfile.
 
 ```toml
 image = "mirror.gcr.io/library/node:24-alpine"
-setup = ["npm ci --no-audit --no-fund"]          # once per worktree
-start = ["npx next dev -p 3000 -H 0.0.0.0"]      # services, started with the sandbox
+setup = ["npm ci"]                        # once per worktree
+start = ["npx next dev -H 0.0.0.0 -p 3000"]   # listen on 0.0.0.0
 ready = "wget -q -O /dev/null http://127.0.0.1:3000/"
 
 [network]
-allow_hosts = ["registry.npmjs.org"]             # the default network reaches the image registry only
-ports = ["auto:3000"]                            # a free host port per worktree
+allow_hosts = ["registry.npmjs.org"]      # everything else is blocked
+ports = ["auto:3000"]                     # a free host port per worktree
 
 [urls]
-enabled = true                                   # https://<branch>.<repo>.localhost:1355 via portless
-
-[tasks.test]
-cmd = "npm test"
-description = "the unit tests"
+enabled = true                            # https://<branch>.<repo>.localhost:1355
 ```
 
-An existing `.devcontainer/devcontainer.json` is read too. [Examples](examples/) has working
-configurations for Next.js, Vite, Python, Go, monorepos, devcontainers and the container backends,
-and [Configuration](site/content/docs/reference/configuration.mdx) lists every key.
-
-## Commands
-
-```sh
-# Run
-boxer run -c '<shell line>'         # in this worktree's sandbox
-boxer run --task test               # a task declared in boxer.toml
-boxer up | down | status            # create and start, delete, inspect this worktree's sandbox
-
-# See and clean up
-boxer ls                            # sandboxes with their worktree, branch, git state and URL (-A: every backend)
-boxer url                           # where this worktree's dev server is
-boxer rm --gone                     # remove sandboxes whose worktree was deleted
-boxer gc                            # reclaim idle sandboxes and unused caches
-
-# Check
-boxer doctor                        # resolved configuration, integrations, disk used
-boxer backends --probe              # create and run a real sandbox on each installed backend
-boxer integrations                  # which harnesses have boxer wired in
-```
-
-Every command that reports state takes `--json`. Output adapts to the reader: tables and prompts at a
-terminal, plain text for an agent or a pipe. [CLI reference](site/content/docs/reference/cli.mdx).
+[Examples](examples/) cover Next.js, Vite, Python, Go and monorepos.
+[Configuration](https://barakchamo.github.io/boxer/docs/reference/configuration) lists every key.
 
 ## Backends
 
-| Backend | Boundary | Egress allowlist | Snapshots and forks |
-| --- | --- | --- | --- |
-| smolvm (default) | a kernel per sandbox | yes | yes |
-| Apple `container` | a kernel per sandbox | no | no |
-| docker, podman | one kernel shared by every sandbox | no | no |
+| Backend | Isolation | Egress allowlist |
+| --- | --- | --- |
+| smolvm (default) | own kernel per sandbox | yes |
+| Apple `container` | own kernel per sandbox | no |
+| docker, podman | one shared kernel | no |
 
-A backend that cannot enforce the allowlist refuses it by name rather than running with an open
-network. [Backends](site/content/docs/concepts/backends.mdx) compares them.
-
-## Security and performance
-
-boxer protects your machine from what an agent runs. The worktree is mounted read-write, and a few
-paths stay on the host on purpose, such as `git` and the MCP servers a harness names. Forwarded
-ports bind to `127.0.0.1`. The threat model is a careless or destructive agent, not one trying to
-escape: [Security](site/content/docs/concepts/security.mdx).
-
-A command in a running smolvm sandbox takes 33 ms, within 4 ms of `docker exec` into a warm container,
-and a Next.js session starts in 7.6 s against 6.8 s with no sandbox. File I/O through the mount is
-the main cost. [Benchmarks](site/content/docs/evals/benchmarks.mdx) has the method and every number.
-
-## Build on boxer
-
-```go
-b, err := boxer.Open(dir, boxer.Options{})   // github.com/BarakChamo/boxer/pkg/boxer
-if err != nil {
-	return err
-}
-if _, err := b.Ensure(true, false); err != nil { // create and start, or do nothing if running
-	return err
-}
-code, err := b.Run([]string{"sh", "-c", "npm test"}, boxer.RunOpts{Stdout: os.Stdout, Stderr: os.Stderr})
-```
-
-[`examples/go-embed`](examples/go-embed) runs one command across several worktrees in parallel.
-Programs in other languages use `--json`; harness integrations use `boxer hook` and `boxer mcp`.
-[Building on boxer](site/content/docs/guides/building-on-boxer.mdx).
-
-## How it is tested
-
-Every harness and orchestrator integration is run for real, with a scripted model and with live
-ones. The smoke suite runs every configuration path on every backend, and passes on all seven
-backend and host pairs (2026-09-27). The Next.js matrix, live agents in parallel worktrees on
-smolvm, scores 99.4% on a pre-release build. [Evaluations](site/content/docs/evals/index.mdx) explains the
-tiers, and [Results](site/content/docs/evals/results.mdx) has the results per harness.
+Set `backend = "docker"` in `boxer.toml` to switch. See
+[Backends](https://barakchamo.github.io/boxer/docs/backends).
 
 ## Documentation
 
-The docs site is in [`site/`](site); `make docs-dev` serves it on localhost. Start with
-[Introduction](site/content/docs/index.mdx), [Install](site/content/docs/start/install.mdx) and
-[Connect your harness](site/content/docs/start/harnesses.mdx).
+- [What is boxer](https://barakchamo.github.io/boxer/docs) and the [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart)
+- [Set up your agent](https://barakchamo.github.io/boxer/docs/setup) and [your orchestrator](https://barakchamo.github.io/boxer/docs/orchestrators)
+- [Set up your project](https://barakchamo.github.io/boxer/docs/configure/environment): images, dependencies, dev servers, URLs
+- [Security](https://barakchamo.github.io/boxer/docs/concepts/security): what is isolated and what is not
+- [CLI](https://barakchamo.github.io/boxer/docs/reference/cli), [Go package and JSON](https://barakchamo.github.io/boxer/docs/reference/building-on-boxer)
+- [Evaluations](https://barakchamo.github.io/boxer/docs/evals) and [benchmarks](https://barakchamo.github.io/boxer/docs/evals/benchmarks)
 
 ## Development
 
 ```sh
-make build      # bin/boxer
-make test       # unit tests with the race detector and per-package coverage floors
-make smoke      # every configuration path against a real sandbox
-make eval-t1    # every harness against a scripted model
+make build    # bin/boxer
+make test     # unit tests, race detector, coverage floors
+make smoke    # every configuration path against a real sandbox
+make docs-dev # the docs site on localhost
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [testing](docs/testing.md),
-[adding a harness](docs/adding-a-harness.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/architecture.md](docs/architecture.md).
 
 ## License
 

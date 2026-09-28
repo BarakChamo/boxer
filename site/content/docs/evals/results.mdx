@@ -3,21 +3,23 @@ title: Results
 description: Which harness works at which integration level and on which backend, from the latest recorded runs.
 ---
 
-This page lists the latest recorded result for each tier. A harness counts as supported at an
-[integration level](/docs/guides/enforcement) only if a cell ran and scored there.
-
-The level tables come from the [matrix tier](/docs/evals/matrix): two full passes of 55 cells on
-2026-09-25, three at a time, every cell on `zai/glm-5.3-flash` so the integration level is the only
-variable. Both passes used boxer v1.0.0-48-ged8def6 with uncommitted changes, smolvm 1.16.1 and
-`node:24-bookworm-slim`, on a 10-core, 24 GB Apple Silicon Mac. One pass had `[urls]` on and kept
-the dev server's address out of the prompt (URLs mode). The other is the control (default).
-Scorecards are in `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
+The latest [matrix tier](/docs/evals/matrix) ran two full passes of 55 cells on 2026-09-25. The
+default pass scored 99.4% of weighted checks. The URLs-mode pass scored 98.7%.
 
 | | default | URLs mode |
 | --- | --- | --- |
 | weighted checks | **99.4%** | **98.7%** |
 | cells at 100% | 54 of 55 | 50 of 55 |
 | cost | $1.89 | $3.04 |
+
+The passes ran three cells at a time. Every cell used `zai/glm-5.3-flash`, so the integration level
+is the only variable. Both passes used boxer v1.0.0-48-ged8def6 with uncommitted changes, smolvm
+1.16.1 and `node:24-bookworm-slim`, on a 10-core, 24 GB Apple Silicon Mac. The URLs-mode pass had
+`[urls]` on and kept the dev server's address out of the prompt. The default pass is the control.
+Scorecards are in `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report.md`.
+
+A harness counts as supported at an [integration level](/docs/setup/integration-levels) only if a cell
+ran and scored there.
 
 ## By integration level
 
@@ -31,18 +33,19 @@ Scorecards are in `docs/eval-matrix-report.md` and `docs/eval-matrix-urls-report
 | inside | 10/10 | 6/10 | Claude Code, Codex, OpenCode, Kimi Code, fx |
 | orchestrator | 6/6 | 6/6 | T3 Code, Paperclip, herdr |
 
-The inside gap in URLs mode was a boxer bug unrelated to URLs: caching a harness install as a
+The inside gap in URLs mode came from a boxer bug unrelated to URLs. Caching a harness install as a
 [pack](/docs/concepts/scopes-and-packs) stops the machine, and boxer did not restart the `start`
-services afterwards. It showed only on a host's first round of inside cells, and the URLs-mode pass
-ran first. After the fix, with the pack cache cleared, the inside cells ran cold once in each mode:
-10 of 10 and 10 of 10.
+services afterwards. The bug showed only on a host's first round of inside cells, and the URLs-mode
+pass ran first. After the fix, with the pack cache cleared, the inside cells ran cold once in each
+mode. They passed 10 of 10 and 10 of 10.
 
-Every level has at least two passing harnesses except shell substitution: OpenHands is the only
+Every level has at least two passing harnesses except shell substitution. OpenHands is the only
 harness whose terminal shell is configurable.
 
 ## On each backend
 
-The smoke suite, with no model, on the final build (2026-09-27), each backend alone on its host:
+The smoke suite ran with no model on the final build on 2026-09-27. Each backend ran alone on its
+host. No backend failed a test.
 
 | backend | passed | skipped, by capability |
 | --- | ---: | ---: |
@@ -55,45 +58,46 @@ The smoke suite, with no model, on the final build (2026-09-27), each backend al
 | podman on Linux | 79 | 9 |
 
 - The skips are forks, named packs and the egress log, which only smolvm has
-  ([backends](/docs/concepts/backends)).
-- macOS rows: an M4 Mac. Linux rows: Ubuntu LTS in a Lima VM on the same Mac, with docker and
-  rootless podman installed natively and smolvm on nested KVM, run by `scripts/linux-smoke.sh`.
-- smolvm also passed 88 of 88 on macOS with smolvm 1.19.2, the current release; the table's macOS
-  run used 1.16.1. Linux used 1.19.2.
+  ([backends](/docs/backends)).
+- The macOS rows ran on an M4 Mac. The Linux rows ran on Ubuntu LTS in a Lima VM on the same Mac,
+  with docker and rootless podman installed natively and smolvm on nested KVM. `scripts/linux-smoke.sh`
+  ran them.
+- The table's macOS smolvm run used smolvm 1.16.1. smolvm also passed 88 of 88 on macOS with smolvm
+  1.19.2, the current release. Linux used 1.19.2.
 - A test checks these rows against the recorded runs in `docs/smoke-results.jsonl`.
 
-The scripted-model tier (t1) ran 69 cells three times on 2026-09-25 and passed all 68 runnable
-cells on two of the runs. The third missed one, a herdr pane that inherited the environment of the
-session running the evaluation, and it did not recur. The one skip is Multica, which needs a server
-configured on the host.
+The scripted-model tier (t1) ran 69 cells three times on 2026-09-25. It passed all 68 runnable
+cells on two of the runs. The third run missed one cell, a herdr pane that inherited the environment
+of the session running the evaluation. That failure did not recur. The one skipped cell is Multica,
+which needs a server configured on the host.
 
 ## When boxer only asks
 
 The adherence tier runs eight harnesses on four live models each, with a prompt that never
-mentions boxer. Latest report: 2026-09-25, `docs/eval-adherence.md`.
+mentions boxer. The latest report is from 2026-09-25, in `docs/eval-adherence.md`.
 
 | scenario | result | notes |
 | --- | --- | --- |
 | `prep`, host-side setup reached through the harness | **32 of 32** | every harness, every model; 8 of 8 on docker |
 | `server`, find this worktree's dev server | **25 of 32** | 5 harnesses on all four models; Kimi and Copilot on two of four; Grok on one |
 
-A harness is blamed only when every model fails it, so Kimi and Copilot passing on two of four
-counts as model adherence. [`prep`](/docs/guides/environment) is the opt-in host-side step that runs
-before the sandbox starts. Grok never shows boxer's brief to the model; its cell is left failing so the
-finding stays visible.
+A harness is blamed only when every model fails it. Kimi and Copilot passed on two of four models,
+so those failures count as model failures. [`prep`](/docs/configure/environment) is the opt-in
+host-side step that runs before the sandbox starts. Grok never shows boxer's brief to the model. Its
+cell fails.
 
 ## Known limits
 
-**PATH shims do not survive a login shell.** A login shell rebuilds `PATH`; on macOS `path_helper`
-puts the system directories first. A harness that runs commands through `zsh -lc`, as Codex
-does, reaches the host. boxer cannot out-rank `path_helper`, so `boxer doctor` detects the situation and
-names the enforcement to use instead.
+**PATH shims fail under a login shell.** A login shell rebuilds `PATH`. On macOS,
+`path_helper` puts the system directories first. A harness that runs commands through `zsh -lc`, as
+Codex does, reaches the host. boxer cannot put its shims ahead of `path_helper`, so `boxer doctor`
+detects this and names the enforcement to use instead.
 
-**Gemini CLI needs its own key.** It speaks only the Gemini API, which the AI Gateway does not
-serve, so its cells skip rather than run.
+**Gemini CLI needs its own key.** It supports only the Gemini API, which the AI Gateway does not
+serve, so its cells are skipped.
 
-**Conductor is verified by hand.** It is a native app rather than an Electron one, so there is no
-debugging port to drive, and its CLI drives cloud workspaces where boxer has nothing to sandbox.
+**Conductor is verified by hand.** It is a native app, not an Electron app, so it has no
+debugging port to drive. Its CLI drives cloud workspaces, where boxer has nothing to sandbox.
 
 **fx is supported inside the guest only.** It has no hooks, its shell cannot be denied headlessly,
 and it resolves commands past a PATH shim, so boxer has no way to intercept it from outside. Inside
@@ -102,7 +106,7 @@ the guest it passes.
 ## Reading a run
 
 Archived runs are in `docs/evals/matrix/`, newest first, with a JSON line per run. Two runs are
-comparable only when the model, the concurrency and the host match; each report records them.
+comparable only when the model, the concurrency and the host match. Each report records all three.
 
 For a cell below 100%, the scorecard names the claim that failed, and the report keeps the cell's
 transcript and trace.

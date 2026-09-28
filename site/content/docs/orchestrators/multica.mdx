@@ -1,0 +1,21 @@
+---
+title: Multica
+description: Sandbox Multica tasks by pointing its runtime profile at a boxer shim.
+---
+
+Multica runs a daemon that creates a worktree per issue. Point its runtime profile at a boxer
+shim, so the agent runs inside the sandbox:
+
+```sh
+boxer shim install --harness claude
+multica runtime profile create --command-name claude
+multica runtime profile set-path claude ~/.local/share/boxer/shims/claude
+```
+
+Use the profile rather than `MULTICA_CLAUDE_PATH`. The profile survives a daemon restart and
+applies to every task. Start the daemon from a shell where `boxer` is on `PATH`.
+
+<Callout type="warn">
+Not tested. Multica's daemon needs a configured server, which the evaluation host did not have.
+These steps are based on the configuration the Multica binary reads, not on a test run.
+</Callout>

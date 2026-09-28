@@ -35,6 +35,14 @@ for f in glob.glob(D+'**/*.mdx',recursive=True):
         t=page(path) if path else f
         if not t: print('NOPAGE',f,u); bad+=1; continue
         if a and a not in heads(t): print('NOANCHOR',f,u); bad+=1
+# The READMEs link to the published site; check those against the pages too.
+for f in ['README.md', 'npm/README.md']:
+    for path, a in re.findall(r'https://barakchamo\.github\.io/boxer(/docs[^)#\s]*)(?:#([^)\s]+))?', open(f).read()):
+        t = page(path.rstrip('/'))
+        if not t:
+            print('NOPAGE', f, path); bad += 1
+        elif a and a not in heads(t):
+            print('NOANCHOR', f, path + '#' + a); bad += 1
 for f in ['README.md']+glob.glob('examples/*/README.md')+['examples/README.md','npm/README.md']:
     for u in re.findall(r'\]\(([^)#\s]+)(?:#[^)]*)?\)',open(f).read()):
         if u.startswith('http') or u.startswith('mailto'): continue

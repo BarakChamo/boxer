@@ -12,7 +12,7 @@ curl -sk "$(boxer url)"      # {"served_from":"a boxer sandbox","host":"…local
 It shows the split between `image_setup` and `setup`. Installing uv changes the image, so it is
 `image_setup`: it runs once and, on smolvm, is kept in the environment pack for every worktree.
 Installing the project's dependencies writes this worktree's `.venv`, which a pack cannot carry, so
-it is `setup`. [The environment guide](../../site/content/docs/guides/environment.mdx) has the rule.
+it is `setup`. [The environment guide](../../site/content/docs/configure/environment.mdx) has the rule.
 
 Gotchas:
 

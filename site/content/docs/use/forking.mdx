@@ -1,0 +1,73 @@
+---
+title: Forking
+description: Branch a running sandbox into warm copy-on-write children for sharded work.
+---
+
+Branch a running sandbox into children that share its memory and disks copy-on-write.
+
+```sh
+boxer fork --prepare --count 4
+boxer run --scope swift-crab-f1 -c 'npm test -- --shard=1'
+boxer fork rm --all
+```
+
+A child does not boot. It starts from the parent's running state, with dependencies installed and
+services already up. Forking needs the smolvm backend.
+
+## Children share the worktree
+
+A child inherits its parent's mounts and cannot override them. smolvm refuses to branch a machine
+whose mount is staged:
+
+```
+fork: staged mounts cannot be branched yet because multiple descendants would
+synchronize into the same host directory
+```
+
+Every fork of a worktree sees the same files. Two children writing one file race each other, as two
+processes on your machine would.
+
+<Callout type="warn">
+Use forks for work that shards cleanly, such as test shards that write to separate paths. For work
+that edits the same files, use a second git worktree. It gets its own sandbox and its own files.
+</Callout>
+
+## Prepare the sandbox
+
+A sandbox can be forked only if it was started as a branch source (`smolvm machine start
+--branchable`). Preparing restarts the sandbox and ends whatever is running in it. boxer does it
+only when you pass `--prepare`:
+
+```console
+$ boxer fork
+boxer: this sandbox was not started as a branch source, so it cannot be forked. Preparing restarts it, which ends whatever is running in it
+  scope:     swift-crab (sb-7e1852e4a3c3, worktree)
+  worktree:  /Users/me/src/myapp
+  cause:     NOT_FORKABLE
+  fix:       boxer fork --prepare
+```
+
+Branchability lasts for one boot. After a sandbox stops, it needs `--prepare` again.
+
+## Work with children
+
+```sh
+boxer fork ls                             # this scope's children
+boxer run --scope <name> -c '<command>'   # run in one
+boxer fork rm <name>                      # remove one
+boxer fork rm --all                       # remove them all
+```
+
+- A child is named after its parent (`sb-7e1852e4a3c3-f1` or `swift-crab-f1`). `--scope` accepts
+  either form.
+- A child has no worktree of its own. Address it by name, not by directory.
+- `--count` is the number of children the scope should have. Asking twice for four gives four.
+- `boxer ls` shows children next to sandboxes.
+- `boxer gc` reclaims a child whose parent is gone.
+- Each child costs as much as a sandbox.
+
+## Save state across hosts
+
+A fork does not persist. smolvm can write a `.smolcheckpoint` of RAM and processes, but it refuses
+on any machine with a host mount, and boxer always mounts the worktree. To carry a prepared
+filesystem between hosts, save a [named pack](/docs/concepts/scopes-and-packs#packs-you-name).

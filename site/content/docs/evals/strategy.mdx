@@ -1,10 +1,13 @@
 ---
-title: Evaluation strategy
+title: Strategy
 description: The test layers from unit tests to live agents, what each proves, how results are judged, and the bugs the evals caught.
 ---
 
-boxer is tested in layers. Unit tests run against a fake backend, and each layer above adds one
-real thing the layer below cannot check: a runtime, a harness, a live model or a Next.js workload.
+boxer is tested in layers, from unit tests against a fake backend up to live agents on real
+runtimes.
+
+Each layer above the unit tests adds one real thing the layer below cannot check: a runtime, a
+harness, a live model or a Next.js workload.
 
 ## The layers
 
@@ -48,12 +51,12 @@ name and the prompt stops giving the agent its address.
 
 ## What the oracle looks at
 
-The oracle ignores the model's own report of what it did and reads what the agent cannot fake:
+The oracle is the code that scores a cell. It ignores the model's own report of what it did. It
+reads evidence the agent cannot fake:
 
 - **A canary.** The command touches a file with a run-specific name. If it exists on the host, the
   command ran on the host, whatever the agent says.
-- **The guest.** A platform probe written by the work itself, corroborated by a dependency that has
-  to really be in `package.json` and by the level's own signature in boxer's trace.
+- **The guest.** A platform probe written by the work itself, corroborated by a dependency that must be in `package.json` and by the level's own signature in boxer's trace.
 - **The trace.** Every hook invocation and its answer, so a command that was allowed silently is
   distinguishable from one that was rewritten.
 - **The host afterwards.** Sandboxes, routes and scratch left behind are findings.
@@ -62,7 +65,7 @@ The oracle ignores the model's own report of what it did and reads what the agen
 
 ## The rules
 
-- **A skip is named, never silent.** A missing credential, a runtime that is not installed, or a
+- **Every skip prints its reason.** A missing credential, a runtime that is not installed, or a
   harness that cannot do a level each skips with the reason.
 - **Two models before a harness is blamed.** One model failing a cell among passes is that model's
   adherence. Only when every judged model fails, and at least two were judged, is it the harness.
@@ -72,9 +75,9 @@ The oracle ignores the model's own report of what it did and reads what the agen
   alternated before it is attributed to the mode.
 - **Repeat before claiming.** Three samples from a clean host, or the number is labelled a single
   sample. Three benchmark claims were [withdrawn](/docs/evals/benchmarks#withdrawn) for skipping this.
-- **Prove the cause.** A fix is shown against a build with the old code: the old one fails, the new
-  one passes. A published diagnosis found wrong is corrected in place.
-- **Evidence is kept.** A failed cell keeps its repository, transcript and trace; `boxer-eval`
+- **Prove the cause.** A fix is tested against a build with the old code. The old build fails and
+  the new one passes. 
+- **Evidence is kept.** A failed cell keeps its repository, transcript and trace. `boxer-eval`
   removes scratch older than three days, and an interrupted run brings down its own sandboxes.
 - **The eval scripts clean up too.** A test fails if any benchmark or smoke script allocates a
   scratch directory without removing it.
@@ -83,13 +86,13 @@ The oracle ignores the model's own report of what it did and reads what the agen
 
 Each of these passed the unit tests and was found by an eval tier:
 
-- `boxer run -c "exit 4"` reported exit 1 whenever output went to `/dev/null`: boxer took
+- `boxer run -c "exit 4"` reported exit 1 whenever output went to `/dev/null`. boxer took
   `/dev/null` for a terminal and the runtime refused the TTY request.
 - One allowlisted hostname that stopped resolving stopped every inside sandbox from starting, because
   smolvm refuses the whole machine if any allowlisted host fails.
 - Codex called `boxer_status` and got a port instead of the URL, because the MCP server it launched
   used a different state directory from the one that registered the URL.
-- Inside cells lost their dev server on a host's first round: caching a harness install as a pack
+- Inside cells lost their dev server on a host's first round. Caching a harness install as a pack
   stops the machine, and boxer restarted it without restarting the `start` services.
 - A reused worktree path skipped setup, and on docker could see a stale mount.
 - docker, podman and Apple `container` published forwarded ports on every interface, so a dev

@@ -1,0 +1,86 @@
+---
+title: Quickstart
+description: Install boxer, connect Claude Code, and check that its commands run in a sandbox.
+---
+
+This takes about five minutes. It uses Claude Code. For another agent, replace step 3 with its
+[setup page](/docs/setup).
+
+## 1. Install smolvm and boxer
+
+```sh
+curl -sSL https://smolmachines.com/install.sh | bash                          # smolvm, the sandbox
+curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh  # boxer, into ~/.local/bin
+```
+
+Or `go install github.com/BarakChamo/boxer/cmd/boxer@latest`. To use docker, podman or Apple
+`container` instead of smolvm, see [Backends](/docs/backends).
+
+On Linux, smolvm needs `/dev/kvm`: `sudo usermod -aG kvm $USER`, then log in again.
+
+## 2. Describe the sandbox
+
+In your repository, add a `boxer.toml`. This one is for a Next.js app with its dev server on port
+3000:
+
+```toml title="boxer.toml"
+image = "mirror.gcr.io/library/node:24-alpine"
+setup = ["npm ci"]                                      # once per worktree
+start = ["npx next dev -H 0.0.0.0 -p 3000"]             # started with the sandbox
+ready = "wget -q -O /dev/null http://127.0.0.1:3000/"
+
+[network]
+allow_hosts = ["registry.npmjs.org"]
+ports = ["auto:3000"]                                   # a free host port per worktree
+```
+
+The dev server must listen on `0.0.0.0`, not `localhost`, or the forwarded port gets no answer.
+Without a `boxer.toml`, boxer picks an image from your lockfile. [Examples](/docs/configure/examples)
+has configurations for Next.js, Vite, Python, Go and monorepos.
+
+## 3. Connect Claude Code
+
+```sh
+boxer install claude-code
+git add boxer.toml .claude .mcp.json
+git commit -m "Run agent commands in boxer"
+```
+
+Commit it. Worktrees are cut from branches, so anything not committed is missing from the next
+worktree.
+
+## 4. Check it works
+
+```sh
+boxer doctor
+```
+
+It prints the backend, the image, the integrations it found, and anything that will not work.
+
+Start the sandbox and open the dev server:
+
+```console
+$ boxer up                  # creates the sandbox, runs setup and start
+$ boxer url
+http://127.0.0.1:52341
+```
+
+Now start Claude Code in the repository and ask it to run `node -p process.platform`. It prints
+`linux`, because the command ran in the sandbox. Any command in `intercept` (`npm`, `node`, `python`, `go`,
+`make` and more) goes there. `git`, `gh` and `ssh` stay on your machine.
+
+## 5. Work in parallel
+
+```sh
+git worktree add ../myapp-fix-ui -b fix-ui
+cd ../myapp-fix-ui && claude
+```
+
+Each worktree gets its own sandbox the first time a command runs in it. `boxer ls` shows them all.
+When you delete a worktree, `boxer gc` removes its sandbox.
+
+## Next
+
+- [Give each worktree a URL](/docs/configure/urls) instead of a port.
+- [Set up your orchestrator](/docs/orchestrators) if something else creates the worktrees.
+- [Understand what is isolated](/docs/concepts/security) before you rely on it.

@@ -1,0 +1,46 @@
+---
+title: Claude Code
+description: Route Claude Code's shell commands into the sandbox with a project hook.
+---
+
+boxer adds a `PreToolUse` hook to Claude Code. When Claude runs `npm test`, the hook rewrites it to
+`boxer run -c 'npm test'`. Claude sees the normal output and exit code.
+
+## Set up
+
+```sh
+boxer install claude-code
+git add .claude .mcp.json
+git commit -m "Run Claude Code's commands in boxer"
+```
+
+The first time you open the repository, Claude Code asks you to approve the `boxer` MCP server from
+`.mcp.json`. Approve it.
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.claude/settings.json` | the hooks that rewrite commands and warm the sandbox at session start |
+| `.mcp.json` | the `boxer` MCP server, with the `boxer_run` tool |
+| `.claude/skills/boxer/` | the skill that tells Claude how commands run here |
+| `.claude/agents/boxed.md` | a subagent that runs everything through boxer |
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask Claude to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Every repository, not just this one:** `boxer install claude-code --user` writes the same hooks
+  to `~/.claude/settings.json`.
+- **Run Claude itself in the sandbox:** `boxer shell claude`. See [Inside mode](/docs/use/inside).
+- **Block the shell instead of rewriting it:** set `[harness.claude-code] mode = "tool"`. Claude
+  then runs commands through the `boxer_run` tool. See [Integration levels](/docs/setup/integration-levels).
+
+Tested in the matrix with hook rewrite, tool mode, PATH shims and inside mode. See
+[Results](/docs/evals/results).

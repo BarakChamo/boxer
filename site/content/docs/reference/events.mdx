@@ -3,6 +3,8 @@ title: Events
 description: The JSON event stream boxer writes when telemetry is on, its schema, and how to read it.
 ---
 
+With telemetry on, boxer writes one JSON event per line for each thing it decides or does.
+
 ```toml
 [telemetry]
 enabled         = true
@@ -12,11 +14,10 @@ record_commands = false
 endpoint        = ""         # otel only
 ```
 
-boxer writes one JSON event per line for what it decides and does. The stream is off by default:
-with no `[telemetry]` table and no `BOXER_TRACE`, boxer writes nothing. The keys are in the
-[configuration reference](/docs/reference/configuration#telemetry).
+The stream is off by default. With no `[telemetry]` table and no `BOXER_TRACE`, boxer writes
+nothing. The keys are in the [configuration reference](/docs/reference/configuration#telemetry).
 
-`BOXER_TRACE=<path>` turns the file sink on at that path whatever the configuration says. `enabled =
+`BOXER_TRACE=<path>` turns on the file sink at that path, whatever the configuration says. `enabled =
 true` with no `sink` uses the file sink. The OpenTelemetry sink exists only in a binary built with
 `-tags otel`.
 
@@ -51,7 +52,7 @@ added, never repurposed.
 | `event` | When | `payload` |
 | --- | --- | --- |
 | `resolve` | A scope was resolved | `isolation`, `degraded`, `warnings` (a count) |
-| `provision` | A sandbox was created or started, `prep` ran, or a fork was prepared or branched | `created`, `image`, `image_reason`; or `kind` (`prep`, `fork-prepare`, `fork`) and `count` |
+| `provision` | A sandbox was created or started, `prep` ran, or a fork was prepared or branched | `created`, `image` and `image_reason`, or `kind` (`prep`, `fork-prepare`, `fork`) and `count` |
 | `pack` | A pack was written, skipped for disk space, or failed | `kind` (`env`, `harness`, `image`, `named`), `image` or `name`, `path`, `free_bytes` when skipped |
 | `run` | A command ran in the guest | `exit`, `command` |
 | `rewrite` | A hook replaced a command with its sandboxed form | `tool`, `command` |

@@ -3,6 +3,8 @@ title: boxer.toml
 description: Every boxer.toml key with its type, default and an example, where boxer reads configuration, and how devcontainer.json maps onto it.
 ---
 
+Every key you can set in `boxer.toml`, with its type, default and an example.
+
 ```toml
 # boxer.toml at the repository root
 image       = "node:24-bookworm-slim"
@@ -60,7 +62,7 @@ isolation = "session"
 `string`, default `"degrade"`. One of `degrade`, `fail`. Env `BOXER_ON_MISSING_ID`.
 
 What `session` or `subagent` isolation does with no id. `degrade` falls back from `subagent` to
-`session` to `worktree` and warns; `fail` refuses with `SCOPE_UNRESOLVED`.
+`session` to `worktree` and warns. `fail` refuses with `SCOPE_UNRESOLVED`.
 
 ```toml
 on_missing_id = "fail"
@@ -70,7 +72,7 @@ on_missing_id = "fail"
 
 `string`, default `"warn"`. One of `off`, `warn`, `require`. Env `BOXER_REQUIRE_WORKTREE`.
 
-What happens in the main checkout rather than a linked worktree. `warn` runs and warns, `require`
+What happens in the main checkout instead of a linked worktree. `warn` runs and warns, `require`
 refuses with `WORKTREE_REQUIRED`, `off` says nothing.
 
 ```toml
@@ -96,7 +98,7 @@ manage = "detect"
 `string`, default `"outside"`. One of `outside`, `inside`. Env `BOXER_INTEGRATION`.
 
 `outside` runs the harness on the host and its commands in the sandbox. `inside` runs the harness in
-the guest; `boxer shell` and `boxer acp` set it. See [running the harness inside](/docs/guides/inside).
+the guest. `boxer shell` and `boxer acp` set it. See [running the harness inside](/docs/use/inside).
 
 ```toml
 integration = "inside"
@@ -117,8 +119,9 @@ mode = "tool"
 
 `string`, default `"both"`. One of `hook`, `shim`, `both`, `audit`. Env `BOXER_ENFORCEMENT`.
 
-Which mechanisms hold. With `shim` or `both`, a hook on a harness that cannot rewrite lets the bare
-command reach the [shim](/docs/guides/enforcement#path-shims); with `hook`, it denies it. `audit`
+Which mechanisms keep commands in the sandbox. With `shim` or `both`, a hook on a harness that
+cannot rewrite lets the bare command reach the [shim](/docs/setup/integration-levels#path-shims). With
+`hook`, the hook denies it. `audit`
 makes hooks print `boxer: audit: would <action>` on stderr and allow everything.
 
 ```toml
@@ -177,7 +180,7 @@ passthrough = ["git", "gh", "ssh", "boxer", "smolvm", "terraform"]
 
 The runtime that hosts sandboxes. A backend that lacks a capability refuses the setting that needs
 it with cause `UNSUPPORTED`. Only `smolvm` supports `network.mode = "allowlist"`, the default, so
-set `network.mode` with any other backend. See [backends](/docs/concepts/backends#what-each-can-do).
+set `network.mode` with any other backend. See [backends](/docs/backends#compare-backends).
 
 ```toml
 backend      = "docker"
@@ -191,8 +194,8 @@ network.mode = "on"
 `string`, default `""`. Env `BOXER_IMAGE`.
 
 The guest image: an OCI reference, or a local `docker save` archive or rootfs directory given as a
-path starting `./`, `../`, `/` or `~/`, or `-` for stdin. A local image is not pulled. Empty picks
-by the first lockfile found in the worktree.
+path starting `./`, `../`, `/` or `~/`, or `-` for stdin. A local image is not pulled. When empty, boxer
+picks the image from the first lockfile found in the worktree.
 
 | Lockfile | Image |
 | --- | --- |
@@ -204,8 +207,8 @@ by the first lockfile found in the worktree.
 | none | `debian:bookworm-slim` |
 
 With `integration = "inside"` and no image, the default is
-`mirror.gcr.io/library/node:24-bookworm-slim`. The inferred images carry no compiler; add one in
-`image_setup`. See [choosing an image](/docs/guides/environment#choose-an-image).
+`mirror.gcr.io/library/node:24-bookworm-slim`. The inferred images carry no compiler. Add one in
+`image_setup`. See [choosing an image](/docs/configure/environment#choose-an-image).
 
 ```toml
 image = "node:24-alpine"
@@ -235,7 +238,7 @@ cpus = 2
 
 `string`, default `"4G"`. Env `BOXER_MEMORY`.
 
-Guest memory: `4G`, `4096M`, or a bare number of MiB. A setup step that exits 137 ran out of it.
+Guest memory: `4G`, `4096M`, or a bare number of MiB. A setup step that exits 137 ran out of memory.
 
 ```toml
 memory = "8G"
@@ -278,7 +281,7 @@ user = "node"
 ## Prep
 
 `[prep]` runs commands on the host while the sandbox boots. See
-[dependencies](/docs/guides/environment#install-dependencies).
+[dependencies](/docs/configure/environment#install-dependencies).
 
 ### `prep.commands`
 
@@ -341,7 +344,7 @@ managers = ["pnpm", "cargo"]
 
 ## Setup and services
 
-See [environment](/docs/guides/environment) for when to use each.
+See [environment](/docs/configure/environment) for when to use each.
 
 ### `image_setup`
 
@@ -394,7 +397,7 @@ ready = "curl -sf http://127.0.0.1:3000/"
 
 `string` (Go duration), default `"60s"`.
 
-How long to poll `ready`. When it passes, the command fails with `NOT_READY` and quotes the tail of
+How long to poll `ready`. When it runs out, the command fails with `NOT_READY` and quotes the tail of
 the start log.
 
 ```toml
@@ -444,7 +447,7 @@ secrets = ["NPM_TOKEN"]
 `string`, default `"allowlist"`. One of `allowlist`, `on`, `off`. Env `BOXER_NETWORK_MODE`.
 
 `allowlist` lets the guest reach `allow_hosts` plus the registry hosts its image pull needs.
-`on` is open, `off` is no network. `allowlist` needs `backend = "smolvm"`.
+`on` allows all traffic. `off` turns the network off. `allowlist` needs `backend = "smolvm"`.
 
 ```toml
 [network]
@@ -468,7 +471,8 @@ allow_hosts = ["registry.npmjs.org", "github.com"]
 `[]string`, default `[]`.
 
 Port forwards as `host:guest`, bound to `127.0.0.1`. `auto:<guest>` takes a free host port, so
-worktrees do not collide; `boxer status` shows where it landed. `NO_FREE_PORT` when none is free.
+worktrees do not collide. `boxer status` shows which host port it got. When no port is free, the
+command fails with `NO_FREE_PORT`.
 
 ```toml
 [network]
@@ -490,14 +494,14 @@ dns = "10.0.0.2"
 ## URLs
 
 `[urls]` names forwarded ports through [portless](https://github.com/vercel-labs/portless). See
-[URLs](/docs/guides/urls).
+[URLs](/docs/configure/urls).
 
 ### `urls.enabled`
 
 `bool`, default `false`. Env `BOXER_URLS` (a boolean).
 
 Give each forwarded port a stable name, such as `https://fix-ui.myapp.localhost:1355`. Needs
-`portless` on the host; without it boxer warns and runs as if this were off.
+`portless` on the host. Without it, boxer warns and runs as if this were off.
 
 ```toml
 [urls]
@@ -530,7 +534,7 @@ name = "shop"
 
 `table` of strings, default `{}`.
 
-A label per guest port, giving `<label>.<name>`. One forwarded port needs no label; several
+A label per guest port, giving `<label>.<name>`. One forwarded port needs no label. Several
 unlabelled ports are named by their number.
 
 ```toml
@@ -545,8 +549,8 @@ names = { "3000" = "web", "8080" = "api" }
 `string` or `table`, default none.
 
 A named command line, run with `boxer run --task <name>`. The table form takes `cmd` (required),
-`description`, `junit` (paths or globs), `timeout` (a Go duration) and `env`; any other key is an
-error. An empty `cmd` or a bad `timeout` is an error. See [tasks](/docs/guides/tasks).
+`description`, `junit` (paths or globs), `timeout` (a Go duration) and `env`. Any other key is an
+error. An empty `cmd` or a bad `timeout` is an error. See [tasks](/docs/configure/tasks).
 
 ```toml
 [tasks]
@@ -562,7 +566,7 @@ env         = { HEADLESS = "1" }
 
 ## Results
 
-See [test results](/docs/guides/results).
+See [test results](/docs/use/results).
 
 ### `results.auto`
 
@@ -616,8 +620,8 @@ destroy_on = ["session_end"]
 
 `bool`, default `false`. Env `BOXER_WARM_ON_SESSION_START`.
 
-The session-start hook provisions in a detached `boxer up` and returns at once, so the session
-never waits for a create.
+When `true`, the session-start hook provisions in a detached `boxer up` and returns at once, so the
+session never waits for a create.
 
 ```toml
 warm_on_session_start = true
@@ -629,8 +633,8 @@ warm_on_session_start = true
 
 `bool`, default `true`.
 
-Ordinary commands start the [`gc`](/docs/reference/cli#boxer-gc) sweep in the background, at most
-once per `reclaim_every`. `BOXER_NO_RECLAIM=1` skips it for one process.
+When `true`, ordinary commands start the [`gc`](/docs/reference/cli#boxer-gc) sweep in the
+background, at most once per `reclaim_every`. `BOXER_NO_RECLAIM=1` skips it for one process.
 
 ```toml
 auto_reclaim = false
@@ -661,7 +665,7 @@ idle_timeout = "24h"
 
 `float`, default `5`.
 
-Free disk boxer keeps. Below it, boxer skips writing a pack and pulls the image instead, and
+The free disk space boxer keeps, in GB. Below it, boxer skips writing a pack and pulls the image instead, and
 `boxer doctor` warns. `0` turns the check off.
 
 ```toml
@@ -825,10 +829,10 @@ These are refused with a warning and have no effect.
 | Key | Why |
 | --- | --- |
 | `features`, `build`, `dockerFile` | They need an image build, which boxer does not do |
-| `dockerComposeFile` | It runs several containers; boxer runs one guest per worktree |
+| `dockerComposeFile` | It runs several containers. boxer runs one guest per worktree |
 | `runArgs`, `privileged`, `capAdd`, `securityOpt` | They would change the sandbox's own boundary |
 | `workspaceMount` | boxer always mounts the worktree, at `mount_at` |
-| `overrideCommand: false` | boxer never runs the image's own command; put it in `start` |
+| `overrideCommand: false` | boxer never runs the image's own command. Put it in `start` |
 | `postAttachCommand` | Nothing attaches to a sandbox |
 | `init` | The guest already reaps what it starts |
 | `hostRequirements.gpu`, unless `false` or `"optional"` | No backend passes a GPU through |

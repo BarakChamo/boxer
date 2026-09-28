@@ -1,0 +1,35 @@
+---
+title: Conductor
+description: Sandbox Conductor workspaces with the committed project layer, or run each agent inside the sandbox.
+---
+
+Conductor runs each agent's real binary in an ordinary git worktree.
+
+## Try the project layer first
+
+It is not yet tested whether Conductor's sessions load project hooks. If they do,
+the committed `boxer install claude-code` is all you need. To check, create a workspace, ask the agent to run `node -p process.platform`, and run
+`boxer ls`. If it printed `linux` and a sandbox for that worktree shows up, you are done.
+
+## Otherwise, run the agent in the sandbox
+
+```sh
+boxer shim install --harness claude,codex,opencode
+boxer install conductor
+```
+
+`boxer install conductor` writes `.conductor/settings.toml`. It points
+`claude_code_executable_path`, `codex_executable_path` and `opencode_executable_path` at boxer's
+shims, and adds a setup script that runs `boxer up --detach && boxer doctor`. Conductor starts the
+shim, and the agent runs [inside the sandbox](/docs/use/inside). The agent's login has to reach the
+sandbox. [Inside mode](/docs/use/inside) covers credentials for each agent.
+
+The setup script warms each workspace's sandbox, so you do not need `boxer install git` here.
+
+The file holds absolute paths to your shim directory, so it only works on your machine. Each
+developer runs the two commands above. Do not commit it.
+
+<Callout>
+Conductor's local workspaces are GUI-only, so this setup is verified by hand, not by the automated
+evaluations.
+</Callout>

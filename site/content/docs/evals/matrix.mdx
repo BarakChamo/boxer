@@ -1,18 +1,19 @@
 ---
-title: The matrix tier
+title: Matrix
 description: The same Next.js workload at every integration level and harness, scored on thirteen weighted claims.
 ---
 
 The `matrix` tier runs the same Next.js workload across every
-[integration level](/docs/guides/enforcement), harness and orchestrator. Each combination is a
-cell, and each cell gets its own worktree, sandbox and automatic host port. The `sdlc` tier varies
-the task on one configuration. The matrix varies the configuration on one task.
+[integration level](/docs/setup/integration-levels), harness and orchestrator. Each combination is a
+cell, and each cell gets its own worktree, sandbox and automatic host port. The matrix runs one task on every configuration. For many tasks on one configuration, see the
+`sdlc` tier.
+
+The latest two passes, on 2026-09-25, scored 99.4% of weighted checks by default and 98.7% in URLs mode.
+[Results](/docs/evals/results) has the full scores.
 
 ```sh
 make eval-matrix    # 55 cells, three at a time; needs AI_GATEWAY_API_KEY
 ```
-
-The latest scores are on [Results](/docs/evals/results).
 
 ## The two tasks
 
@@ -31,20 +32,18 @@ Each cell scores thirteen claims independently, weighted:
 | 2 | the page renders · the change is in the worktree · the dependency is installed · the agent converged · the server was not replaced |
 | 1 | the sandbox came up · a host port was forwarded · the dev server answered first · the agent finished · the sandbox was left clean |
 
-Claims are declared before the cell runs, so a cell that dies early reports the unanswered claims
-as failures instead of shrinking its denominator. A provider that refuses a turn makes the cell a
+If a cell stops early, its unanswered claims count as failures. A provider that refuses a turn makes the cell a
 skip.
 
-## What the evidence is worth
+## How a cell is verified
 
-The oracle does not trust the platform file the agent writes on its own, since a model can write
-`Linux` without running anything. Two checks back it up: the dependency must be in `package.json`,
-and boxer's trace must show the level's own signature carrying a command.
+The oracle does not accept the agent's platform file alone, because a model can write
+`Linux` without running anything. Two checks back it up. The dependency must be in `package.json`,
+and boxer's trace must show that level running a command.
 
 Two levels leave different evidence, and the report names which mechanism it found. The OpenCode
 plugin rewrites in-process and writes no rewrite line. An orchestrator's launcher gives the harness
-a clean environment, so boxer's trace variable never reaches it. There, the worktree the
-orchestrator created is the evidence.
+a clean environment, so boxer's trace variable never reaches it. For orchestrator cells, the oracle checks the worktree the orchestrator created.
 
 ## Running it
 
@@ -54,9 +53,9 @@ bin/boxer-eval --tier matrix --list                        # what would run; run
 BOXER_EVAL_URLS=1 bin/boxer-eval --tier matrix             # every sandbox named, no address in the prompt
 ```
 
-`BOXER_EVAL_URLS=1` gives every sandbox a [portless name](/docs/guides/urls) and, at every outside
-level, stops telling the agent where its dev server is, so each agent has to find its own from the
-brief while sibling worktrees run theirs. The oracle still reads the page through the host port
+`BOXER_EVAL_URLS=1` gives every sandbox a [portless name](/docs/configure/urls). At every outside
+level, it also stops telling the agent where its dev server is. Each agent has to find its own server
+from the brief while sibling worktrees run theirs. The oracle still reads the page through the host port
 boxer allocated, so an agent that used another worktree's server fails the render check. An
 interrupted run brings down its own sandboxes and removes its scratch.
 

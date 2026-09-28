@@ -1,0 +1,37 @@
+---
+title: OpenCode
+description: Route OpenCode's shell commands into the sandbox with a plugin.
+---
+
+OpenCode has no hooks, but it loads TypeScript plugins. boxer's plugin rewrites each intercepted
+command to `boxer run` before OpenCode runs it.
+
+## Set up
+
+```sh
+boxer install opencode
+git add .opencode opencode.json AGENTS.md
+git commit -m "Run OpenCode's commands in boxer"
+```
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.opencode/plugins/boxer.ts` | the plugin that rewrites commands |
+| `opencode.json` | the `boxer` MCP server |
+| `AGENTS.md` | a section telling OpenCode how commands run here |
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask OpenCode to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Run OpenCode itself in the sandbox:** `boxer shell opencode`. See [Inside mode](/docs/use/inside).
+
+Tested in the matrix with plugin rewrite and inside mode.

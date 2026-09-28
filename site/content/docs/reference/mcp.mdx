@@ -3,13 +3,15 @@ title: MCP server
 description: "boxer's MCP server: the boxer_run and boxer_status tools, the brief resource, and lifecycle behaviour."
 ---
 
+`boxer mcp` gives any MCP client two tools, `boxer_run` and `boxer_status`, and one resource.
+
 ```sh
 boxer mcp [--harness NAME]
 ```
 
-Serves MCP over stdio as newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It answers
-`initialize`, `ping`, `tools/list`, `tools/call`, `resources/list` and `resources/read`, and
-ignores notifications. Any harness that supports MCP can use it, including ones boxer has no
+It serves MCP over stdio as newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It answers
+`initialize`, `ping`, `tools/list`, `tools/call`, `resources/list` and `resources/read`. It ignores
+notifications. Any harness that supports MCP can use it, including harnesses boxer has no
 specific integration for.
 
 `--harness` selects the `[harness.<name>]` override layer, so per-harness settings such as `mode`
@@ -25,7 +27,7 @@ apply here too.
 }
 ```
 
-`boxer install <harness>` writes this for you, in whatever file that harness reads.
+`boxer install <harness>` writes this entry into the file that harness reads.
 
 ## Tools
 
@@ -33,8 +35,8 @@ apply here too.
 
 | Field | Type | |
 | --- | --- | --- |
-| `command` | string | required. A POSIX shell line, executed with `sh -c` in the guest |
-| `cwd` | string | optional. The directory to run in; defaults to the server's working directory |
+| `command` | string | Required. A POSIX shell line, run with `sh -c` in the guest |
+| `cwd` | string | Optional. The directory to run in. Defaults to the server's working directory |
 
 Returns stdout and stderr interleaved, followed by `[exit N]`. Stdin is empty. `isError` is set when
 the exit is non-zero or when boxer refused. A refusal is the same `boxer: <reason>` text, with
@@ -45,10 +47,10 @@ the exit is non-zero or when boxer refused. A refusal is the same `boxer: <reaso
 
 | Field | Type | |
 | --- | --- | --- |
-| `cwd` | string | optional |
+| `cwd` | string | Optional |
 
 One line with the scope, isolation, state, image, worktree and mount path, then one line per
-forwarded guest port with its [URL](/docs/guides/urls), else `http://127.0.0.1:<host port>`. When no
+forwarded guest port with its [URL](/docs/configure/urls), else `http://127.0.0.1:<host port>`. When no
 sandbox exists yet it says so and names the image it would boot.
 
 ### How `cwd` is interpreted
@@ -62,28 +64,35 @@ A client may pass a host path or a guest path. boxer accepts both:
 
 ## Resource
 
-One resource, `boxer://brief`, `text/markdown`. It is the brief `boxer brief` prints and the hooks
-inject, resolved for the server's working directory: the mount, the mode, the intercept and
-passthrough lists, and the declared tasks with what each is for. It is generated on each read,
-not stored. Any other URI is an error.
+The server has one resource, `boxer://brief`, of type `text/markdown`. It holds the same brief that
+`boxer brief` prints and the hooks inject, resolved for the server's working directory. The brief
+lists:
+
+- the mount
+- the mode
+- the intercept and passthrough lists
+- the declared tasks, with what each is for
+
+boxer generates the brief on each read. Any other URI is an error.
 
 ## Lifecycle signals
 
-For harnesses with no hook API, the MCP lifecycle stands in for session start and end. Both apply
-only when `create_on` includes `mcp`, which it does by default:
+For harnesses with no hook API, boxer treats MCP lifecycle messages as session start and end. Both
+signals apply only when `create_on` includes `mcp`, which it does by default.
 
 - **`initialize`** provisions the server's scope in the background, so the sandbox is warm before
   the first command. It is skipped under `session` and `subagent` isolation, because MCP carries no
   session id.
 - **stdin EOF** records the scope's last use, so `gc`'s idle clock starts at the session's end.
 
-Register the MCP server even on a harness where hooks already enforce, to get these signals.
+Register the MCP server even on a harness where hooks already enforce sandboxing. You still get
+these signals.
 
 ## Running someone else's MCP server in the sandbox
 
-Some MCP servers must run next to the code. `next-devtools-mcp`, for example, talks to a running
+Some MCP servers must run next to the code. For example, `next-devtools-mcp` talks to a running
 Next.js dev server, so it must run in the same sandbox. `boxer run` passes stdio through
-unchanged, which is all an MCP client needs:
+unchanged, so you can wrap the server command with it:
 
 ```json
 {

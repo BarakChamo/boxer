@@ -1,0 +1,28 @@
+---
+title: T3 Code
+description: Sandbox T3 Code threads with the committed project layer.
+---
+
+T3 Code creates a worktree per thread and runs Claude Code in it.
+
+## Set up
+
+```sh
+boxer install claude-code
+boxer install git
+git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
+```
+
+`boxer install git` is required. Without a warm sandbox, T3 Code's provider fails with
+`turn/setPermissionMode failed` while the sandbox boots (32 to 39 seconds cold).
+
+## Run the agent itself in the sandbox
+
+```sh
+boxer shim install --harness claude
+```
+
+Set the shim as the provider's `binaryPath` in T3 Code's settings. T3 Code starts the shim, the
+shim runs `boxer shell claude`, and Claude runs [inside the sandbox](/docs/use/inside).
+
+Tested in the matrix, 2 of 2 cells.

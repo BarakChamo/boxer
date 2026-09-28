@@ -1,0 +1,32 @@
+---
+title: fx and other agents
+description: Sandbox an agent boxer has no integration for by running the whole agent inside the sandbox.
+---
+
+If an agent has no hooks or plugins boxer can use, run the agent itself in the sandbox. Then there
+is nothing on your machine to intercept.
+
+```sh
+boxer shell fx
+```
+
+`boxer shell <harness>` starts the harness inside the worktree's sandbox, with the worktree mounted
+at its real path. It works for `claude`, `codex`, `copilot`, `fx`, `gemini`, `grok`, `kimi`,
+`opencode` and `pi`. See [Inside mode](/docs/use/inside) for credentials and memory.
+
+fx has no hooks, and its shell cannot be blocked headlessly, so inside mode is the only way to
+sandbox it. Tested in the matrix with inside mode.
+
+## An agent boxer does not know
+
+Try these in order:
+
+1. **The MCP tool.** Register `boxer mcp` as an MCP server. The agent gets `boxer_run`. This asks the
+   agent to use the sandbox but does not force it.
+2. **PATH shims.** `boxer shim install` writes files named `npm`, `node` and so on that run in the
+   sandbox. Put the directory first on the agent's `PATH`. See
+   [PATH shims](/docs/setup/integration-levels#path-shims).
+3. **Inside mode**, if the agent can be installed in the sandbox image.
+
+To add first-class support, see
+[Adding a harness](https://github.com/BarakChamo/boxer/blob/main/docs/adding-a-harness.md).

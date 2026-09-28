@@ -1,0 +1,108 @@
+---
+title: Test results
+description: Summarise JUnit results after a run, and save a failure as a capsule someone else can replay.
+---
+
+## See which tests failed
+
+```sh
+boxer run --junit junit.xml -- npm test
+```
+
+```console
+boxer: tests 128 passed, 3 failed, 1 error, 2 skipped (1 file(s))
+boxer:   FAIL api/AuthTest.refresh
+boxer:   FAIL cart/CheckoutTest.applies_discount
+boxer:   FAIL cart/CheckoutTest.rejects_expired
+```
+
+boxer lists failed and errored tests as `FAIL`, sorted, up to ten. It reads the report on the host.
+The worktree is mounted, so the file the guest wrote is already there.
+
+### Say where the reports are
+
+You can set report paths in three places, listed here from highest precedence to lowest.
+
+```sh
+boxer run --junit junit.xml,reports/*.xml -- npm test   # this run
+```
+
+```toml
+[tasks.test]
+cmd   = "npm test"
+junit = ["reports/junit.xml"]     # whenever this task runs
+
+[results]
+auto = ["junit.xml", "reports/*.xml"]   # every run in this repository
+fail_on_test_failures = true
+```
+
+Patterns are relative to the worktree. `*` matches within one directory. `**` does not recurse.
+
+### What boxer counts
+
+- **Test cases, not attributes.** boxer counts `<testcase>` elements and their `<failure>`,
+  `<error>` and `<skipped>` children. It ignores `tests=` and `failures=` on `<testsuite>`, because
+  frameworks fill them in inconsistently.
+- **Only reports newer than the run.** An older report is ignored. A command that crashed before
+  writing a report does not show the previous run's results.
+
+### Fail the run on test failures
+
+By default the run's exit code is the command's, and the summary is for information only.
+
+Pass `--fail-on-test-failures`, or set `results.fail_on_test_failures`, to turn exit 0 into 1 when
+the report has failures or errors. boxer never replaces a non-zero exit code.
+
+## Save a failure as a capsule
+
+Every run leaves a record for its sandbox:
+
+- the command, directory and exit code
+- the image, pack and HEAD
+- whether the tree was dirty
+- the tail of stdout and stderr
+- the test summary, if there was one
+
+`boxer status --json` shows the record as `last_run`. `boxer capsule new` writes it to a file.
+
+```console
+$ boxer run -c 'npm test'            # it fails
+$ boxer capsule new
+boxer: wrote capsule.patch (4.1 kB)
+boxer: wrote capsule.toml — exit 1 from "npm test"
+boxer: replay it with `boxer capsule replay capsule.toml`
+```
+
+`capsule.toml` records what ran, against which commit, under which image and configuration. It
+also records which outcome counts as reproducing the failure. If the tree was dirty, boxer writes
+the uncommitted changes next to it as `capsule.patch`. Commit the capsule, attach it to an issue,
+or delete it.
+
+## Replay a capsule
+
+```sh
+boxer capsule inspect capsule.toml
+boxer capsule replay capsule.toml
+```
+
+A replay overlays the captured configuration onto the current one and runs the command again:
+
+```console
+boxer: reproduced — exit 1, as recorded
+```
+
+<Callout type="warn">
+Replay exits 0 when the failure reproduced, and 1 when it did not. It answers the question "does
+this still fail?".
+</Callout>
+
+| Replay refuses with exit 1 when | Override |
+| --- | --- |
+| The worktree has uncommitted changes | `--allow-dirty` |
+| HEAD differs from the captured commit | `--allow-drift` |
+
+A captured patch is applied only with `--apply-patch`.
+
+A capsule describes the environment. It contains no machine. To keep a prepared guest, save a
+[named pack](/docs/concepts/scopes-and-packs#packs-you-name).

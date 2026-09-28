@@ -3,9 +3,12 @@ title: Benchmarks
 description: What boxer costs against other sandboxes and across its own backends, with the date and conditions of each measurement.
 ---
 
+The latest measurements are from 2026-09-28. A no-op command in a running smolvm sandbox takes
+33 ms through `boxer run`, against 29 ms for `docker exec` and 232 ms for a fresh `docker run`.
+
 Every number on this page comes from one Apple M4 Mac (10 cores, 24 GB, macOS 26.5.2). The
-scripts are in `bench/`, each writes its raw results beside it, and `bench/README.md` has the full
-method. A number measured once is labelled a single sample.
+scripts are in `bench/`. Each script writes its raw results beside it, and `bench/README.md` has the
+full method. A number measured once is labelled a single sample.
 
 | measurement | script | recorded | boxer build |
 | --- | --- | --- | --- |
@@ -25,8 +28,8 @@ with `[urls]` on wait for the proxy and the route.
 
 ## A command in a running sandbox
 
-`make bench` runs a no-op and a set of ordinary workloads in an already-running sandbox, 20 samples
-per cell, median reported. Docker 29.4.0.
+`make bench` runs a no-op and a set of ordinary workloads in an already-running sandbox. It takes
+20 samples per cell and reports the median. Docker was 29.4.0.
 
 | | no-op |
 | --- | ---: |
@@ -39,8 +42,8 @@ per cell, median reported. Docker 29.4.0.
 - boxer is about 7x faster than a container per command, because the sandbox per worktree stays
   warm.
 - Seatbelt is faster. It filters syscalls around a host process and does not start another kernel.
-- The worktree mount costs. A recursive grep takes 2.4x as long as in a warm container, and so does
-  writing 200 files. That cost is virtiofs.
+- The worktree mount adds cost. A recursive grep takes 2.4x as long as in a warm container, and so
+  does writing 200 files. The cost comes from virtiofs.
 - boxer adds 19 to 27 ms over raw `smolvm machine exec`, most of it starting the `smolvm` process.
 - The rewrite hook that every intercepted command passes through takes 4 ms.
 
@@ -56,8 +59,8 @@ cleared `.next`.
 | **boxer**, smolvm | **7.6 s** | 9.2 s |
 | OrbStack (a container) | 10.8 s | 5.2 s |
 
-You pay the session start every time, and boxer is 0.8 s over no sandbox. Installing is boxer's
-weak row because the guest writes through the mount. [`[prep]`](/docs/guides/environment) and the
+You pay the session start every time. boxer adds 0.8 s over no sandbox. Installing dependencies is
+slower in boxer because the guest writes through the mount. [`[prep]`](/docs/configure/environment) and the
 host package-cache mounts move that work out of the guest.
 
 ## Several sandboxes at once
@@ -97,13 +100,13 @@ sample out of three (8.3 s against 5.3 s), as it did on 2026-09-25.
 Podman was not rerun because the host had no podman machine. On 2026-09-25 it took 3.6 s for one
 worktree and 25.9 s for three. Every other backend was 40 to 50% slower at three worktrees on
 that day than on 2026-09-28, docker included, with the same app and script. The cause was host
-state, not recorded, so compare rows within one run and not across the two.
+state, which was not recorded. Compare rows within one run, not across the two.
 `bench/backends-2026-09-25.jsonl` has that run.
 
 ## `[urls]` on and off
 
 `bench/urls.sh` brings up two worktrees that differ only in `[urls] enabled`, then times five
-interleaved pairs of each call. Medians:
+interleaved pairs of each call. The table shows medians.
 
 | | `boxer up` on a running sandbox | warm `boxer run` |
 | --- | ---: | ---: |
@@ -118,14 +121,14 @@ starts, so a later `boxer up` finds it in place.
 A sandbox serving a Next.js dev server touches about **1.2 GB inside the guest**, 642 MB of it
 node's own heap, and does not grow to fill a larger allocation. That figure replicates across runs.
 
-There is no host-memory ratio against a container. The whole-host measurement varied up to 2.1x
+The whole-host measurement varied up to 2.1x
 within one configuration, and halving each guest's memory produced both the lowest and the highest
 figure. A microVM per worktree costs a kernel, a guest userland and a page cache more than a shared
 kernel. How much more on this workload is unmeasured.
 
 ## Withdrawn
 
-Three earlier claims did not survive repetition:
+Repeated runs showed these three earlier claims were wrong:
 
 - **"About 243 MB per sandbox, crossover at six."** This was measured on sandboxes running nothing.
   One serving a dev server costs about a gigabyte, most of it node.
@@ -134,7 +137,7 @@ Three earlier claims did not survive repetition:
   wiped host the same cell read 2.2 to 2.9 GB, not 501 MB.
 - **"Halving the guest allocation saves memory."** It produced the widest spread measured.
 
-Each was a single sample that matched an expectation.
+Each came from a single sample.
 
 ## Caveats
 
@@ -142,5 +145,5 @@ Each was a single sample that matched an expectation.
   every container row would be cheaper and the comparison would change.
 - **Cache state dominates cold start.** A first run pulls the image. Every figure above is warm
   unless it says otherwise.
-- **Benchmarks gate nothing.** The [evaluation tiers](/docs/evals/strategy) check whether boxer
+- **Benchmarks do not fail CI.** The [evaluation tiers](/docs/evals/strategy) check whether boxer
   works.

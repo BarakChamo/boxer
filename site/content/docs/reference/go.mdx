@@ -3,11 +3,13 @@ title: Go package
 description: Every exported identifier in pkg/boxer, for opening, running and managing sandboxes from Go.
 ---
 
+Use `pkg/boxer` to open, run and manage boxer sandboxes from a Go program.
+
 ```go
 import "github.com/BarakChamo/boxer/pkg/boxer"
 ```
 
-`pkg/boxer` is the module's only importable package; everything else is under `internal/`. It
+`pkg/boxer` is the module's only importable package. Everything else is under `internal/`. It
 calls the same code the CLI does, so a `Box` reads the worktree's `boxer.toml` and behaves as
 `boxer run` would there. The [stability contract](https://github.com/BarakChamo/boxer/blob/main/docs/release.md)
 covers its exported functions, types and fields from 1.0.
@@ -25,7 +27,7 @@ code, err := b.Run([]string{"sh", "-c", "npm test"}, boxer.RunOpts{Stdout: os.St
 
 [`examples/go-embed`](https://github.com/BarakChamo/boxer/tree/main/examples/go-embed) runs one
 shell line in several worktrees at once through this package and reports each exit code.
-[Building on boxer](/docs/guides/building-on-boxer) covers the decisions around it.
+[Build on boxer](/docs/reference/building-on-boxer) covers when to use it and what to check before you ship.
 
 ## Index
 
@@ -99,8 +101,8 @@ Non-fatal findings from resolution, such as running in the main checkout or degr
 func (b *Box) Ensure(allowCreate, recreate bool) (created bool, err error)
 ```
 
-Makes the machine exist and run, runs `setup` and `start`, and waits for `ready`. It creates only
-when `allowCreate` is set; otherwise a missing sandbox is `NO_SANDBOX`. `recreate` deletes an
+Makes the machine exist and run, runs `setup` and `start`, and waits for `ready`. It creates a machine only
+when `allowCreate` is set. Otherwise a missing sandbox fails with cause `NO_SANDBOX`. `recreate` deletes an
 existing machine first. `created` reports whether a machine was created.
 
 ### Box.Run
@@ -145,7 +147,7 @@ Every boxer-owned machine on the host backend.
 func Stop(name string) error
 ```
 
-Halts one machine by name and keeps it, the state `boxer status` reports as exit 3. Stopping a
+Stops one machine by name without deleting it. `boxer status` reports a stopped machine as exit 3. Stopping a
 stopped machine is not an error. Same as `boxer stop NAME`.
 
 ## Delete
@@ -164,9 +166,10 @@ func LastUsed(name string) time.Time
 
 When the scope last ran a command, or the zero time when unknown.
 
-`List`, `Stop`, `Delete` and `LastUsed` take a machine name rather than a directory, because the
+`List`, `Stop`, `Delete` and `LastUsed` take a machine name instead of a directory because the
 worktree may be gone. `List`, `Stop` and `Delete` act on the backend the CLI would use from the
-process's working directory: `BOXER_BACKEND`, else the one `boxer.toml` names, else smolvm.
+process's working directory. That is `BOXER_BACKEND` if set, else the backend `boxer.toml` names,
+else smolvm.
 
 ## RunOpts
 
@@ -183,8 +186,8 @@ type RunOpts struct {
 }
 ```
 
-The streams, whether to request a terminal, a timeout (zero for none), and the `[tasks]` name to
-record in the run record. Pass the same writer as `Stdout` and `Stderr` to get one interleaved
+The fields set the streams, whether to request a terminal, a timeout (zero for none), and the
+`[tasks]` name to record in the run record. Pass the same writer as `Stdout` and `Stderr` to get one interleaved
 stream.
 
 ## Machine
@@ -228,7 +231,7 @@ func (s Scope) Names() string
 
 `Key` is `sb-` plus twelve hex characters and is the machine name. `Isolation` is the isolation
 used after degradation, and `Reason` says why when `Degraded` is set. `Root` is the mounted
-worktree. `Slug` is the two-word name (`swift-crab`); `Names` is `swift-crab (sb-7e1852e4a3c3)`.
+worktree. `Slug` is the two-word name (`swift-crab`). `Names` is `swift-crab (sb-7e1852e4a3c3)`.
 
 ## Error
 
@@ -245,7 +248,7 @@ type Error struct {
 func (e *Error) Error() string
 ```
 
-boxer's refusal. `Error()` is the same multi-line text the CLI prints.
+The error boxer returns when it refuses. `Error()` returns the same multi-line text the CLI prints.
 
 ```go
 var be *boxer.Error
@@ -254,6 +257,6 @@ if errors.As(err, &be) {
 }
 ```
 
-Match on `Cause`, the stable identifier, not on the message. The
-[full list](/docs/reference/json#errors) is on the JSON page; the same causes appear in `--json`
+Match on `Cause`, which is stable. Do not match on the message. The
+[full list](/docs/reference/json#errors) is on the JSON page. The same causes appear in `--json`
 output and in failed MCP tool calls.

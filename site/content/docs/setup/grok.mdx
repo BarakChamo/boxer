@@ -1,0 +1,40 @@
+---
+title: Grok
+description: Route Grok's shell commands into the sandbox with a project hook.
+---
+
+boxer adds a hook to Grok that rewrites each intercepted command to `boxer run`.
+
+## Set up
+
+```sh
+boxer install grok
+git add .grok .mcp.json .agents
+git commit -m "Run Grok's commands in boxer"
+```
+
+Grok loads project hooks only from a trusted folder. Launch it once with `--trust`. For headless
+runs, set `GROK_FOLDER_TRUST=0`.
+
+## What it writes
+
+| File | What it is |
+| --- | --- |
+| `.grok/hooks/boxer.json` | the hook that rewrites commands |
+| `.mcp.json` | the `boxer` MCP server |
+| `.agents/skills/boxer/` | the skill that tells Grok how commands run here |
+
+## Check it
+
+```sh
+boxer doctor
+```
+
+Then ask Grok to run `node -p process.platform`. It prints `linux`.
+
+## Options
+
+- **Block the shell instead:** set `[harness.grok] mode = "tool"`. Grok does not show boxer's session
+  brief to the model, so its first shell command is refused once before it switches to the tool.
+
+Tested in the matrix with hook rewrite and tool mode.
