@@ -16,6 +16,19 @@ docker and podman are also supported.
 
 macOS on Apple Silicon and Linux on x86-64 and arm64.
 
+## Motivation
+
+I built boxer to make parallel agent work easy. Running several agents at once, each on its own
+worktree, works until their environments collide: two dev servers want the same port, one task's
+dependency install breaks another's, and every task shares the host system. Each workstream needed
+its own isolated environment on the same machine, without a hosted platform or a change of tools.
+
+boxer is a single, self-contained utility for that. It gives each git worktree its own local
+sandbox and runs the agent's commands inside it. It does not replace a harness, orchestrator or
+editor. It integrates with them through hooks, PATH shims, an MCP tool or a Go package, so the same
+isolation applies whether the agent is Claude Code in a terminal, a task in an orchestrator, or
+your own automation.
+
 ## Install
 
 ```sh
