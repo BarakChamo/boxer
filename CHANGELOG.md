@@ -39,6 +39,8 @@ All notable changes to this project are documented here. The format follows
   `idle_action = "delete"` for the 1.1 behaviour.
 
 ### Fixed
+- The test suite's fake smolvm isolates boxer's state directory itself. A test that used the fake
+  without a repository wrote a fake pack into the developer's real pack cache.
 - A local image archive on smolvm no longer tries to build a pack at every create. smolvm refuses
   to pack an archive, so each create printed the refusal and paid for the attempt.
 
