@@ -27,12 +27,16 @@ func TestGoReferenceCoversTheWholePackage(t *testing.T) {
 
 	var names []string
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range pkgs {
-		for _, f := range p.Files {
+	srcs, _ := filepath.Glob("*.go")
+	for _, path := range srcs {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		{
 			for _, d := range f.Decls {
 				switch d := d.(type) {
 				case *ast.FuncDecl:
