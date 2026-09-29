@@ -1,26 +1,28 @@
 ---
 title: What is boxer
-description: Install boxer into your coding agent once. Every worktree it works in gets its own sandbox, automatically.
+description: Install boxer into your coding agent once. Every workstream gets its own sandbox, automatically.
 ---
 
-boxer gives every git worktree its own sandbox and runs your coding agent's commands in it.
-Install it into your agent once, then work as usual.
+boxer gives every agent workstream its own sandbox and runs the agent's commands in it. A
+workstream is a git worktree by default, or a single agent session or subagent. A sandbox is a
+microVM by default, or a container. Install boxer into your agent once, then work as usual.
 
-![Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL](/hero.svg)
+![Three coding agents in three git worktrees, each running in its own boxer sandbox with its own dev server URL](/hero.svg)
 
 ## Why
 
 Codex and Claude Code create worktrees themselves, and orchestrators like Conductor run a task per
 worktree. Each worktree has its own files, but every task still shares your machine. Dev servers
 fight over ports, one task's install breaks another's, and every command runs against your own
-system. boxer gives each worktree its own sandbox:
+system. boxer gives each workstream its own sandbox:
 
-- **A sandbox per worktree**, created when an agent starts working there, including worktrees the
-  agent or an orchestrator creates.
+- **A sandbox per workstream**: per worktree by default, including worktrees the agent or an
+  orchestrator creates, or per session or subagent.
 - **Your agent doesn't change.** A hook runs `npm test` in the sandbox instead of on your machine.
 - **No port clashes.** Each worktree's dev servers get their own ports, or named URLs like
   `https://fix-ui.myapp.localhost`.
-- **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree.
+- **A real boundary.** A microVM with its own kernel by default, or a docker, podman or Apple
+  container. It sees only the worktree.
 - **Fast.** 33 ms per command, about the same as `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
 - **Local.** No account, no upload. See how it [compares](/docs/comparison).
 

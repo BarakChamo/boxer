@@ -1,14 +1,14 @@
 # boxer
 
-**Parallel coding agents, each in its own sandbox.** A microVM, dev server and URL for every git
-worktree, set up once per agent.
+**Parallel coding agents, each in its own sandbox.** An isolated sandbox for every agent
+workstream, with its own dev server and URL. A microVM or a container, set up once per agent.
 
 [![CI](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml/badge.svg)](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/BarakChamo/boxer)](https://github.com/BarakChamo/boxer/releases)
 [![License](https://img.shields.io/github/license/BarakChamo/boxer)](LICENSE)
 
 <p align="center">
-  <img src="site/public/hero.svg" alt="Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL" width="860">
+  <img src="site/public/hero.svg" alt="Three coding agents in three git worktrees, each running in its own boxer sandbox with its own dev server URL" width="860">
 </p>
 
 **[Documentation](https://barakchamo.github.io/boxer/docs)** ·
@@ -17,17 +17,17 @@ worktree, set up once per agent.
 
 ## Highlights
 
-- **A sandbox per worktree.** Created when an agent starts working there, including worktrees the
-  agent or an orchestrator creates. Removed when the worktree goes.
+- **A sandbox per workstream.** One per git worktree by default, including worktrees the agent or
+  an orchestrator creates, or one per agent session or subagent. Cleaned up when the work is done.
 - **Your agent doesn't change.** `npm test`, `pytest` and `make` run in the sandbox. Output and exit
   codes come back as usual.
 - **No port clashes.** Each worktree's dev servers get their own ports, or named URLs like
   `https://fix-ui.myapp.localhost` with [portless](https://github.com/vercel-labs/portless).
-- **A real boundary.** Each sandbox is a microVM with its own kernel, and reaches only the hosts you
-  allow.
+- **MicroVM or container.** A smolvm microVM with its own kernel and a network allowlist by
+  default, or a docker, podman or Apple container.
 - **Fast.** 33 ms per command, about the same as `docker exec`.
-- **Works with your setup.** Your images and devcontainer, docker or podman if you prefer, and
-  services like Postgres in the sandbox.
+- **Works with your setup.** Your own images and devcontainer, and services like Postgres running
+  in the sandbox.
 - **Works with your tools.** Claude Code, Codex, Gemini CLI, Copilot CLI, OpenCode, pi, Grok, Kimi
   Code, Conductor, T3 Code and more.
 

@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Install boxer, connect your agent, and let every worktree get its own sandbox without thinking about it.
+description: Install boxer, connect your agent, and let every workstream get its own sandbox without thinking about it.
 ---
 
 You set boxer up once per repository. After that, every agent session in every worktree gets its
@@ -150,9 +150,9 @@ alone and it runs on your machine.
 
 - **Another worktree gets another sandbox**, with its own dev server and port. The two do not share
   ports, installed tools or processes. It does not matter who created the worktree.
-- **Two sessions in the same worktree share its sandbox.** For separate sandboxes, give each
-  session its own worktree: `claude --worktree fix-ui` creates one and starts Claude in it, and an
-  orchestrator makes one per task.
+- **Two sessions in the same worktree share its sandbox by default.** For separate ones, give each
+  session its own worktree (`claude --worktree fix-ui`), or set `isolation = "session"` for a
+  sandbox per session, or `"subagent"` for one per subagent.
 - **A deleted worktree's sandbox is removed.** Any boxer command starts this cleanup in the
   background, at most every 6 hours. `boxer gc` runs it now.
 

@@ -13,16 +13,16 @@ const stats = [
 
 const steps = [
   { title: 'Install it into your agent', body: 'One command: boxer install claude-code, codex, or whichever agent you use.' },
-  { title: 'Work as usual', body: 'Each session gets its worktree’s sandbox, with dependencies installed and your dev server running.' },
-  { title: 'Run as many as you want', body: 'Every new worktree gets its own sandbox. Deleted ones are cleaned up.' },
+  { title: 'Work as usual', body: 'Each workstream gets its sandbox when it starts, with dependencies installed and your dev server running.' },
+  { title: 'Run as many as you want', body: 'Every new worktree, session or subagent can get its own sandbox. Finished ones are cleaned up.' },
 ];
 
 const highlights = [
-  ['A sandbox per worktree', 'Created when an agent starts working there. Removed when the worktree goes.'],
+  ['A sandbox per workstream', 'One per git worktree by default, or one per agent session or subagent. Created when the work starts, cleaned up after.'],
   ['Your agent doesn’t change', 'npm test, pytest and make run in the sandbox. Output and exit codes come back as usual.'],
   ['No port clashes', 'Each worktree’s dev servers get their own ports, or named URLs like https://fix-ui.myapp.localhost.'],
-  ['A real boundary', 'Each sandbox is a microVM with its own kernel, and reaches only the hosts you allow.'],
-  ['Works with your setup', 'Your images, your devcontainer, docker or podman if you prefer, and services like Postgres in the sandbox.'],
+  ['MicroVM or container', 'A smolvm microVM with its own kernel and a network allowlist by default. Docker, podman or Apple container if you prefer.'],
+  ['Works with your setup', 'Your own images and devcontainer, and services like Postgres running in the sandbox.'],
   ['Local and open source', 'Runs on your Mac or Linux machine. No account. Apache-2.0.'],
 ];
 
@@ -64,7 +64,8 @@ export default function HomePage() {
           each in its own sandbox
         </h1>
         <p className="text-fd-muted-foreground max-w-2xl text-lg sm:text-xl">
-          A microVM, dev server and URL for every git worktree. Set up once per agent.
+          An isolated sandbox for every agent workstream, with its own dev server and URL. A microVM
+          or a container, set up once per agent.
         </p>
         <pre className="bg-fd-card border-fd-border max-w-full overflow-x-auto rounded-lg border px-4 py-3 text-left text-sm">
           <code>{`curl -sSL https://smolmachines.com/install.sh | bash
@@ -93,7 +94,7 @@ ${install}`}</code>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`${base}/hero.svg`}
-          alt="Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL"
+          alt="Three coding agents in three git worktrees, each running in its own boxer sandbox with its own dev server URL"
           className="w-full rounded-2xl"
         />
       </section>

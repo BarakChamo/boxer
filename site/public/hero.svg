@@ -7,8 +7,8 @@
   </defs>
   <rect x="0" y="0" width="960" height="400" rx="20" fill="#0f1117"/>
 
-  <text x="40" y="52" fill="#8b93a1" font-size="14" letter-spacing="1.5">YOUR AGENTS, IN THEIR WORKTREES</text>
-  <text x="560" y="52" fill="#8b93a1" font-size="14" letter-spacing="1.5">ONE SANDBOX EACH</text>
+  <text x="40" y="52" fill="#8b93a1" font-size="14" letter-spacing="1.5">YOUR AGENTS, IN PARALLEL</text>
+  <text x="560" y="52" fill="#8b93a1" font-size="14" letter-spacing="1.5">ONE SANDBOX EACH · MICROVM OR CONTAINER</text>
 
   <g>
     <rect x="40" y="78" width="330" height="84" rx="12" fill="#1a1d27" stroke="#2b3040"/>
@@ -33,15 +33,15 @@
 
   <g>
     <rect x="560" y="78" width="360" height="84" rx="12" fill="#10251c" stroke="#1f6f4a"/>
-    <text x="582" y="112" fill="#e6f6ee" font-size="18" font-weight="600">microVM · own kernel</text>
+    <text x="582" y="112" fill="#e6f6ee" font-size="18" font-weight="600">own sandbox · own dev server</text>
     <text x="582" y="140" fill="#6fd3a0" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">https://fix-ui.myapp.localhost</text>
 
     <rect x="560" y="180" width="360" height="84" rx="12" fill="#10251c" stroke="#1f6f4a"/>
-    <text x="582" y="214" fill="#e6f6ee" font-size="18" font-weight="600">microVM · own kernel</text>
+    <text x="582" y="214" fill="#e6f6ee" font-size="18" font-weight="600">own sandbox · own dev server</text>
     <text x="582" y="242" fill="#6fd3a0" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">https://add-auth.myapp.localhost</text>
 
     <rect x="560" y="282" width="360" height="84" rx="12" fill="#10251c" stroke="#1f6f4a"/>
-    <text x="582" y="316" fill="#e6f6ee" font-size="18" font-weight="600">microVM · own kernel</text>
+    <text x="582" y="316" fill="#e6f6ee" font-size="18" font-weight="600">own sandbox · own dev server</text>
     <text x="582" y="344" fill="#6fd3a0" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">https://bump-deps.myapp.localhost</text>
   </g>
 </svg>
