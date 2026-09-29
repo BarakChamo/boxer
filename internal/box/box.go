@@ -73,6 +73,9 @@ type Env struct {
 	// seen is the last machine Exists looked at, so a second reader in the same command does not
 	// pay another smolvm start-up. See seenMachine; anything that changes the machine clears it.
 	seen *vm.Machine
+	// built is what buildImage produced this command: the tag, or on smolvm the archive, which
+	// only exists once the build has run and so cannot be predicted by Image beforehand.
+	built string
 }
 
 // Resolve builds an Env for cwd. harness may be empty; id fields may be empty.
@@ -195,6 +198,12 @@ var InsideHooks struct {
 
 // Image returns the guest image and the reason it was chosen (R-GUEST-1).
 func (e *Env) Image() (string, string) {
+	if e.built != "" {
+		return e.built, "built from " + e.Cfg.Build
+	}
+	if e.Cfg.Build != "" {
+		return e.buildTag(), "built from " + e.Cfg.Build
+	}
 	if e.Cfg.Smolfile != "" {
 		return "", "smolfile " + e.Cfg.Smolfile
 	}
@@ -458,6 +467,13 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 
 func (e *Env) create() error {
 	e.seen = nil // the machine is about to change; a memoised one would describe the old one
+	if e.Cfg.Build != "" {
+		built, err := e.buildImage()
+		if err != nil {
+			return err
+		}
+		e.built = built
+	}
 	image, why := e.Image()
 	if image == "" && e.Cfg.Smolfile == "" {
 		return e.fail(&Error{Reason: "no guest image could be chosen (" + why + ")", Cause: "NO_IMAGE", Scope: e.Scope,
@@ -468,7 +484,7 @@ func (e *Env) create() error {
 		return e.fail(&Error{Reason: err.Error(), Cause: "CONFIG_INVALID", Scope: e.Scope,
 			Fix: "set memory = \"4G\" in boxer.toml"})
 	}
-	hosts := append([]string{}, e.Cfg.Network.AllowHosts...)
+	hosts := e.Cfg.Network.AllowedHosts()
 	if e.Cfg.Network.Mode == "allowlist" && image != "" {
 		hosts = append(hosts, registryHosts(image)...)
 	}
@@ -506,6 +522,12 @@ func (e *Env) create() error {
 	// and a package cache changes nothing about what a pack contains. Putting them in the key
 	// would rebuild every environment the first time a developer's ~/.npm appeared.
 	volumes = append(volumes, e.CacheMounts()...)
+	// Named volumes are not in EnvKey either: they hold data, not the environment.
+	named, err := e.volumeMounts()
+	if err != nil {
+		return e.fail(&Error{Reason: "creating the sandbox's volumes: " + err.Error(), Cause: "CREATE_FAILED", Scope: e.Scope, Fix: "boxer doctor"})
+	}
+	volumes = append(volumes, named...)
 	if e.Inside() {
 		if InsideHooks.Mounts != nil {
 			volumes = append(volumes, InsideHooks.Mounts()...)
@@ -988,6 +1010,11 @@ func (e *Env) packed(image string) string {
 	if !ok {
 		return ""
 	}
+	// A local archive or rootfs is not pulled, so a pack of it saves nothing, and smolvm refuses
+	// to pack one: every create printed that refusal and paid for the attempt.
+	if IsLocalImage(image) {
+		return ""
+	}
 	side := PackPath(image)
 	stub := strings.TrimSuffix(side, ".smolmachine")
 	if packReady(side) {
@@ -1138,10 +1165,10 @@ func (e *Env) startServices() error {
 	if code == 0 {
 		return nil
 	}
-	for _, cmd := range e.Cfg.Start {
+	for i, cmd := range e.Cfg.Start {
 		fmt.Fprintf(e.Stderr, "boxer: start: %s\n", cmd)
 		// Detached and disowned: the command that launches a server must not wait for it.
-		line := "cd " + e.MountAt() + " && nohup " + shellWords(guestShell(cmd)) + " >>" + startLog + " 2>&1 &"
+		line := "cd " + e.MountAt() + " && " + superviseLine(i, cmd, e.Cfg.Restart)
 		var out strings.Builder
 		// Services see the same environment as `setup` and every `boxer run`: a dev server that
 		// reads DATABASE_URL or a secret from [env] or `secrets` needs it when it starts.
@@ -1155,6 +1182,81 @@ func (e *Env) startServices() error {
 	}
 	_, _, _ = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "touch "+startMarker)
 	return nil
+}
+
+// serviceDir holds one pid file per `start` line: the supervisor's pid, which is also its process
+// group when setsid exists, so `boxer restart` can stop a service and everything it spawned.
+const serviceDir = "/tmp/boxer-svc"
+
+// superviseLine launches one `start` command detached, under a supervisor that restarts it when
+// it crashes (restart = "on-failure", the default) or that only records it ("never").
+//
+// A service that exits 0 is taken to have finished and is not restarted. One that fails is
+// restarted after 1s, then 2s, doubling to 30s; a run that lasted 10s or more resets the delay,
+// and five quick failures in a row stop the loop, so a service that cannot start does not spin
+// forever. Every restart is a line in the start log.
+func superviseLine(i int, cmd, restart string) string {
+	script := superviseScript(fmt.Sprintf("%s/%d.pid", serviceDir, i), cmd, restart)
+	// setsid, where the image has it, makes the supervisor a process group of its own, so
+	// StopServices can stop the service and everything it spawned with one signal. The whole list
+	// is backgrounded, as a single `&`, so the exec that launches it returns at once.
+	launch := `command -v setsid >/dev/null 2>&1 && exec setsid sh -c "$0"; exec sh -c "$0"`
+	return "mkdir -p " + serviceDir + " && nohup sh -c " + sh.Quote(launch) + " " + sh.Quote(script) + " >>" + startLog + " 2>&1 &"
+}
+
+// superviseScript is the supervisor itself, a POSIX sh loop, so it needs nothing in the image.
+func superviseScript(pid, cmd, restart string) string {
+	run := shellWords(guestShell(cmd))
+	label := sh.Quote(cmd)
+	var script string
+	if restart == "never" {
+		script = "echo $$ > " + pid + "; exec " + run
+	} else {
+		script = "echo $$ > " + pid + "\n" +
+			"fast=0; delay=1\n" +
+			"while :; do\n" +
+			"  began=$(date +%s)\n" +
+			"  " + run + "\n" +
+			"  code=$?\n" +
+			"  [ \"$code\" = 0 ] && exit 0\n" +
+			"  if [ $(( $(date +%s) - began )) -ge 10 ]; then fast=0; delay=1; else fast=$((fast + 1)); fi\n" +
+			"  if [ \"$fast\" -ge 5 ]; then echo \"boxer: start: gave up after 5 quick crashes (exit $code): \"" + label + "; exit \"$code\"; fi\n" +
+			"  echo \"boxer: start: exited $code; restarting in ${delay}s: \"" + label + "\n" +
+			"  sleep \"$delay\"; delay=$((delay * 2)); [ \"$delay\" -gt 30 ] && delay=30\n" +
+			"done"
+	}
+	return script
+}
+
+// StopServices stops every `start` service and its children, and clears the marker that says
+// they are running, so the next startServices launches them again.
+func (e *Env) StopServices() error {
+	stop := "for f in " + serviceDir + "/*.pid; do [ -f \"$f\" ] || continue; p=$(cat \"$f\"); " +
+		"kill -TERM -\"$p\" 2>/dev/null || { pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; }; rm -f \"$f\"; done; rm -f " + startMarker
+	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", stop)
+	if err != nil || code != 0 {
+		return fmt.Errorf("stopping services: %s", firstNonEmpty(errText(err), strings.TrimSpace(out)))
+	}
+	return nil
+}
+
+// RestartServices stops the `start` services and launches them again, then waits for `ready`,
+// without recreating the sandbox: whatever the services keep in the guest, such as a database, stays.
+func (e *Env) RestartServices() error {
+	m, ok, err := e.Exists()
+	if err != nil {
+		return err
+	}
+	if !ok || !m.Running() {
+		return e.fail(&Error{Reason: "this worktree's sandbox is not running", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"})
+	}
+	if err := e.StopServices(); err != nil {
+		return e.fail(&Error{Reason: err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
+	}
+	if err := e.startServices(); err != nil {
+		return err
+	}
+	return e.waitReady()
 }
 
 // startTail is the service's own last words, which are the whole diagnosis when a sandbox does
@@ -1823,11 +1925,11 @@ func InstructionsFor(cfg config.Config, runTool string) string {
 	switch cfg.Mode {
 	case "rewrite":
 		b.WriteString("Shell commands that start with ")
-		b.WriteString(strings.Join(cfg.Intercept, ", "))
+		b.WriteString(strings.Join(cfg.Intercepted(), ", "))
 		b.WriteString(" are transparently executed in the sandbox; write them normally. ")
 	case "tool":
 		b.WriteString("Do not run ")
-		b.WriteString(strings.Join(cfg.Intercept, ", "))
+		b.WriteString(strings.Join(cfg.Intercepted(), ", "))
 		b.WriteString(" through the shell tool. Use ")
 		b.WriteString(runTool)
 		b.WriteString(", or the shell form `boxer run -c '<command>'`. ")

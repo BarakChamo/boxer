@@ -67,6 +67,8 @@ type Machine struct {
 	PID       int `json:"pid"`
 	CPUs      int `json:"cpus"`
 	MemoryMiB int `json:"memory_mib"`
+	// Backend names the backend the machine is on. Only listings that span backends set it.
+	Backend string `json:"backend,omitempty"`
 }
 
 // DataDir is where smolvm keeps a machine's disks. It is the machine's real cost on disk, and it

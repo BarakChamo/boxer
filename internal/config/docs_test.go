@@ -90,3 +90,29 @@ func section(doc, heading string) string {
 	}
 	return rest
 }
+
+// The preset table is written out by hand; every preset and every host in it must be there.
+func TestConfigurationReferenceListsEveryPresetHost(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "site", "content", "docs", "reference", "configuration.mdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := section(string(b), "### `network.allow_presets`")
+	for _, name := range PresetNames() {
+		row := ""
+		for _, line := range strings.Split(sec, "\n") {
+			if strings.HasPrefix(line, "| `"+name+"` |") {
+				row = line
+			}
+		}
+		if row == "" {
+			t.Errorf("preset %s has no row", name)
+			continue
+		}
+		for _, h := range Presets[name] {
+			if !strings.Contains(row, "`"+h+"`") {
+				t.Errorf("preset %s: row does not list %s", name, h)
+			}
+		}
+	}
+}

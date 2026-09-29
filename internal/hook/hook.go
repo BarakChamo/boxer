@@ -244,7 +244,7 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 	}
 	args := toolArgs(d, in)
 	cmd, _ := args["command"].(string)
-	dec := decide.Decide(decide.Input{Command: cmd, Mode: e.Cfg.Mode, Intercept: e.Cfg.Intercept, Passthrough: e.Cfg.Passthrough})
+	dec := decide.Decide(decide.Input{Command: cmd, Mode: e.Cfg.Mode, Intercept: e.Cfg.Intercepted(), Passthrough: e.Cfg.Passthrough})
 	if e.Cfg.Enforcement == "audit" && dec.Action != decide.Allow {
 		fmt.Fprintf(stderr, "boxer: audit: would %s: %s\n", []string{"allow", "rewrite", "block"}[dec.Action], cmd)
 		return 0

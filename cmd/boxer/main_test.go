@@ -576,3 +576,100 @@ func TestUsageNamesEveryInsideHarness(t *testing.T) {
 		}
 	}
 }
+
+// Idle reclaim stops a sandbox whose worktree is still there rather than deleting it, and a named
+// volume outlives the sandbox until its worktree goes or rm --volumes asks.
+func TestIdleReclaimStopsAndVolumesSurvive(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nvolumes = [\"data:/data\"]\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	if code, out := call(t, &ls, "ls", "--json"); code != 0 || len(ls) != 1 {
+		t.Fatalf("ls: %d %s", code, out)
+	}
+	key := ls[0]["scope"].(string)
+	vol := filepath.Join(box.VolumeDir(), key, "data")
+	if err := os.WriteFile(filepath.Join(vol, "row"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("the volume must exist on the host once the sandbox does: %v", err)
+	}
+	ageStamp(t, key)
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 1 || rows[0]["stopped"] != true {
+		t.Fatalf("an idle sandbox with a worktree must be stopped: %d %v %s", code, rows, out)
+	}
+	if m, ok, _ := client.Status(key); !ok || m.Running() {
+		t.Fatalf("it must still exist, stopped: %v %v", ok, m.State)
+	}
+	if code, _ := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 0 {
+		t.Fatalf("a stopped idle sandbox is left alone: %v", rows)
+	}
+
+	// rm deletes the sandbox and keeps the volume; the next sandbox sees the same data.
+	if code, out := call(t, nil, "rm", key); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	if b, err := os.ReadFile(filepath.Join(vol, "row")); err != nil || string(b) != "1" {
+		t.Fatalf("the volume must survive rm and recreate: %v", err)
+	}
+	if code, out := call(t, nil, "rm", "--volumes", key); code != 0 {
+		t.Fatal(out)
+	}
+	if _, err := os.Stat(filepath.Join(box.VolumeDir(), key)); !os.IsNotExist(err) {
+		t.Fatalf("rm --volumes must delete them: %v", err)
+	}
+
+	// A volume whose worktree is gone goes at the next gc, sandbox or not.
+	orphan := filepath.Join(box.VolumeDir(), "sb-orphan")
+	_ = os.MkdirAll(filepath.Join(orphan, "data"), 0o755)
+	_ = os.WriteFile(filepath.Join(orphan, ".worktree"), []byte(filepath.Join(t.TempDir(), "removed")), 0o644)
+	unknown := filepath.Join(box.VolumeDir(), "sb-unknown")
+	_ = os.MkdirAll(unknown, 0o755)
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 1 || rows[0]["volumes"] != "sb-orphan" {
+		t.Fatalf("gc must delete the orphaned volumes, and only them: %d %v %s", code, rows, out)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatal("orphaned volumes survived gc")
+	}
+	if _, err := os.Stat(unknown); err != nil {
+		t.Fatal("volumes boxer cannot place must be left alone")
+	}
+}
+
+// idle_action = "delete" is the 1.1 behaviour.
+func TestIdleActionDelete(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nidle_action = \"delete\"\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	key := ls[0]["scope"].(string)
+	ageStamp(t, key)
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 1 || rows[0]["deleted"] != true {
+		t.Fatalf("gc: %d %v %s", code, rows, out)
+	}
+	if _, ok, _ := client.Status(key); ok {
+		t.Fatal(`idle_action = "delete" must delete`)
+	}
+}
+
+// ageStamp records the scope as last used an hour ago.
+func ageStamp(t *testing.T, key string) {
+	t.Helper()
+	stamp := filepath.Join(box.LastUsedDir(), key)
+	_ = os.MkdirAll(filepath.Dir(stamp), 0o755)
+	if err := os.WriteFile(stamp, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(stamp, old, old); err != nil {
+		t.Fatal(err)
+	}
+}

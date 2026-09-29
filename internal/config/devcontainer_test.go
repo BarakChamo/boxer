@@ -100,13 +100,44 @@ func TestBoxerTomlOverridesTheDevcontainer(t *testing.T) {
 	}
 }
 
+// A devcontainer that builds its image becomes boxer's `build`, with its paths rewritten from the
+// devcontainer file's directory to the worktree's.
+func TestDevcontainerBuildBecomesBuild(t *testing.T) {
+	for _, tc := range []struct{ name, body, build, context string }{
+		{"build", `{"build":{"dockerfile":"Dockerfile","context":".."}}`, ".devcontainer/Dockerfile", "."},
+		{"dockerFile", `{"dockerFile":"Dockerfile"}`, ".devcontainer/Dockerfile", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDC(t, dir, tc.body)
+			cfg, err := Load(dir, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Build != tc.build || cfg.BuildContext != tc.context {
+				t.Fatalf("build = %q, build_context = %q; want %q, %q", cfg.Build, cfg.BuildContext, tc.build, tc.context)
+			}
+			if cfg.Sources["build"] == "" {
+				t.Fatal("doctor must be able to say where build came from")
+			}
+			if len(cfg.Warnings) != 0 {
+				t.Fatalf("a build boxer does is not refused: %v", cfg.Warnings)
+			}
+		})
+	}
+	dir := t.TempDir()
+	writeDC(t, dir, `{"build":{"dockerfile":"Dockerfile","args":{"V":"1"}}}`)
+	cfg, _ := Load(dir, dir)
+	if !strings.Contains(strings.Join(cfg.Warnings, "\n"), "build.args") {
+		t.Fatalf("build args are not passed, and that must be said: %v", cfg.Warnings)
+	}
+}
+
 // Silence would be worse than refusal: a repository whose tools come from `features` would get a
 // sandbox that looks configured and is missing half of them.
 func TestDevcontainerRefusesWhatNeedsABuild(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"features", `{"image":"x","features":{"ghcr.io/devcontainers/features/node:1":{}}}`, "features"},
-		{"build", `{"build":{"dockerfile":"Dockerfile"}}`, "build"},
-		{"dockerFile", `{"dockerFile":"Dockerfile"}`, "build"},
 		{"compose", `{"dockerComposeFile":"docker-compose.yml","service":"app"}`, "dockerComposeFile"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

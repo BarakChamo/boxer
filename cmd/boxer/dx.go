@@ -47,19 +47,9 @@ func parseAnywhere(fs *flag.FlagSet, args []string) ([]string, error) {
 }
 
 // backendNames are every backend, in the order they are shown.
-var backendNames = []string{"smolvm", "docker", "podman", "container"}
+var backendNames = vm.Names
 
-func backendBin(b vm.Backend) string {
-	switch t := b.(type) {
-	case vm.Client:
-		return t.Bin
-	case vm.Docker:
-		return t.Bin
-	case vm.Apple:
-		return t.Bin
-	}
-	return b.Name()
-}
+func backendBin(b vm.Backend) string { return vm.Bin(b) }
 
 // hostMachine is one sandbox and the backend it lives on.
 type hostMachine struct {
@@ -78,10 +68,8 @@ func listMachines(all bool, stderr io.Writer) []hostMachine {
 	var out []hostMachine
 	for _, n := range names {
 		c := vm.Host(n)
-		if all {
-			if _, err := exec.LookPath(backendBin(c)); err != nil {
-				continue
-			}
+		if all && !vm.Installed(c) {
+			continue
 		}
 		ms, err := vm.Owned(c)
 		if err != nil {
@@ -389,6 +377,10 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	yes := fs.Bool("y", false, "do not ask for confirmation")
 	everywhere := fs.Bool("A", false, "look on every installed backend")
 	asJSON := fs.Bool("json", false, "print what was done as JSON")
+	var volumes *bool
+	if verb == "rm" {
+		volumes = fs.Bool("volumes", false, "also delete the sandboxes' named volumes, which rm otherwise keeps")
+	}
 	fs.SetOutput(stderr)
 	names, err := parseAnywhere(fs, args)
 	if err != nil {
@@ -449,6 +441,9 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 			if err == nil {
 				vm.ForgetOwned(h.client, h.m.Name)
 				box.ForgetScope(h.m.Name)
+				if *volumes {
+					err = box.RemoveVolumes(h.m.Name)
+				}
 			}
 		}
 		if err != nil {
@@ -1067,15 +1062,7 @@ func urlAllCmd(open bool, stdout, stderr io.Writer) int {
 		if !m.Running() {
 			continue
 		}
-		urls := box.MachineURLs(m)
-		for guest, host := range box.PortsOf(m) {
-			if _, named := urls[guest]; !named {
-				if urls == nil {
-					urls = map[string]string{}
-				}
-				urls[guest] = "http://127.0.0.1:" + host
-			}
-		}
+		urls := box.ReachableURLs(m)
 		for _, guest := range sortedMapKeys(urls) {
 			fmt.Fprintf(stdout, "%s\t%s\n", scope.Slug(m.Name), urls[guest])
 			if open && human {
@@ -1102,7 +1089,7 @@ func openURL(u string) {
 // completionCmd prints a shell completion script. The command list is static: it is the set of
 // subcommands, which changes with a release, not with a repository.
 func completionCmd(args []string, stdout, stderr io.Writer) int {
-	cmds := "up run down stop rm status ls gc doctor brief tasks backends integrations url open fork pack capsule logs watch shim hook mcp package install shell acp completion version"
+	cmds := "up run down stop rm status restart ls gc doctor brief tasks backends integrations url open fork pack capsule logs watch shim hook mcp package install uninstall shell acp completion version"
 	if len(args) != 1 {
 		fmt.Fprintln(stderr, "usage: boxer completion bash|zsh|fish")
 		return 2

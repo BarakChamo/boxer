@@ -162,9 +162,8 @@ If the repository has `.devcontainer/devcontainer.json`, boxer reads it first:
 | `postStartCommand` | `start` |
 | `initializeCommand` | `[prep]` |
 
-boxer also reads the image, ports, environment, bind mounts and `remoteUser`. It does not build
-images or run Compose, so `build`, `dockerFile`, `dockerComposeFile` and `features` are refused by
-name. [Bring your Docker setup](/docs/configure/docker#use-your-devcontainer) has what to do
+boxer also reads the image or Dockerfile, ports, environment, bind mounts and `remoteUser`. It does
+not run Compose or install features, so `dockerComposeFile` and `features` are refused by name. [Bring your Docker setup](/docs/configure/docker#use-your-devcontainer) has what to do
 instead. Any key in `boxer.toml` overrides the devcontainer.
 The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
 
@@ -182,9 +181,15 @@ ready_timeout = "120s"     # the default is 60s
 ```
 
 - Each `start` line runs detached in the worktree, after `setup`, every time the sandbox starts.
-- A process that exits is not restarted.
-- Service output goes to `/tmp/boxer-start.log`. When `ready` does not pass in time, boxer prints
-  the end of that log.
+- A process that crashes is restarted after 1 second, then 2, 4 and up to 30. After five quick
+  crashes in a row boxer stops trying. A process that exits 0 is not restarted. Set
+  [`restart = "never"`](/docs/reference/configuration#restart) to turn this off.
+- `boxer restart` stops the services and launches them again, without recreating the sandbox.
+- Service output, and a line for each restart, goes to `/tmp/boxer-start.log`. When `ready` does
+  not pass in time, boxer prints the end of that log.
+- To keep a service's data when the sandbox is recreated or reclaimed, put it in a
+  [volume](/docs/reference/configuration#volumes). [Run Postgres, Redis and other services](/docs/configure/docker#run-postgres-redis-and-other-services)
+  has an example.
 
 ## Forward ports
 

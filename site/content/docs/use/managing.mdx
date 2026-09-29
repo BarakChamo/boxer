@@ -56,7 +56,7 @@ its URL.
 
 ```sh
 boxer gc --dry-run    # print what would go
-boxer gc              # sandboxes whose worktree is gone or unused past idle_timeout, and old packs
+boxer gc              # sandboxes whose worktree is gone, idle ones stopped, and old packs
 boxer gc --all        # also every stopped sandbox and every unreferenced pack (running ones stay)
 ```
 
@@ -64,10 +64,11 @@ boxer gc --all        # also every stopped sandbox and every unreferenced pack (
 commands run the same sweep in the background, at most once every `reclaim_every` (`6h`). No
 daemon runs it, so nothing is reclaimed until some boxer command runs.
 
-The sweep deletes, rather than stops, a sandbox unused past `idle_timeout`, even when its worktree
-still exists. The next command creates it again: `image_setup` comes from the pack on smolvm,
-`setup` is not repeated because its work is in the worktree, and data a service kept inside the
-sandbox, such as a database, is gone.
+The sweep stops a sandbox unused past `idle_timeout` whose worktree still exists. That frees its
+memory and keeps its disk, so the next command starts it again with everything it had. Set
+[`idle_action = "delete"`](/docs/reference/configuration#idle_action) to delete it instead. A
+sandbox whose worktree is gone is always deleted, and so are its
+[volumes](/docs/reference/configuration#volumes).
 
 ## Check the backends
 

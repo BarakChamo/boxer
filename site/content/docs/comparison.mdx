@@ -35,9 +35,8 @@ one for each worktree, map ports so they do not clash, and point the agent's com
 Worktrees the agent creates mid-session get nothing.
 
 boxer automates that. It creates the sandbox when the agent starts working in a worktree and routes
-the agent's commands into it. It can use docker or podman as its backend and your own image, and it
-reads a `.devcontainer/devcontainer.json` that uses a prebuilt image. It does not build images or run
-Compose. See [Bring your Docker setup](/docs/configure/docker). On its default backend each sandbox is a microVM, so tasks do not
+the agent's commands into it. It can use docker or podman as its backend, build your Dockerfile, and read
+your `.devcontainer/devcontainer.json`. It does not run Compose. See [Bring your Docker setup](/docs/configure/docker). On its default backend each sandbox is a microVM, so tasks do not
 share a kernel. See [Backends](/docs/backends).
 
 ## A cloud sandbox

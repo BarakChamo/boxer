@@ -112,7 +112,7 @@ func capsuleNew(args []string, stdout, stderr io.Writer) int {
 		Git: capsuleGit{Head: rec.GitHead, Dirty: rec.Dirty},
 		Config: capsuleConfig{
 			Image: e.Cfg.Image, ImageSetup: e.Cfg.ImageSetup, Setup: e.Cfg.Setup, Env: e.Cfg.Env,
-			Mounts: e.Cfg.Mounts, NetworkMode: e.Cfg.Network.Mode, AllowHosts: e.Cfg.Network.AllowHosts,
+			Mounts: e.Cfg.Mounts, NetworkMode: e.Cfg.Network.Mode, AllowHosts: e.Cfg.Network.AllowedHosts(),
 		},
 		Expect: capsuleExpect{Exit: rec.Exit},
 	}

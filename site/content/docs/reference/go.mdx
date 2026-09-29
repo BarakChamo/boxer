@@ -33,7 +33,8 @@ shell line in several worktrees at once through this package and reports each ex
 | Identifier | Kind |
 | --- | --- |
 | [`Open`](#open) | func |
-| [`List`](#list), [`Stop`](#stop), [`Delete`](#delete), [`LastUsed`](#lastused) | func |
+| [`List`](#list), [`ListAll`](#listall), [`Stop`](#stop), [`Delete`](#delete), [`LastUsed`](#lastused) | func |
+| [`Ports`](#ports), [`URLs`](#urls) | func |
 | [`Box`](#box) | type, with `Scope`, `Warnings`, `Ensure`, `Run`, `Status`, `Down` |
 | [`Options`](#options) | type |
 | [`RunOpts`](#runopts) | type alias |
@@ -140,6 +141,44 @@ func List() ([]Machine, error)
 
 Every boxer-owned machine on the host backend.
 
+## ListAll
+
+```go
+func ListAll() ([]Machine, error)
+```
+
+Every boxer-owned machine on every backend installed on this host, with `Machine.Backend` set to
+the backend's name. A backend that is installed and not answering is skipped. Its error is returned
+beside the machines the other backends listed, so check both. Same as `boxer ls -A`.
+
+## Ports
+
+```go
+func Ports(m Machine) map[string]string
+```
+
+A machine's forwarded ports, guest port to host port, read from its `boxer.port.<guest>` labels.
+Empty when it forwards none.
+
+## URLs
+
+```go
+func URLs(m Machine) map[string]string
+```
+
+A URL for each forwarded port, keyed by guest port: the portless name when
+[`[urls]`](/docs/reference/configuration#urlsenabled) is on and the route is registered, otherwise
+`http://127.0.0.1:<host port>`. Same as `boxer url --all`.
+
+```go
+ms, _ := boxer.ListAll()
+for _, m := range ms {
+    if m.Running() {
+        fmt.Println(m.Backend, m.Name, boxer.URLs(m)["3000"])
+    }
+}
+```
+
 ## Stop
 
 ```go
@@ -203,12 +242,14 @@ type Machine struct {
     PID       int
     CPUs      int
     MemoryMiB int
+    Backend   string
 }
 
 func (m Machine) Running() bool
 ```
 
-One sandbox on any backend. `Name` is the scope key. `CreatedAt` is Unix seconds. `Labels` carry
+One sandbox on any backend. `Name` is the scope key. `CreatedAt` is Unix seconds. `Backend` is set
+only by [`ListAll`](#listall). `Labels` carry
 boxer's `boxer.*` keys, which are stable:
 
 | Label | Value |

@@ -753,7 +753,7 @@ func TestStartAndReady(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	s := string(b)
-	if !strings.Contains(s, "nohup 'sh' '-c'") || !strings.Contains(s, "'echo serving'") {
+	if launches(s) != 1 || !strings.Contains(s, "echo serving") {
 		t.Fatalf("a start command must be launched detached:\n%s", s)
 	}
 	if !strings.Contains(s, startMarker) {
@@ -892,7 +892,7 @@ func TestServicesRestartAfterAStopButSetupDoesNot(t *testing.T) {
 	if n := strings.Count(s, "echo installing"); n != 1 {
 		t.Fatalf("setup survives a restart, ran %d times:\n%s", n, s)
 	}
-	if n := strings.Count(s, "boxer \"$PATH\" \"$0\"' 'echo serving'"); n != 2 {
+	if n := launches(s); n != 2 {
 		t.Fatalf("services must start again after a restart, started %d times:\n%s", n, s)
 	}
 }
@@ -1289,7 +1289,7 @@ func TestPackHarnessRestartsServices(t *testing.T) {
 	}
 	e.PackHarness()
 	b, _ := os.ReadFile(log)
-	if n := strings.Count(string(b), "'echo serving'"); n != 2 {
+	if n := launches(string(b)); n != 2 {
 		t.Fatalf("the service must be launched again after the pack stopped the machine, launched %d times:\n%s", n, b)
 	}
 }
@@ -1312,7 +1312,7 @@ func TestSavePackRestartsServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(log)
-	if n := strings.Count(string(b), "'echo serving'"); n != 2 {
+	if n := launches(string(b)); n != 2 {
 		t.Fatalf("the service must be launched again after the snapshot, launched %d times:\n%s", n, b)
 	}
 }
@@ -1380,3 +1380,7 @@ func TestUnsetSecretIsNamedOnce(t *testing.T) {
 		t.Fatalf("want the missing secret named once, got %d:\n%s", n, errOut.String())
 	}
 }
+
+// launches counts the start services launched, from the fake's log: one line per launch, however
+// the command itself is quoted inside the supervisor.
+func launches(log string) int { return strings.Count(log, "mkdir -p "+serviceDir+" && nohup") }

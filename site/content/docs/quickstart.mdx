@@ -180,7 +180,7 @@ on a Mac.
 | Watch what boxer would do, without changing anything | set `enforcement = "audit"` in `boxer.toml` |
 | Run one session on your machine | start the agent with `BOXER_MODE=off` |
 | Turn it off for the repository | set `mode = "off"` in `boxer.toml` |
-| Remove it | revert the commit that added the `boxer install` files, then run `boxer down --all` |
+| Remove it | `boxer uninstall all` (or the harness you installed), commit the result, then `boxer down --all` |
 
 ## Next
 

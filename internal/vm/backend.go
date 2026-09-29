@@ -211,6 +211,28 @@ func Default(name string) (Backend, error) {
 	return nil, fmt.Errorf("unknown backend %q; known: smolvm, docker, podman, container", name)
 }
 
+// Names are every backend boxer drives, in the order commands that look at all of them report.
+var Names = []string{"smolvm", "docker", "podman", "container"}
+
+// Bin is the binary a backend runs.
+func Bin(b Backend) string {
+	switch t := b.(type) {
+	case Client:
+		return t.Bin
+	case Docker:
+		return t.Bin
+	case Apple:
+		return t.Bin
+	}
+	return b.Name()
+}
+
+// Installed reports whether a backend's binary is on this host.
+func Installed(b Backend) bool {
+	_, err := exec.LookPath(Bin(b))
+	return err == nil
+}
+
 // Host is the backend for commands that work across every sandbox on the host rather than within
 // one worktree — `ls`, `gc`, `down --all`, `watch`.
 //

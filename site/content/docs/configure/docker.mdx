@@ -1,10 +1,10 @@
 ---
 title: Bring your Docker setup
-description: Use docker or podman as the backend, your own Dockerfile or devcontainer image, private images, and services like Postgres and Redis.
+description: Use docker or podman as the backend, build your own Dockerfile, reuse your devcontainer, and run services like Postgres and Redis with data that survives the sandbox.
 ---
 
-boxer can run each worktree's sandbox as a docker or podman container, and it can use the images you
-already build. It does not build images or run Compose.
+boxer can run each worktree's sandbox as a docker or podman container, build your Dockerfile, and
+read your devcontainer. It does not run Compose.
 
 ## Use docker as the backend
 
@@ -26,9 +26,29 @@ with the default, you give up three things:
 To make docker your default for every repository, put `backend = "docker"` and
 `[network] mode = "on"` in `~/.config/boxer/boxer.toml`. [Backends](/docs/backends) compares all four.
 
-## Use your own image
+## Build your Dockerfile
 
-Build your image, then point `image` at it.
+```toml title="boxer.toml"
+build = "Dockerfile"        # relative to the worktree
+```
+
+boxer builds it on the host each time it creates a sandbox, then boots the result. The builder's
+layer cache makes an unchanged build take about a second, so editing a file the Dockerfile copies is
+picked up at the next `boxer up --recreate`.
+
+| Backend | Built with | Boots |
+| --- | --- | --- |
+| docker, podman | `docker build`, `podman build` | the tag `boxer-<hash>` |
+| container | `container build` | the tag `boxer-<hash>` |
+| smolvm | your host's `docker build`, then `docker save` | the saved archive |
+
+On smolvm you need docker on the host to build, even though the sandbox is a microVM. The build
+context is the Dockerfile's directory. Set [`build_context`](/docs/reference/configuration#build_context)
+to change it. Build arguments are not passed.
+
+## Use an image you already build
+
+Point `image` at it.
 
 | Backend | Your image |
 | --- | --- |
@@ -44,7 +64,8 @@ enough. On smolvm, save the image to an archive as above.
 
 ## Use your devcontainer
 
-If the repository has `.devcontainer/devcontainer.json` with an `image`, boxer reads it. It maps
+If the repository has `.devcontainer/devcontainer.json`, boxer reads it. `image` becomes `image`,
+and `build.dockerfile` (or `dockerFile`) becomes [`build`](#build-your-dockerfile). It maps
 `onCreateCommand` to `image_setup`, `postCreateCommand` to `setup` and `postStartCommand` to
 `start`, and reads ports, environment, mounts and `remoteUser`.
 
@@ -52,9 +73,9 @@ It ignores these, with a warning that names them:
 
 | devcontainer key | Do this instead |
 | --- | --- |
-| `build`, `dockerFile` | build the image yourself and set `image`, as above |
 | `dockerComposeFile` | run the services in the sandbox (next section) |
-| `features` | install them in `image_setup`, or bake them into your image |
+| `features` | install them in `image_setup`, or in your Dockerfile |
+| `build.args`, `build.target` | put the values in the Dockerfile |
 
 The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
 
@@ -65,21 +86,18 @@ Every worktree then gets its own database on the same port, with no clashes.
 
 ```toml title="boxer.toml"
 image = "mirror.gcr.io/library/node:24-alpine"
-image_setup = [
-  "apk add --no-cache postgresql16 postgresql16-client redis",
-  "mkdir -p /var/lib/postgresql/data && chown postgres:postgres /var/lib/postgresql/data",
-  "su postgres -c 'initdb -D /var/lib/postgresql/data --auth=trust'",
-]
+image_setup = ["apk add --no-cache postgresql16 postgresql16-client redis"]
 setup = ["npm ci"]
+volumes = ["pgdata:/var/lib/postgresql/data"]
 start = [
   "redis-server --save '' --appendonly no",
-      "su postgres -c 'postgres -D /var/lib/postgresql/data -k /tmp -h 0.0.0.0'",
+  "PGDATA=/var/lib/postgresql/data; chown postgres:postgres $PGDATA && chmod 700 $PGDATA && { [ -f $PGDATA/PG_VERSION ] || su postgres -c \"initdb -D $PGDATA --auth=trust\"; } && exec su postgres -c \"postgres -D $PGDATA -k /tmp -h 0.0.0.0\"",
   "npx next dev -H 0.0.0.0 -p 3000",
 ]
 ready = "pg_isready -h 127.0.0.1 -U postgres && redis-cli ping"
 
 [network]
-allow_hosts = ["dl-cdn.alpinelinux.org", "registry.npmjs.org"]
+allow_presets = ["alpine", "npm"]
 ports = ["auto:3000"]
 
 [env]
@@ -89,17 +107,25 @@ REDIS_URL = "redis://127.0.0.1:6379"
 
 - `image_setup` installs the services once. On smolvm, the result is cached, so the next worktree
   boots in about 2 seconds instead of reinstalling.
-- `start` runs them every time the sandbox starts. Put the Postgres socket in `/tmp`, because `/run`
-  is empty at boot. `-h 0.0.0.0` lets a forwarded port reach it, if you add `auto:5432` to `ports`
-  and a `host all all all trust` line to `pg_hba.conf`.
-- `apt-get` or `apk` in `image_setup` needs the distribution's mirror in `allow_hosts`, such as
-  `deb.debian.org` or `dl-cdn.alpinelinux.org`.
+- `volumes` keeps the database's files on your machine, one directory per worktree. They survive
+  `boxer rm`, `--recreate` and idle reclaim, and are deleted when the worktree is, or by
+  `boxer rm --volumes`.
+- `start` runs them every time the sandbox starts. The Postgres line creates the database the first
+  time, when the volume is empty. It changes the volume's owner first, because Postgres refuses a
+  data directory it does not own. The owner changes only inside the sandbox: on your machine the
+  directory stays yours. Put the socket in `/tmp`, because `/run` is empty at boot. `-h 0.0.0.0` lets a
+  forwarded port reach it, if you add `auto:5432` to `ports` and a `host all all all trust` line to
+  `pg_hba.conf`.
+- A service that crashes is restarted, and five quick crashes in a row stop the retries. Each
+  restart is a line in `/tmp/boxer-start.log`. `boxer restart` relaunches them by hand. See
+  [`restart`](/docs/reference/configuration#restart).
+- `apt-get` or `apk` in `image_setup` needs the distribution's mirror. The `alpine` and `debian`
+  [presets](/docs/reference/configuration#networkallow_presets) name them.
 - `ready` waits for both before the agent's first command.
-- The database starts from the state `image_setup` left. Data written later is lost when the
-  sandbox is removed. `setup` runs before `start`, so seed the database from a
-  [task](/docs/configure/tasks) that the agent runs once the sandbox is ready.
+- `setup` runs before `start`, so seed the database from a [task](/docs/configure/tasks) that the
+  agent runs once the sandbox is ready.
 
-On docker or podman, drop `allow_hosts` and set `network.mode = "on"`. With your own Dockerfile,
+On docker or podman, drop `allow_presets` and set `network.mode = "on"`. With your own Dockerfile,
 install Postgres and Redis there instead of in `image_setup`, and keep the `start` and `ready` lines.
 
 ## Environment variables and secrets

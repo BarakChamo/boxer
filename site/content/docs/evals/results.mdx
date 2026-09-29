@@ -103,6 +103,25 @@ debugging port to drive. Its CLI drives cloud workspaces, where boxer has nothin
 and it resolves commands past a PATH shim, so boxer has no way to intercept it from outside. Inside
 the guest it passes.
 
+## File watching
+
+A dev server that reloads on save waits for inotify events. This run checked whether an edit made on
+the host reaches a watcher in the sandbox. Each round made five in-place appends and five
+write-then-rename saves to files under `src/`, one second apart. The watcher was chokidar 4 on
+`node:24-alpine`. Measured on an M4 Mac on 2026-09-30.
+
+| backend | rounds | edits seen, native events | edits seen, `CHOKIDAR_USEPOLLING=1` |
+| --- | ---: | ---: | ---: |
+| smolvm 1.16.1 | 3 | 30 of 30 | not needed |
+| docker, OrbStack 29.4.0 | 2 | 20 of 20 | not needed |
+| Apple `container` 1.4.1 | 2 | 0 of 20 | 20 of 20 |
+| podman 5.8.2, `applehv` machine | 2 | 0 of 20 | not run |
+
+On Apple `container` and podman the watcher was running, and it saw an edit made inside the sandbox.
+Only host edits were missing. On smolvm, a plain `fs.watch` sometimes reported an edit against the
+directory rather than the file (2 of 5 in-place edits in one round). chokidar still named the file every
+time. The smoke suite's `file watching` cells hold this table to the truth on every backend.
+
 ## Reading a run
 
 Archived runs are in `docs/evals/matrix/`, newest first, with a JSON line per run. Two runs are

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,7 +20,11 @@ import (
 type Network struct {
 	Mode       string   `toml:"mode"`
 	AllowHosts []string `toml:"allow_hosts"`
-	Ports      []string `toml:"ports"`
+	// AllowPresets names package ecosystems whose hosts join AllowHosts: "npm", "pypi", "github"
+	// and the rest of Presets. A preset is a list boxer maintains, so a repository does not have
+	// to learn which CDN a registry redirects to.
+	AllowPresets []string `toml:"allow_presets"`
+	Ports        []string `toml:"ports"`
 	// DNS is the resolver a networked guest uses. Empty (the default) means the host's own
 	// caching resolver, which is what makes name lookups cost milliseconds instead of ~400ms
 	// each: smolvm otherwise points the guest at public resolvers, so every lookup is an
@@ -171,6 +176,10 @@ type Config struct {
 	CreateOn        []string `toml:"create_on"`
 	DestroyOn       []string `toml:"destroy_on"`
 	IdleTimeout     string   `toml:"idle_timeout"`
+	// IdleAction is what idle reclaim does to a sandbox whose worktree still exists: "stop" (the
+	// default) frees its memory and keeps its disk, so the next command resumes it with its data;
+	// "delete" frees both. A sandbox whose worktree is gone is always deleted.
+	IdleAction string `toml:"idle_action"`
 	// AutoReclaim lets an ordinary command sweep what it no longer needs — sandboxes whose
 	// worktree is gone, sandboxes idle past idle_timeout, and unreferenced packs — at most once
 	// every reclaim_every. Without it nothing reclaims anything until someone runs `boxer gc` by
@@ -198,7 +207,10 @@ type Config struct {
 	Enforcement          string   `toml:"enforcement"`
 	OnSandboxUnavailable string   `toml:"on_sandbox_unavailable"`
 	Intercept            []string `toml:"intercept"`
-	Passthrough          []string `toml:"passthrough"`
+	// InterceptAlso adds programs to Intercept without restating it, so a repository keeps the
+	// default list, and whatever later releases add to it, and names only what it needs on top.
+	InterceptAlso []string `toml:"intercept_also"`
+	Passthrough   []string `toml:"passthrough"`
 
 	// Prep runs on the *host*, in the worktree, before the sandbox exists — devcontainer's
 	// `initializeCommand`. It is for installing dependencies faster than a guest can, and it is
@@ -251,14 +263,28 @@ type Config struct {
 	// mounted; these are for what a project needs beside it, usually a dependency cache.
 	Mounts []string `toml:"mounts"`
 	// Start runs every time the VM starts, detached, after Setup. This is how a service runs: the
-	// setup list installs it, the start list launches it. There is no supervision and no
-	// dependency graph — if a started process dies, the next command fails and says so.
+	// setup list installs it, the start list launches it. Restart says what happens when one
+	// crashes; there is no dependency graph between them.
 	Start []string `toml:"start"`
 	// Ready is polled until it exits zero before boxer reports the sandbox up, because a server
 	// takes a variable time to accept connections and a fixed sleep is always wrong.
 	Ready string `toml:"ready"`
 	// ReadyTimeout bounds that wait.
-	ReadyTimeout   string   `toml:"ready_timeout"`
+	ReadyTimeout string `toml:"ready_timeout"`
+	// Restart is what happens when a `start` service exits non-zero: "on-failure" (the default)
+	// restarts it with a backoff and gives up after five quick crashes; "never" leaves it down.
+	Restart string `toml:"restart"`
+	// Volumes are named directories that outlive the sandbox: "name:/guest/path". Each is kept on
+	// the host per scope and mounted read-write, so a database's files survive `--recreate`, idle
+	// reclaim and `rm`. It is removed with its worktree, or by `boxer rm --volumes`.
+	Volumes []string `toml:"volumes"`
+	// Build is a Dockerfile, relative to the repository, that boxer builds into the sandbox's
+	// image. It replaces `image`. On smolvm the host's docker builds it and smolvm boots the saved
+	// archive, so docker must be installed even though the sandbox is a microVM.
+	Build string `toml:"build"`
+	// BuildContext is the directory the build sees, relative to the worktree. Empty means the
+	// directory holding the Dockerfile.
+	BuildContext   string   `toml:"build_context"`
 	CPUs           int      `toml:"cpus"`
 	Memory         string   `toml:"memory"`
 	EnvPassthrough []string `toml:"env_passthrough"`
@@ -303,6 +329,8 @@ func Defaults() Config {
 		PacksKeepLast:        5,
 		ReuseExisting:        true,
 		ReadyTimeout:         "60s",
+		Restart:              "on-failure",
+		IdleAction:           "stop",
 		Integration:          "outside",
 		Mode:                 "rewrite",
 		Enforcement:          "both",
@@ -571,6 +599,8 @@ func (c Config) Validate() error {
 		{"enforcement", c.Enforcement, []string{"hook", "shim", "both", "audit"}},
 		{"on_sandbox_unavailable", c.OnSandboxUnavailable, []string{"fail", "passthrough"}},
 		{"network.mode", c.Network.Mode, []string{"off", "allowlist", "on"}},
+		{"restart", c.Restart, []string{"on-failure", "never"}},
+		{"idle_action", c.IdleAction, []string{"stop", "delete"}},
 		{"worktree.manage", c.Worktree.Manage, []string{"off", "detect"}},
 		{"telemetry.sink", c.Telemetry.Sink, []string{"none", "file", "stderr", "otel"}},
 	}
@@ -608,10 +638,55 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	for _, p := range c.Network.AllowPresets {
+		if _, ok := Presets[p]; !ok {
+			return fmt.Errorf("network.allow_presets contains %q; allowed: %s", p, strings.Join(PresetNames(), " | "))
+		}
+	}
+	seen := map[string]bool{}
+	for _, v := range c.Volumes {
+		name, guest, ok := strings.Cut(v, ":")
+		if !ok || !volumeName.MatchString(name) || !strings.HasPrefix(guest, "/") || strings.Contains(guest, ":") {
+			return fmt.Errorf("volumes entry %q: want name:/guest/path, the name made of letters, digits, '-' and '_'", v)
+		}
+		if seen[name] {
+			return fmt.Errorf("volumes names %q twice", name)
+		}
+		seen[name] = true
+	}
+	if c.Build != "" && c.Smolfile != "" {
+		return fmt.Errorf("build and smolfile both describe the image; keep one")
+	}
 	if _, err := MemoryMiB(c.Memory); err != nil {
 		return err
 	}
 	return nil
+}
+
+var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// Intercepted is the full list of programs that go to the sandbox: intercept plus intercept_also.
+func (c Config) Intercepted() []string {
+	out := slices.Clone(c.Intercept)
+	for _, p := range c.InterceptAlso {
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// AllowedHosts is allow_hosts plus the hosts of every preset in allow_presets, without repeats.
+func (n Network) AllowedHosts() []string {
+	out := slices.Clone(n.AllowHosts)
+	for _, p := range n.AllowPresets {
+		for _, h := range Presets[p] {
+			if !slices.Contains(out, h) {
+				out = append(out, h)
+			}
+		}
+	}
+	return out
 }
 
 // MemoryMiB parses "4G", "4096M", "4096" (MiB).

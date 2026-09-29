@@ -7,6 +7,8 @@
 package boxer
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -76,6 +78,37 @@ func (b *Box) Status() (Machine, bool, error) { return b.env.Exists() }
 // List returns every boxer-owned machine on the backend the CLI would use from the process's
 // working directory: BOXER_BACKEND, else the one boxer.toml names, else smolvm.
 func List() ([]Machine, error) { return vm.Owned(host()) }
+
+// ListAll returns every boxer-owned machine on every backend installed on this host, with
+// Machine.Backend saying which. A backend that is installed and not answering is skipped, and its
+// error returned alongside whatever the others listed.
+func ListAll() ([]Machine, error) {
+	var out []Machine
+	var errs []error
+	for _, n := range vm.Names {
+		c := vm.Host(n)
+		if !vm.Installed(c) {
+			continue
+		}
+		ms, err := vm.Owned(c)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", n, err))
+			continue
+		}
+		for _, m := range ms {
+			m.Backend = n
+			out = append(out, m)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// Ports returns a machine's forwarded ports, guest port to host port, from its labels.
+func Ports(m Machine) map[string]string { return box.PortsOf(m) }
+
+// URLs returns a URL for each forwarded port of a machine, keyed by guest port: its portless name
+// when [urls] is on and the route is registered, otherwise http://127.0.0.1:<host port>.
+func URLs(m Machine) map[string]string { return box.ReachableURLs(m) }
 
 // Stop halts a machine by name; stopping a stopped machine is not an error.
 func Stop(name string) error { return host().Stop(name) }

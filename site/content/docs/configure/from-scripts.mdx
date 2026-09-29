@@ -15,8 +15,9 @@ with configuration.
 | a `post-checkout` hook that starts the stack | `boxer install git`, which starts the sandbox in every new worktree |
 | a Claude Code or Codex hook that wraps commands in `docker exec` | `boxer install claude-code` or `boxer install codex` |
 | a teardown script when a worktree is removed | automatic within 6 hours, or `boxer rm --gone` at once |
+| a named Docker volume for the database | `volumes = ["pgdata:/var/lib/postgresql/data"]`, kept until the worktree goes |
 | an `.env` per worktree with its own ports | `[env]` for fixed values, and `boxer status --json` for each worktree's host ports and URLs |
-| a Dockerfile for the dev image | your image, used as-is ([Docker setup](/docs/configure/docker#use-your-own-image)) |
+| a Dockerfile for the dev image | `build = "Dockerfile"`, built on the host and shared by every worktree ([Docker setup](/docs/configure/docker#build-your-dockerfile)) |
 
 boxer does not replace a multi-container Compose stack as it is. It runs one sandbox per worktree,
 so run the services inside it. `docker` is not on the `intercept` list, so an agent that runs

@@ -78,8 +78,8 @@ not.
 
 ### `boxer up` passed but the server is not ready
 
-**Cause.** The `ready` probe passed before the server could serve. boxer runs `start` once per boot
-and does not restart a service that dies.
+**Cause.** The `ready` probe passed before the server could serve, or the server has crashed since.
+boxer restarts a crashed service, but a server that keeps crashing is given up on after five tries.
 
 **Fix.** Make `ready` probe the real endpoint. The server's output is in `/tmp/boxer-start.log` in
 the guest, and boxer quotes its tail in the error.
@@ -127,12 +127,32 @@ removed by hand.
 
 ## A `start` service died
 
-**Cause:** boxer starts `start` services once and does not restart them. A crashed dev server or
-database stays down.
+**Cause:** boxer restarts a crashed service after 1 second, then 2, 4 and up to 30. After five
+crashes in a row, each within 10 seconds of starting, it stops trying. With `restart = "never"` it
+does not restart it at all.
 
-**Fix:** `boxer stop && boxer up` restarts the sandbox and runs `start` again, keeping its data.
-`boxer up --recreate` also works, but deletes the sandbox and anything a service stored in it. The
-service's output is in `/tmp/boxer-start.log`.
+**Fix:** read `/tmp/boxer-start.log` in the sandbox. It has the service's output, a line for each
+restart, and `gave up after 5 quick crashes` when boxer stopped. Fix what it says, then run
+`boxer restart` to launch the services again without recreating the sandbox.
+
+## A dev server does not reload after an edit
+
+**Cause:** on Apple `container`, and on podman on a Mac, your edits reach the sandbox's files but do
+not raise the inotify events a watcher waits for. The watcher sees edits made inside the sandbox
+only. smolvm and OrbStack's docker pass them through.
+
+**Fix:** turn on the watcher's polling mode in `[env]`, then `boxer up --recreate`.
+
+```toml
+[env]
+CHOKIDAR_USEPOLLING = "1"     # Vite, and anything built on chokidar
+WATCHPACK_POLLING = "true"    # Next.js and webpack
+```
+
+Polling costs some CPU for a large tree. `CHOKIDAR_USEPOLLING` was measured: a chokidar watcher on
+Apple `container` saw none of 20 edits without it and all 20 with it. `WATCHPACK_POLLING` is
+watchpack's own switch and was not measured. See [file watching](/docs/evals/results#file-watching)
+for how this is tested.
 
 ## An interactive harness hangs
 

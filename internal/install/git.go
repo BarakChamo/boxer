@@ -19,16 +19,24 @@ const (
 // Git writes boxer's post-checkout hook into the repository's hooks directory, honouring
 // core.hooksPath, merging into an existing hook file once. Opt-in only: it touches the
 // developer's git configuration, so `boxer install all` leaves it out.
-func Git(repoRoot string) (Result, error) {
+// hookPath is the post-checkout hook git runs for repoRoot, honouring core.hooksPath.
+func hookPath(repoRoot string) (string, error) {
 	out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-path", "hooks").Output()
 	if err != nil {
-		return Result{}, err
+		return "", err
 	}
 	dir := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(repoRoot, dir)
 	}
-	path := filepath.Join(dir, "post-checkout")
+	return filepath.Join(dir, "post-checkout"), nil
+}
+
+func Git(repoRoot string) (Result, error) {
+	path, err := hookPath(repoRoot)
+	if err != nil {
+		return Result{}, err
+	}
 	r := &Result{}
 	block := gitBlockStart + "\n" + gitHookBody + "\n" + gitBlockEnd + "\n"
 	if _, err := os.Stat(path); os.IsNotExist(err) {

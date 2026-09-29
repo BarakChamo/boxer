@@ -434,6 +434,92 @@ check "ls says backend and worktree state" 'boxer ls --json | python3 -c "import
 CLK=$(cd "$WORK/cl" && scopekey)
 check "rm by name removes it" 'boxer rm "$CLK" >/dev/null 2>&1 && ! boxer ls --json | grep -q "$CLK"'
 
+echo "# services are supervised, and restart relaunches them"
+# `sleep 601` is the service: a number nothing else in the guest sleeps for. The docker driver's own
+# keep-alive is `sleep 3600`, and the supervisor's script contains the command's text, so a pid is
+# taken from ps by exact argv rather than by pattern.
+mkrepo "$WORK/sv" "$BASE
+start = [\"sleep 601\"]"
+cd "$WORK/sv"
+svc() { boxer run -c 'ps -o pid,args | awk '"'"'$2=="sleep" && $3=="601" {print $1}'"'"'' 2>/dev/null; }
+boxer up >/dev/null 2>&1
+P1=$(svc)
+boxer run -c "kill $P1" >/dev/null 2>&1; sleep 4
+P2=$(svc)
+check "a killed service is restarted" '[ -n "$P1" ] && [ -n "$P2" ] && [ "$P1" != "$P2" ]'
+check "the restart is in the start log" 'boxer run -c "grep -q \"restarting in 1s: sleep 601\" /tmp/boxer-start.log"'
+boxer restart >/dev/null 2>&1
+P3=$(svc)
+check "boxer restart relaunches exactly one" '[ -n "$P3" ] && [ "$P3" != "$P2" ] && [ "$(printf "%s\n" $P3 | wc -l | tr -d " ")" = 1 ]'
+boxer down >/dev/null 2>&1 || true
+
+echo "# volumes outlive the sandbox"
+mkrepo "$WORK/vol" "$BASE
+volumes = [\"data:/data\"]"
+cd "$WORK/vol"
+boxer run -c "echo kept > /data/f" >/dev/null 2>&1
+boxer up --recreate >/dev/null 2>&1
+check "a volume survives --recreate" '[ "$(boxer run -c "cat /data/f" 2>/dev/null)" = kept ]'
+VK=$(scopekey)
+boxer rm "$VK" >/dev/null 2>&1
+check "rm keeps the volume" '[ "$(cat "$STATE/volumes/$VK/data/f" 2>/dev/null)" = kept ]'
+boxer up >/dev/null 2>&1
+boxer rm --volumes "$VK" >/dev/null 2>&1
+check "rm --volumes deletes it" '[ ! -e "$STATE/volumes/$VK" ]'
+
+echo "# build a Dockerfile"
+BUILDER=$BACKEND; [ "$BACKEND" = smolvm ] && BUILDER=docker
+if ! command -v "$BUILDER" >/dev/null 2>&1 || { [ "$BUILDER" = docker ] && ! docker info >/dev/null 2>&1; }; then
+  skip "build boots the built image" "$BUILDER on the host"
+else
+  mkrepo "$WORK/bld" "$(printf '%s\n' "$BASE" | grep -v '^image')
+build = \"Dockerfile\""
+  printf 'FROM mirror.gcr.io/library/alpine:3.21\nCOPY built.txt /built.txt\n' > "$WORK/bld/Dockerfile"; echo from-dockerfile > "$WORK/bld/built.txt"
+  cd "$WORK/bld"
+  # `up` names what it booted: the tag, or on smolvm the archive, which is <tag>-<id>.tar.
+  IMG1=$(boxer up 2>/dev/null | sed -n 's/.* image \([^ ]*\) \[built from.*/\1/p')
+  check "build boots the built image" '[ -n "$IMG1" ] && [ "$(boxer run -c "cat /built.txt" 2>/dev/null)" = from-dockerfile ]'
+  echo changed > built.txt
+  IMG2=$(boxer up --recreate 2>/dev/null | sed -n 's/.* image \([^ ]*\) \[built from.*/\1/p')
+  check "a changed build input is rebuilt" '[ "$(boxer run -c "cat /built.txt" 2>/dev/null)" = changed ]'
+  boxer down >/dev/null 2>&1 || true
+  # What the build left on the host: the tag in the builder's store, and on smolvm the archives.
+  TAG=$(basename "${IMG1:-none}" .tar | sed 's/-[0-9a-f]\{16\}$//')
+  case $BUILDER in container) container image delete "$TAG" >/dev/null 2>&1 || true ;; *) "$BUILDER" image rm -f "$TAG" >/dev/null 2>&1 || true ;; esac
+  rm -f "$STATE/images/$TAG"-*.tar
+fi
+
+echo "# allowlist presets"
+if needs allowlist "a preset opens its hosts and nothing else"; then
+  mkrepo "$WORK/pre" "$BASE
+[network]
+allow_presets = [\"alpine\"]"
+  cd "$WORK/pre"
+  check "a preset opens its hosts and nothing else" '[ "$(boxer run -c "wget -q -T 5 -O /dev/null https://dl-cdn.alpinelinux.org/alpine/ && echo open; wget -q -T 3 -O /dev/null http://example.com 2>/dev/null && echo LEAK || echo blocked" 2>/dev/null | tr "\n" " ")" = "open blocked " ]'
+  boxer down >/dev/null 2>&1 || true
+fi
+
+echo "# file watching: a host edit reaches a watcher in the guest"
+# inotify is what fs.watch, chokidar and watchpack use by default. Apple container and podman's
+# macOS machine share the worktree over virtiofs without forwarding host changes as inotify events,
+# so there only polling sees them (CHOKIDAR_USEPOLLING, WATCHPACK_POLLING). This cell holds the
+# documented table to the truth in both directions: if events start arriving there, it fails.
+mkrepo "$WORK/fw" "$BASE
+start = [\"inotifyd - /workspace/w.txt:c > /tmp/ev 2>&1\", \"last=; while :; do m=\$(stat -c %Y-%s /workspace/w.txt); [ \\\"\$m\\\" != \\\"\$last\\\" ] && echo \$m >> /tmp/mt; last=\$m; sleep 0.3; done\"]"
+cd "$WORK/fw"; echo 0 > w.txt
+boxer up >/dev/null 2>&1; sleep 2
+echo 1 >> w.txt; sleep 2; echo 22 >> w.txt; sleep 3
+EV=$(boxer run -c 'wc -l < /tmp/ev' 2>/dev/null | tr -d ' ')
+MT=$(boxer run -c 'wc -l < /tmp/mt' 2>/dev/null | tr -d ' ')
+echo "  ..   inotify events ${EV:-?} · polled changes ${MT:-?} (two host edits)"
+check "a polling watcher sees both host edits" '[ "${MT:-0}" -ge 3 ]'
+if [ "$(uname -s)" = Darwin ] && { [ "$BACKEND" = container ] || [ "$BACKEND" = podman ]; }; then
+  check "host edits raise no inotify event here (known gap: use polling)" '[ "${EV:-x}" = 0 ]'
+else
+  check "host edits raise inotify events" '[ "${EV:-0}" -ge 2 ]'
+fi
+boxer down >/dev/null 2>&1 || true
+
 echo "# performance (numbers printed; the bounds are generous, they catch a regression, not jitter)"
 mkrepo "$WORK/p" "$BASE"
 cd "$WORK/p"

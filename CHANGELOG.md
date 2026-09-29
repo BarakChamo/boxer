@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `start` services are supervised. A service that exits non-zero is restarted after 1 s, then 2, 4
+  and up to 30 s. After five quick crashes in a row, boxer stops and the start log says so.
+  `restart = "never"` turns it off. Each restart is a line in `/tmp/boxer-start.log`.
+- `boxer restart` stops the `start` services and launches them again without recreating the
+  sandbox.
+- `volumes = ["name:/guest/path"]`: named directories kept on the host per scope and mounted
+  read-write. They survive `rm`, `--recreate` and idle reclaim, and are deleted with their worktree
+  by `gc`, or by `boxer rm --volumes`. Tested with Postgres on smolvm, including crash recovery
+  after a `kill -9`.
+- `idle_action = "stop" | "delete"` chooses what idle reclaim does to a sandbox whose worktree still
+  exists.
+- `build = "Dockerfile"` and `build_context`. boxer builds the Dockerfile on the host and boots the
+  result. docker, podman and Apple `container` build into their own store. smolvm boots a
+  `docker save` archive built by the host's docker. devcontainer `build.dockerfile` and `dockerFile`
+  now map to it instead of being refused.
+- `[network] allow_presets` expands npm, yarn, pypi, crates, rust, go, rubygems, maven, gradle,
+  debian, alpine and github into the hosts each one needs.
+- `intercept_also` adds programs to the default `intercept` list without restating it. `boxer
+  doctor` suggests it for Ruby and JVM projects.
+- `boxer uninstall <harness>|all|git|conductor [--user]` removes what `boxer install` wrote. Files
+  boxer merged into keep everything else.
+- `pkg/boxer`: `ListAll` lists sandboxes on every installed backend, with the new
+  `Machine.Backend` field. `Ports` and `URLs` read a machine's forwarded ports and their URLs.
+- Smoke cells for supervision, `boxer restart`, volumes, `build`, presets and file watching. File
+  watching was measured on each backend. On Apple `container` and on podman on a Mac, host edits do
+  not reach inotify, and the troubleshooting guide gives the polling fix.
+
+### Changed
+- Idle reclaim now stops a sandbox whose worktree still exists, instead of deleting it. Set
+  `idle_action = "delete"` for the 1.1 behaviour.
+
+### Fixed
+- A local image archive on smolvm no longer tries to build a pack at every create. smolvm refuses
+  to pack an archive, so each create printed the refusal and paid for the attempt.
+
 ## [1.1.0] - 2026-09-29
 
 ### Added

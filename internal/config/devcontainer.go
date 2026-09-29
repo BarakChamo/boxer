@@ -18,9 +18,10 @@ import (
 //
 // The split is not arbitrary. `image`, `postCreateCommand`, `postStartCommand`, `forwardPorts`,
 // `containerEnv`, `remoteEnv`, bind `mounts` and `workspaceFolder` are runtime properties: they
-// describe how to run a container that already exists. `features`, `build`/`dockerFile` and
-// `dockerComposeFile` describe how to *build* one, or how to orchestrate several, which smolvm
-// cannot do — so boxer refuses them by name rather than ignoring them silently.
+// describe how to run a container that already exists. `build`/`dockerFile` describe how to build
+// one, which boxer maps to its own `build`. `features` and `dockerComposeFile` describe a build
+// boxer does not do, or several containers, so boxer refuses them by name rather than ignoring
+// them silently.
 type devcontainer struct {
 	Image                string `json:"image"`
 	InitializeCommand    any    `json:"initializeCommand"`
@@ -104,6 +105,20 @@ func (c *Config) mergeDevcontainer(path, workspace string) error {
 	if d.Image == "" {
 		delete(c.Sources, "image")
 	}
+	// build.dockerfile and build.context are relative to the devcontainer file; boxer's `build`
+	// is relative to the worktree, so both are rewritten from the file's own directory.
+	if df, ctx := d.dockerfile(); df != "" {
+		dir := "."
+		if strings.HasSuffix(filepath.ToSlash(path), "/.devcontainer/devcontainer.json") {
+			dir = ".devcontainer"
+		}
+		set("build", c.Build != "", func() {
+			c.Build = filepath.ToSlash(filepath.Join(dir, df))
+			if ctx != "" {
+				c.BuildContext = filepath.ToSlash(filepath.Join(dir, ctx))
+			}
+		})
+	}
 	// onCreateCommand runs once when the container is built and is cacheable, which is exactly
 	// boxer's image_setup; postCreateCommand runs for the workspace, which is boxer's setup. The
 	// specification draws the line for the same reason boxer does.
@@ -183,6 +198,21 @@ func (c *Config) mergeDevcontainer(path, workspace string) error {
 	return nil
 }
 
+// dockerfile is build.dockerfile, or the older top-level dockerFile, with build.context.
+func (d devcontainer) dockerfile() (file, context string) {
+	if b, ok := d.Build.(map[string]any); ok {
+		file, _ = b["dockerfile"].(string)
+		if file == "" {
+			file, _ = b["dockerFile"].(string)
+		}
+		context, _ = b["context"].(string)
+	}
+	if file == "" {
+		file = d.DockerFile
+	}
+	return file, context
+}
+
 // unsupported names what boxer will not do and what to do instead. Silence here would be worse
 // than a refusal: a repository whose environment is built by `features` would get a sandbox that
 // looks configured and is missing half its tools.
@@ -194,12 +224,15 @@ func (d devcontainer) unsupported() []string {
 			names = append(names, f)
 		}
 		sort.Strings(names)
-		out = append(out, "`features` needs an image build, which boxer does not do ("+strings.Join(names, ", ")+
-			"). Install them in `image_setup`, or build an image yourself and set `image` to it.")
+		out = append(out, "`features` are not installed by boxer ("+strings.Join(names, ", ")+
+			"). Install them in `image_setup`, or in a Dockerfile that `build` names.")
 	}
-	if d.Build != nil || d.DockerFile != "" {
-		out = append(out, "`build`/`dockerFile` needs an image build, which boxer does not do. "+
-			"Build it yourself and set `image` to it: the tag on docker or podman, or a `docker save` archive on smolvm.")
+	if b, ok := d.Build.(map[string]any); ok {
+		for _, k := range []string{"args", "target", "cacheFrom", "options"} {
+			if _, set := b[k]; set {
+				out = append(out, "`build."+k+"` is not passed to the build; boxer builds the Dockerfile as it is.")
+			}
+		}
 	}
 	var widen []string
 	if len(d.RunArgs) > 0 {

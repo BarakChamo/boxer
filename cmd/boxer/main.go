@@ -63,6 +63,7 @@ See what is here
 
 Manage sandboxes
   boxer stop|rm [NAME...] [--all|--gone|--stopped] [-i] [-y]   stop or remove; -i to choose
+  boxer rm --volumes ...           also delete the named volumes rm otherwise keeps
 
 Run and configure
   boxer up [--recreate|--detach]   create and start the sandbox for this scope (--detach: in the background)
@@ -70,6 +71,7 @@ Run and configure
   boxer run -- <prog> [args]       run a program in the sandbox
   boxer down [--all|--scope NAME]  delete this scope's sandbox, every one, or one by name
   boxer status                     this scope's sandbox; exit 0 running, 3 stopped, 4 absent
+  boxer restart                    stop and relaunch the start services, then wait for ready
   boxer gc [--all] [--dry-run]     delete sandboxes whose worktree is gone, idle sandboxes and packs
   boxer doctor                     explain the resolved configuration and state
   boxer brief [--json]             the agent brief for this checkout: mount, mode, intercept, tasks
@@ -90,6 +92,7 @@ Run and configure
   boxer package plugin|skills|<harness>|all  render the Agent Plugins package (dist/boxer), the
                                    published skill and its .well-known index, one client's view, or all
   boxer install <harness>|all      write project-level hooks/tool/instruction into this repo
+  boxer uninstall <harness>|all|git|conductor [--user]   remove what install wrote, and only that
                                    (the layer orchestrators like T3 Code and Paperclip also load)
   boxer install git                post-checkout hook: boxer up --detach in every new worktree (not in all)
   boxer install conductor          .conductor/settings.toml: harness shims + a setup script that warms the sandbox
@@ -167,6 +170,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return packageCmd(rest, stdout, stderr)
 	case "install":
 		return installCmd(rest, stdout, stderr)
+	case "uninstall":
+		return uninstallCmd(rest, stdout, stderr)
 	case "stop", "rm":
 		return stopRmCmd(args[0], args[1:], stdin, stdout, stderr)
 	case "backends":
@@ -199,7 +204,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return logsCmd(rest, stdout, stderr)
 	case "watch":
 		return watchCmd(rest, stdout, stderr)
-	case "up", "run", "down", "status", "doctor", "brief", "tasks":
+	case "up", "run", "down", "status", "doctor", "brief", "tasks", "restart":
 		return scoped(cmd, rest, stdin, stdout, stderr)
 	case "shell", "acp":
 		return insideCmd(cmd, rest, stdin, stdout, stderr)
@@ -290,6 +295,13 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		return 0
 	case "status":
 		return statusCmd(e, *asJSON, stdout, stderr)
+	case "restart":
+		if err := e.RestartServices(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "boxer: %s restarted %s\n", e.Scope.Names(), plural(len(e.Cfg.Start), "service", "services"))
+		return 0
 	case "up":
 		for _, w := range e.Warnings {
 			fmt.Fprintln(stderr, "boxer: warning:", w)
@@ -649,7 +661,10 @@ func isShim(path string) bool {
 // gcJSON is one `gc` decision: Deleted is false under --dry-run or when Error is set.
 type gcJSON struct {
 	machineJSON
-	Pack    string `json:"pack,omitempty"` // set for pack rows; machine fields are then empty
+	Pack    string `json:"pack,omitempty"`    // set for pack rows; machine fields are then empty
+	Volumes string `json:"volumes,omitempty"` // set for volume rows: the scope whose volumes these are
+	Stopped bool   `json:"stopped,omitempty"` // idle_action = "stop" stopped it rather than deleting it
+	stop    bool   // a stop row, dry or not; not counted as reclaimed
 	Bytes   int64  `json:"bytes,omitempty"`
 	Reason  string `json:"reason"`
 	Deleted bool   `json:"deleted"`
@@ -708,6 +723,34 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			reason = fmt.Sprintf("worktree %s is gone", root)
 		} else if last := box.LastUsed(m.Name); idle > 0 && !last.IsZero() && time.Since(last) > idle {
 			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", last.Format(time.RFC3339), cfg.IdleTimeout)
+			// Its worktree still exists, so someone may come back to it. Stopping frees the
+			// memory and keeps what the sandbox holds; an already stopped one has nothing left
+			// to give back but its disk, which --all and min_free_gb deal with.
+			if cfg.IdleAction == "stop" {
+				if m.State != "running" {
+					continue
+				}
+				row := gcJSON{machineJSON: machineRow(m), Reason: reason + ", idle_action stop", stop: true}
+				if *dry {
+					rows = append(rows, row)
+					if !*asJSON {
+						fmt.Fprintf(stdout, "would stop %s (%s)\n", m.Name, row.Reason)
+					}
+					continue
+				}
+				if err := client.Stop(m.Name); err != nil {
+					row.Error = err.Error()
+					fmt.Fprintln(stderr, err)
+					code = 1
+				} else {
+					row.Stopped = true
+					if !*asJSON {
+						fmt.Fprintf(stdout, "stopped %s (%s)\n", m.Name, row.Reason)
+					}
+				}
+				rows = append(rows, row)
+				continue
+			}
 		} else if *all && m.State != "running" {
 			reason = "not running (--all)"
 		}
@@ -748,6 +791,28 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		box.PruneURLs(live)
 		box.SweepState(live, time.Now())
+	}
+	// Volumes go with their worktree, and only then, whatever happened to the sandbox.
+	for _, key := range box.OrphanVolumes() {
+		row := gcJSON{Volumes: key, Reason: "its worktree is gone"}
+		if *dry {
+			rows = append(rows, row)
+			if !*asJSON {
+				fmt.Fprintf(stdout, "would delete the volumes of %s (%s)\n", key, row.Reason)
+			}
+			continue
+		}
+		if err := box.RemoveVolumes(key); err != nil {
+			row.Error = err.Error()
+			fmt.Fprintln(stderr, err)
+			code = 1
+		} else {
+			row.Deleted = true
+			if !*asJSON {
+				fmt.Fprintf(stdout, "deleted the volumes of %s (%s)\n", key, row.Reason)
+			}
+		}
+		rows = append(rows, row)
 	}
 	reason := fmt.Sprintf("pack unused for %s", cfg.IdleTimeout)
 	if *all {
@@ -790,7 +855,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		if r.Pack != "" {
 			packs++
 			freed += r.Bytes
-		} else {
+		} else if r.Volumes == "" && !r.stop {
 			machines++
 		}
 	}
@@ -952,7 +1017,7 @@ func shimCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	paths, err := shim.Install(dir, cfg.Intercept)
+	paths, err := shim.Install(dir, cfg.Intercepted())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -1100,6 +1165,79 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 	return code
 }
 
+// uninstallCmd removes what `boxer install` wrote, and only that: the targets and flags mirror
+// install's, so `boxer uninstall X` undoes `boxer install X`.
+func uninstallCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	user := fs.Bool("user", false, "remove the user-level layer instead of the project layer")
+	fs.SetOutput(stderr)
+	var flags, pos []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+		} else {
+			pos = append(pos, a)
+		}
+	}
+	if err := fs.Parse(flags); err != nil || len(pos) == 0 {
+		fmt.Fprintln(stderr, "usage: boxer uninstall <harness>|all|git|conductor [--user]")
+		return 2
+	}
+	wt, repo := cwdRoot()
+	if wt == "" && !*user {
+		fmt.Fprintln(stderr, "boxer uninstall: run inside the git repository it was installed in")
+		return 1
+	}
+	report := func(name string, r install.Result, err error) int {
+		if err != nil {
+			fmt.Fprintf(stderr, "boxer uninstall %s: %v\n", name, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "%s:\n", name)
+		if len(r.Written) == 0 {
+			fmt.Fprintln(stdout, "  nothing to remove")
+		}
+		for _, w := range r.Written {
+			shown := w
+			if rel, err := filepath.Rel(wt, w); err == nil && !strings.HasPrefix(rel, "..") && wt != "" {
+				shown = rel
+			}
+			fmt.Fprintf(stdout, "  removed boxer from %s\n", shown)
+		}
+		for _, n := range r.Notes {
+			fmt.Fprintf(stdout, "  note: %s\n", n)
+		}
+		return 0
+	}
+	switch pos[0] {
+	case "git":
+		r, err := install.UninstallGit(repo)
+		return report("git", r, err)
+	case "conductor":
+		r, err := install.UninstallConductor(wt)
+		return report("conductor", r, err)
+	}
+	names := pos
+	if pos[0] == "all" {
+		names = []string{"claude-code", "codex", "gemini-cli", "opencode", "grok", "kimi", "dsh", "pi"}
+		if *user {
+			names = []string{"claude-code", "codex", "copilot"}
+		}
+	}
+	code := 0
+	for _, h := range names {
+		var r install.Result
+		var err error
+		if *user {
+			r, err = install.UninstallUser(h)
+		} else {
+			r, err = install.Uninstall(h, wt)
+		}
+		code |= report(h, r, err)
+	}
+	return code
+}
+
 // cwdRoot returns (worktreeRoot, repoRoot) for config loading outside a resolved Env.
 func cwdRoot() (string, string) {
 	cwd, _ := os.Getwd()
@@ -1136,7 +1274,7 @@ type briefJSON struct {
 func briefCmd(e *box.Env, asJSON bool, stdout io.Writer) int {
 	if emit(stdout, briefJSON{
 		Brief: e.Instructions(), Scope: scopeRow(e.Scope), Isolation: e.Cfg.Isolation, MountAt: e.MountAt(),
-		Mode: e.Cfg.Mode, Enforcement: e.Cfg.Enforcement, Intercept: e.Cfg.Intercept,
+		Mode: e.Cfg.Mode, Enforcement: e.Cfg.Enforcement, Intercept: e.Cfg.Intercepted(),
 		Passthrough: e.Cfg.Passthrough, Tasks: tasksOrEmpty(e.Cfg.Tasks), TaskDetails: taskDetails(e.Cfg),
 		Ports: append([]string{}, e.Cfg.Network.Ports...), URLs: e.Cfg.URLs.Enabled,
 	}, asJSON) {

@@ -23,6 +23,7 @@ last. Every other command wants its flags before any positional argument or `--`
 | [`run`](#boxer-run) | Run a command in the sandbox |
 | [`down`](#boxer-down) | Delete this scope's sandbox, one by name, or all |
 | [`status`](#boxer-status) | This scope's sandbox, as an exit code and a line |
+| [`restart`](#boxer-restart) | Relaunch the `start` services without recreating the sandbox |
 | [`ls`](#boxer-ls) | Every sandbox on the backend |
 | [`stop`, `rm`](#boxer-stop-and-boxer-rm) | Stop or remove sandboxes by name or filter |
 | [`gc`](#boxer-gc) | Reclaim gone, idle and stopped sandboxes and stale packs |
@@ -38,6 +39,7 @@ last. Every other command wants its flags before any positional argument or `--`
 | [`logs`](#boxer-logs) | Read the event log |
 | [`watch`](#boxer-watch) | Stream sandbox state changes and events |
 | [`install`](#boxer-install) | Write a harness's hooks, MCP entry and skill |
+| [`uninstall`](#boxer-uninstall) | Remove what `install` wrote |
 | [`shim`](#boxer-shim-install) | Write `PATH` shims |
 | [`shell`, `acp`](#boxer-shell-and-boxer-acp) | Run a harness inside the sandbox |
 | [`hook`](#boxer-hook) | The entry point a harness hook calls |
@@ -135,6 +137,21 @@ state.
 | `--scope NAME` | | Another sandbox, by key or two-word name. The current directory must still be in a repository |
 | `--json` | `false` | The [status object](/docs/reference/json#boxer-status---json) |
 
+## `boxer restart`
+
+```sh
+boxer restart
+```
+
+Stops this scope's [`start`](/docs/reference/configuration#start) services and everything they
+spawned, launches them again, and waits for [`ready`](/docs/reference/configuration#ready). The
+sandbox and what is in it stay: an installed package, a database's files. Use it after changing
+something a server reads only at start, or when a service gave up after five quick crashes (see
+[`restart`](/docs/reference/configuration#restart)).
+
+Exits 1 with cause `NO_SANDBOX` when the sandbox is not running. Takes the
+[identity flags](#identity-flags).
+
 ## `boxer ls`
 
 ```sh
@@ -156,11 +173,12 @@ Lists boxer's sandboxes on the configured backend with name, key, state, backend
 
 ```sh
 boxer stop [NAME...] [--all | --gone | --stopped] [-A] [-i] [-y] [--json]
-boxer rm   [NAME...] [--all | --gone | --stopped] [-A] [-i] [-y] [--json]
+boxer rm   [NAME...] [--all | --gone | --stopped] [-A] [-i] [-y] [--volumes] [--json]
 ```
 
 `stop` stops sandboxes without deleting them. `rm` deletes them and everything boxer kept about them: the
-run record, the last-used stamp, the lock and any URL. `NAME` is a key (`sb-7e1852e4a3c3`) or a
+run record, the last-used stamp, the lock and any URL. It keeps their named
+[`volumes`](/docs/reference/configuration#volumes) unless you pass `--volumes`. `NAME` is a key (`sb-7e1852e4a3c3`) or a
 two-word name (`swift-crab`).
 
 | Flag | Default | |
@@ -171,6 +189,7 @@ two-word name (`swift-crab`).
 | `-A` | `false` | Look on every installed backend |
 | `-i` | `false` | Choose from a numbered list. The default for a person when nothing is named |
 | `-y` | `false` | Do not ask before removing several sandboxes or a filter's matches |
+| `--volumes` | `false` | `rm` only. Also delete the sandboxes' named volumes |
 | `--json` | `false` | Print what was done |
 
 With no name and no filter, an agent or a pipe gets exit 2 and the command to run instead. A name
@@ -182,10 +201,13 @@ that matches nothing exits 1.
 boxer gc [--all] [--dry-run] [--json]
 ```
 
-Deletes sandboxes whose worktree is gone, fork children whose parent is gone, sandboxes unused for
-[`idle_timeout`](/docs/reference/configuration#idle_timeout), and environment packs past the same
-age or beyond [`packs_keep_last`](/docs/reference/configuration#packs_keep_last). It never deletes
-a [named pack](#boxer-pack).
+Deletes sandboxes whose worktree is gone, fork children whose parent is gone, the named
+[`volumes`](/docs/reference/configuration#volumes) of worktrees that are gone, and environment
+packs past [`idle_timeout`](/docs/reference/configuration#idle_timeout) or beyond
+[`packs_keep_last`](/docs/reference/configuration#packs_keep_last). A running sandbox unused for
+`idle_timeout` is stopped, or deleted with
+[`idle_action = "delete"`](/docs/reference/configuration#idle_action). It never deletes a
+[named pack](#boxer-pack).
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -406,6 +428,27 @@ repository. See [harnesses](/docs/setup).
 `boxer install` takes the integration's name (`claude-code`, `gemini-cli`). `boxer shell` takes the
 program's (`claude`, `gemini`).
 </Callout>
+
+## `boxer uninstall`
+
+```sh
+boxer uninstall <harness>... [--user]
+boxer uninstall all [--user]
+boxer uninstall git
+boxer uninstall conductor
+```
+
+Removes what the same `boxer install` wrote, and only that. Files boxer created go. In files it
+merged into (`.claude/settings.json`, `.mcp.json`, `AGENTS.md`, `opencode.json`), only boxer's
+entries go and the rest of the file is kept. Directories left empty are removed. Running it twice
+is harmless.
+
+Two things are left for you, and it says so: the `tools.exclude` entry in Gemini CLI's settings,
+which may be yours too, and the hooks you appended to `~/.kimi-code/config.toml` by hand.
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--user` | `false` | Remove what `install --user` wrote. `claude-code`, `codex` and `copilot` only |
 
 ## `boxer shim install`
 

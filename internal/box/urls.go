@@ -117,6 +117,21 @@ func (e *Env) URLs(m vm.Machine) map[string]string {
 // MachineURLs is URLs for a machine with no Env: a listing, which knows only the allocated ports.
 func MachineURLs(m vm.Machine) map[string]string { return urlsFor(m.Name, PortsOf(m)) }
 
+// ReachableURLs is every forwarded port of m as a URL a browser can open: its named URL where
+// [urls] gave it one, otherwise the loopback address of its host port.
+func ReachableURLs(m vm.Machine) map[string]string {
+	urls := MachineURLs(m)
+	for guest, host := range PortsOf(m) {
+		if _, named := urls[guest]; !named {
+			if urls == nil {
+				urls = map[string]string{}
+			}
+			urls[guest] = "http://127.0.0.1:" + host
+		}
+	}
+	return urls
+}
+
 func urlsFor(key string, ports map[string]string) map[string]string {
 	out := URLsOf(key)
 	var byPort map[string]string

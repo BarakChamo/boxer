@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,7 +132,7 @@ func (r *doctorReport) exit() int {
 var launchedPATH string
 
 func loginShellDemotesShims(e *box.Env) string {
-	if e == nil || e.Cfg.Enforcement == "hook" || len(e.Cfg.Intercept) == 0 {
+	if e == nil || e.Cfg.Enforcement == "hook" || len(e.Cfg.Intercepted()) == 0 {
 		return ""
 	}
 	dir := ""
@@ -143,7 +145,7 @@ func loginShellDemotesShims(e *box.Env) string {
 	if dir == "" {
 		return "" // no shims on this PATH; nothing to demote
 	}
-	prog := e.Cfg.Intercept[0]
+	prog := e.Cfg.Intercepted()[0]
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -192,7 +194,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		{"require_worktree", e.Cfg.RequireWorktree}, {"on_sandbox_unavailable", e.Cfg.OnSandboxUnavailable},
 		{"create_on", strings.Join(e.Cfg.CreateOn, ",")}, {"destroy_on", strings.Join(e.Cfg.DestroyOn, ",")},
 		{"warm_on_session_start", fmt.Sprint(e.Cfg.WarmOnSessionStart)}, {"worktree.manage", e.Cfg.Worktree.Manage},
-		{"intercept", strings.Join(e.Cfg.Intercept, ",")}, {"passthrough", strings.Join(e.Cfg.Passthrough, ",")},
+		{"intercept", strings.Join(e.Cfg.Intercepted(), ",")}, {"passthrough", strings.Join(e.Cfg.Passthrough, ",")},
 		{"network.mode", e.Cfg.Network.Mode}, {"mount_at", e.Cfg.MountAt}, {"cpus", fmt.Sprint(e.Cfg.CPUs)}, {"memory", e.Cfg.Memory},
 	} {
 		src := e.Cfg.Sources[strings.SplitN(k.key, ".", 2)[0]]
@@ -229,7 +231,7 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	}
 	if e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both" {
 		sh := &doctorShims{OnPath: []string{}, Missing: []string{}}
-		for _, p := range e.Cfg.Intercept {
+		for _, p := range e.Cfg.Intercepted() {
 			if p == "*" {
 				continue
 			}
@@ -243,6 +245,9 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 		r.Shims = sh
 	}
 	r.Warnings = append(r.Warnings, e.Warnings...)
+	if w := interceptSuggestion(e.Scope.Root, e.Cfg.Intercepted()); w != "" {
+		r.Warnings = append(r.Warnings, w)
+	}
 	if w := loginShellDemotesShims(e); w != "" {
 		r.Warnings = append(r.Warnings, w)
 	}
@@ -395,4 +400,49 @@ func printCaps(w io.Writer, c *vm.Caps) {
 			fmt.Fprintf(w, "  %-18s no    — %s\n", row.name, row.off)
 		}
 	}
+}
+
+// languageTools are the programs a project in a language the default intercept list does not
+// cover runs to build and test, keyed by the file that marks such a project. The default list
+// cannot grow within 1.x, so doctor names what is missing instead.
+var languageTools = []struct {
+	file  string
+	tools []string
+}{
+	{"Gemfile", []string{"ruby", "bundle", "rake", "rails", "rspec"}},
+	{"pom.xml", []string{"mvn", "mvnw", "java"}},
+	{"build.gradle", []string{"gradle", "gradlew", "java"}},
+	{"build.gradle.kts", []string{"gradle", "gradlew", "java"}},
+}
+
+// interceptSuggestion says which of this project's own tools would run on the host, and the one
+// line that sends them to the sandbox.
+func interceptSuggestion(root string, intercepted []string) string {
+	if slices.Contains(intercepted, "*") {
+		return ""
+	}
+	var missing []string
+	for _, l := range languageTools {
+		if _, err := os.Stat(filepath.Join(root, l.file)); err != nil {
+			continue
+		}
+		for _, t := range l.tools {
+			if !slices.Contains(intercepted, t) && !slices.Contains(missing, t) {
+				missing = append(missing, t)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s run on the host: they are not in intercept. To send them to the sandbox, add intercept_also = [%s] to boxer.toml",
+		strings.Join(missing, ", "), quoteJoin(missing))
+}
+
+func quoteJoin(xs []string) string {
+	q := make([]string, len(xs))
+	for i, x := range xs {
+		q[i] = strconv.Quote(x)
+	}
+	return strings.Join(q, ", ")
 }

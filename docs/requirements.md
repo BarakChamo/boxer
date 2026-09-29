@@ -969,9 +969,10 @@ the runtime-only part of a `devcontainer.json` itself, since 1.1.
   (→ `setup`), `postStartCommand` (→ `start`), `forwardPorts` (→ `network.ports`), `containerEnv`
   and `remoteEnv` (→ `env`, with `remoteEnv` winning), bind `mounts` (→ `mounts`) and
   `workspaceFolder` (→ `mount_at`). `boxer.toml` overrides it; `doctor` prints which file each
-  value came from. What needs an image build — `features`, `build`/`dockerFile` — and what needs
-  multi-container orchestration — `dockerComposeFile` — is refused by name, with what to do
-  instead, rather than ignored.
+  value came from. `build.dockerfile` and `dockerFile` map to boxer's `build`, with
+  `build.context` to `build_context`. `features`, which boxer does not install, and multi-container
+  orchestration, `dockerComposeFile`, are refused by name, with what to do instead, rather than
+  ignored.
 - **R-ENV-3.** `initializeCommand` is read into `[prep]` and runs on the host; `updateContentCommand`
   is appended to `setup` ahead of `postCreateCommand`, in specification order. `postAttachCommand`
   has no boxer equivalent and is refused by name.

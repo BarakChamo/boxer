@@ -85,6 +85,9 @@ olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
 Orchestrators: [Conductor, T3 Code, Paperclip, herdr, Multica and
 OpenHands](https://barakchamo.github.io/boxer/docs/orchestrators).
 
+`boxer uninstall <harness>` removes what `boxer install` wrote, and leaves the rest of each file as
+it was.
+
 ## Find your path
 
 | You are | Start here |
