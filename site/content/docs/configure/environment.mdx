@@ -81,6 +81,17 @@ setup       = ["npm ci"]                # writes node_modules into this worktree
 ```
 
 <Callout type="warn">
+`setup` must install into the worktree. boxer records that it ran on the host, with the worktree,
+so a recreated sandbox does not run it again. Anything it installs elsewhere, such as a system-wide
+`pip install`, is gone after the sandbox is recreated or reclaimed. Install Python packages into a
+virtual environment in the worktree, and system packages in `image_setup`:
+
+```toml
+setup = ["python -m venv .venv && .venv/bin/pip install -r requirements.txt"]
+```
+</Callout>
+
+<Callout type="warn">
 Do not put `npm ci` in `image_setup`. The pack records it as done, but `node_modules` lives in the
 worktree and the pack does not carry it. The next worktree starts with no dependencies.
 </Callout>

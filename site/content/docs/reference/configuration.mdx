@@ -364,8 +364,9 @@ image_setup = ["apt-get update && apt-get install -y build-essential"]
 `[]string`, default `[]`.
 
 Commands that prepare this worktree, run in the guest as `user`, once per worktree and again when
-the list changes. A pack never skips them, because the worktree is mounted from the host. A failure
-is `SETUP_FAILED`.
+the list changes or on `boxer up --rebuild`. A pack never skips them, because the worktree is
+mounted from the host. They must write into the worktree: a recreated sandbox does not run them
+again, so anything installed elsewhere is lost. A failure is `SETUP_FAILED`.
 
 ```toml
 setup = ["npm ci"]

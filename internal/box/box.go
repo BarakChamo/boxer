@@ -724,6 +724,10 @@ func (e *Env) envPack(image string) string {
 // DropEnvPack deletes this environment's cached pack, so the next provision runs setup again. It
 // returns the path it removed, or "" when there was nothing cached.
 func (e *Env) DropEnvPack() (string, error) {
+	// A rebuild means "prepare this from scratch", which includes the worktree half, whether or not
+	// there is a pack to drop. This was once removed only alongside a pack, so on docker, podman
+	// and Apple container, or with no image_setup, `--rebuild` never ran `setup` again.
+	_ = os.Remove(setupMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg))
 	image, _ := e.Image()
 	if image == "" || len(e.Cfg.ImageSetup) == 0 {
 		return "", nil
@@ -736,8 +740,6 @@ func (e *Env) DropEnvPack() (string, error) {
 		return "", err
 	}
 	_ = os.Remove(strings.TrimSuffix(side, ".smolmachine") + ".lock")
-	// A rebuild means "prepare this from scratch", which includes the worktree half.
-	_ = os.Remove(setupMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg))
 	return side, nil
 }
 

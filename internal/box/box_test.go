@@ -1312,3 +1312,30 @@ func TestSavePackRestartsServices(t *testing.T) {
 		t.Fatalf("the service must be launched again after the snapshot, launched %d times:\n%s", n, b)
 	}
 }
+
+// --rebuild re-runs setup even when there is no environment pack to drop: on docker, podman and
+// Apple container, or with no image_setup. The setup record was once cleared only with a pack.
+func TestRebuildClearsTheSetupRecordWithoutAPack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nsetup = [\"echo installing\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	marker := setupMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("setup should have left its record: %v", err)
+	}
+	if _, err := e.DropEnvPack(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a rebuild with no pack kept the setup record, so setup would not run again")
+	}
+}

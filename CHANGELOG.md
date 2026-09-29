@@ -43,6 +43,8 @@ All notable changes to this project are documented here. The format follows
   `USER node` could not install system packages. It now runs as root, as documented.
 - **The docs' own `[env]` example was invalid TOML.** It put `env_passthrough` and `secrets` after
   `[env]`, which makes them part of that table, and the file failed to load.
+- **`boxer up --rebuild` did not re-run `setup` without an environment pack,** which is always the
+  case on docker, podman and Apple `container`, and on smolvm with no `image_setup`.
 - **`boxer install codex` and `boxer install dsh` deleted the user's own hooks.** They copied the
   bundled `hooks.json` over an existing `.codex/hooks.json` or `.dsh/hooks.json`. Both now merge,
   as `.claude/settings.json` always did, and a second install adds nothing.
