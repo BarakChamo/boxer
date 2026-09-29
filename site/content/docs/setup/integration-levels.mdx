@@ -30,8 +30,7 @@ An integration level is the mechanism that gets an agent's shell commands into t
 | [DSH](/docs/setup/kimi-and-dsh) | `boxer install dsh` | tool mode, shims | tool |
 | [fx](/docs/setup/other-agents) | nothing to install | inside only | inside |
 
-Scores per cell are in [Results](/docs/evals/results). Each harness's setup page lists the files
-`boxer install` writes and any step it cannot do for you. For orchestrators, see
+Scores per cell are in [Results](/docs/evals/results). For orchestrators, see
 [Orchestrators](/docs/orchestrators).
 
 The outside levels route only the programs listed in `intercept` in `boxer.toml`. See
@@ -121,7 +120,7 @@ through `PATH`. Set it as the harness's shell:
 | [OpenHands](/docs/orchestrators/openhands) | `shell_path` on the terminal tool |
 | [herdr](/docs/orchestrators/herdr) | `terminal.default_shell` |
 
-OpenHands is the only measured harness whose terminal shell is configurable.
+Of the supported harnesses, only OpenHands lets you set its terminal shell.
 
 ## Inside mode
 

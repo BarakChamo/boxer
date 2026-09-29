@@ -24,8 +24,7 @@ fork: staged mounts cannot be branched yet because multiple descendants would
 synchronize into the same host directory
 ```
 
-Every fork of a worktree sees the same files. Two children writing one file race each other, as two
-processes on your machine would.
+Every fork of a worktree sees the same files. Two children writing one file race each other.
 
 <Callout type="warn">
 Use forks for work that shards cleanly, such as test shards that write to separate paths. For work

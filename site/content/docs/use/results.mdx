@@ -21,7 +21,7 @@ The worktree is mounted, so the file the guest wrote is already there.
 
 ### Say where the reports are
 
-You can set report paths in three places, listed here from highest precedence to lowest.
+Report paths, highest precedence first:
 
 ```sh
 boxer run --junit junit.xml,reports/*.xml -- npm test   # this run
@@ -93,8 +93,7 @@ boxer: reproduced — exit 1, as recorded
 ```
 
 <Callout type="warn">
-Replay exits 0 when the failure reproduced, and 1 when it did not. It answers the question "does
-this still fail?".
+Replay exits 0 when the failure reproduced, and 1 when it did not.
 </Callout>
 
 | Replay refuses with exit 1 when | Override |

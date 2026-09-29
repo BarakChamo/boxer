@@ -6,40 +6,31 @@ const base = process.env.BOXER_BASE_PATH ?? '';
 const install = 'curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh';
 
 const stats = [
-  { value: '33 ms', label: 'per command in a running sandbox, within 4 ms of docker exec' },
-  { value: '10 agents', label: 'and 6 orchestrators, each with its own setup page' },
-  { value: '99.4%', label: 'of checks passed by live agents across 55 setups' },
+  { value: '33 ms', label: 'per command, about the same as docker exec' },
+  { value: '16', label: 'agents and orchestrators, from Claude Code and Codex to Conductor' },
+  { value: '7.6 s', label: 'to a running Next.js dev server, 0.8 s more than without boxer' },
 ];
 
 const steps = [
-  {
-    title: 'Install it into your agent',
-    body: 'boxer install claude-code writes hooks, an MCP server and a skill into your repo. Commit them once.',
-  },
-  {
-    title: 'Keep working as you do',
-    body: 'When a session starts, boxer boots that worktree’s sandbox, runs your setup and starts your dev server. npm, node, make and the other build tools run inside it.',
-  },
-  {
-    title: 'Run as many as you want',
-    body: 'Every new worktree gets its own sandbox, whoever created it: you, the agent, or an orchestrator. Deleted worktrees are cleaned up.',
-  },
+  { title: 'Install it into your agent', body: 'One command: boxer install claude-code, codex, or whichever agent you use.' },
+  { title: 'Work as usual', body: 'Each session gets its worktree’s sandbox, with dependencies installed and your dev server running.' },
+  { title: 'Run as many as you want', body: 'Every new worktree gets its own sandbox. Deleted ones are cleaned up.' },
 ];
 
 const highlights = [
-  ['A sandbox per worktree', 'Created when an agent starts working there. Nothing to configure per task.'],
-  ['No change to your agent', 'Hooks rewrite npm test into the sandbox before the shell runs it. Output and exit codes come back as usual.'],
-  ['A URL per dev server', 'Every worktree serves port 3000 inside its sandbox, and gets its own host port outside, or a named https://branch.app.localhost URL with portless.'],
-  ['A real boundary', 'Each sandbox is a microVM with its own kernel. It sees the worktree, and reaches only the hosts you allow.'],
-  ['Fast enough to forget', '33 ms per command. A Next.js session is ready in 7.6 s, against 6.8 s with no sandbox.'],
-  ['Local and open source', 'Runs on your Mac or Linux machine. No account, no upload, Apache-2.0.'],
+  ['A sandbox per worktree', 'Created when an agent starts working there. Removed when the worktree goes.'],
+  ['Your agent doesn’t change', 'npm test, pytest and make run in the sandbox. Output and exit codes come back as usual.'],
+  ['No port clashes', 'Each worktree’s dev servers get their own ports, or named URLs like https://fix-ui.myapp.localhost.'],
+  ['A real boundary', 'Each sandbox is a microVM with its own kernel, and reaches only the hosts you allow.'],
+  ['Works with your setup', 'Your images, your devcontainer, docker or podman if you prefer, and services like Postgres in the sandbox.'],
+  ['Local and open source', 'Runs on your Mac or Linux machine. No account. Apache-2.0.'],
 ];
 
 const compare = [
   ['', 'boxer', 'Agent’s built-in sandbox', 'A container per worktree', 'Cloud sandbox'],
   ['Separate ports and dev server per task', 'yes, automatic', 'no', 'yes, if you map ports', 'yes'],
   ['Own kernel per task', 'yes, on smolvm', 'no', 'no', 'yes'],
-  ['Follows worktrees the agent creates', 'yes', 'n/a', 'no, start each one', 'no'],
+  ['Follows worktrees the agent creates', 'yes', 'n/a', 'no', 'no'],
   ['Code stays on your machine', 'yes', 'yes', 'yes', 'no'],
   ['Cost of one command', '33 ms', '~8 ms', '~29 ms', 'a network round trip'],
 ];
@@ -73,9 +64,7 @@ export default function HomePage() {
           each in its own sandbox
         </h1>
         <p className="text-fd-muted-foreground max-w-2xl text-lg sm:text-xl">
-          boxer gives every git worktree its own microVM, dev server and URL. Install it into Claude
-          Code, Codex or your orchestrator once, and every task your agents start is isolated from
-          your machine and from each other.
+          A microVM, dev server and URL for every git worktree. Set up once per agent.
         </p>
         <pre className="bg-fd-card border-fd-border max-w-full overflow-x-auto rounded-lg border px-4 py-3 text-left text-sm">
           <code>{`curl -sSL https://smolmachines.com/install.sh | bash
@@ -119,7 +108,7 @@ ${install}`}</code>
       </section>
 
       <section className="flex flex-col gap-8">
-        <h2 className="text-center text-3xl font-semibold tracking-tight">Set it up once. Then forget about it.</h2>
+        <h2 className="text-center text-3xl font-semibold tracking-tight">How it works</h2>
         <div className="grid gap-8 sm:grid-cols-3">
           {steps.map((s, i) => (
             <div key={s.title} className="flex flex-col gap-2">
@@ -141,7 +130,7 @@ ${install}`}</code>
       </section>
 
       <section className="flex flex-col gap-6">
-        <h2 className="text-center text-3xl font-semibold tracking-tight">Why not what you already have?</h2>
+        <h2 className="text-center text-3xl font-semibold tracking-tight">Compared with what you use now</h2>
         <div className="border-fd-border overflow-x-auto rounded-xl border">
           <table className="w-full text-left text-sm">
             <tbody>
@@ -166,7 +155,7 @@ ${install}`}</code>
       </section>
 
       <section className="flex flex-col items-center gap-4 text-center">
-        <h2 className="text-3xl font-semibold tracking-tight">Works with the tools you use</h2>
+        <h2 className="text-3xl font-semibold tracking-tight">Works with</h2>
         <div className="flex max-w-3xl flex-wrap justify-center gap-2">
           {tools.map(([name, slug]) => (
             <Link
@@ -181,12 +170,11 @@ ${install}`}</code>
       </section>
 
       <section className="flex flex-col items-center gap-5 text-center">
-        <h2 className="text-3xl font-semibold tracking-tight">Try it on your repo</h2>
+        <h2 className="text-3xl font-semibold tracking-tight">Try it</h2>
         <pre className="bg-fd-card border-fd-border max-w-full overflow-x-auto rounded-lg border p-5 text-left text-sm">
           <code>{`curl -sSL https://smolmachines.com/install.sh | bash
 ${install}
-boxer install claude-code
-git add .claude .mcp.json && git commit -m "Run agent commands in boxer"`}</code>
+boxer install claude-code`}</code>
         </pre>
         <Link
           href="/docs/quickstart"

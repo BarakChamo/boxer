@@ -17,7 +17,7 @@ allow_hosts = ["registry.npmjs.org"]
 ports       = ["auto:3000"]
 ```
 
-This page covers each key in the order boxer uses it. The
+The
 [configuration reference](/docs/reference/configuration) lists every key and its default.
 
 ## Choose an image
@@ -168,7 +168,7 @@ ports = ["auto:3000"]
 | `"auto:3000"` | a free host port, forwarded to 3000 in the guest |
 | `"8080:3000"` | always 8080. A second worktree then fails to start. |
 
-Use `auto:` in anything you commit. Forwards bind `127.0.0.1` on the host. Ports are fixed when the
+Use `auto:` so worktrees do not collide. Forwards bind `127.0.0.1` on the host. Ports are fixed when the
 sandbox is created, so run `boxer up --recreate` after you change the list.
 
 <Callout type="warn">

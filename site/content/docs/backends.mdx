@@ -57,8 +57,7 @@ portless proxy bind `127.0.0.1`. See the [security model](/docs/concepts/securit
 boxer's threat model is a careless agent. If containment is why you use boxer, keep a
 kernel-per-sandbox backend.
 
-The smoke suite passes 88 of 88 cells on smolvm. On docker, podman and Apple `container` it passes
-79, with 9 skipped by capability. This holds on macOS, and on Linux where the backend exists
+Every backend passes the smoke suite. On docker, podman and Apple `container`, the 9 tests for smolvm-only features are skipped. This holds on macOS, and on Linux where the backend exists
 ([results](/docs/evals/results#on-each-backend)).
 
 ## Set the backend

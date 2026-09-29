@@ -3,7 +3,7 @@ title: Compared with
 description: How boxer differs from your agent's built-in sandbox, a container per worktree, and cloud sandboxes.
 ---
 
-There are three things people use today to keep agents apart. Each solves part of the problem.
+There are three things people use today to keep agents apart.
 
 | | boxer | Agent's built-in sandbox | A container per worktree | Cloud sandbox |
 | --- | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ Claude Code and Codex can confine their own shell with seatbelt on macOS or land
 limits what a command can write and reach. It is fast, because it adds no kernel.
 
 It does not separate tasks from each other. Every session still shares your machine's ports, global
-tools, home directory and running processes. Two dev servers on port 3000 still collide.
+tools, home directory and running processes. Two dev servers on the same port still collide.
 
 Use boxer instead of it, not on top of it. A hypervisor cannot start inside seatbelt or landlock, so
 turn the agent's own sandbox off when boxer is on. The [Codex page](/docs/setup/codex) shows how.

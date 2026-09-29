@@ -3,7 +3,6 @@ title: Security
 description: What the sandbox isolates on each backend, what it does not, and the paths that stay on the host on purpose.
 ---
 
-This page covers what the sandbox isolates, what stays on the host, and what each backend changes.
 
 ## Summary
 
@@ -15,8 +14,7 @@ This page covers what the sandbox isolates, what stays on the host, and what eac
 | **Exposed to the host** | Ports in `network.ports`, bound to `127.0.0.1`. |
 | **Threat model** | A careless or destructive agent. boxer is not built to stop an agent that sets out to reach the host. |
 
-boxer protects your machine from what a careless agent runs. Examples are a dependency's
-postinstall script, an `rm -rf` in the wrong directory, and a change to system configuration. A postinstall script in the sandbox cannot read your home directory. A command that changes system
+boxer protects your machine from what a careless agent runs, such as a dependency's postinstall script, an `rm -rf` in the wrong directory, or a change to system configuration. A postinstall script in the sandbox cannot read your home directory. A command that changes system
 configuration changes only the sandbox, and `boxer down` deletes it.
 
 <Callout type="warn">
@@ -82,7 +80,7 @@ boxer shell claude
 
 The agent is not on the host. It cannot run commands on the host.
 
-The harness's credentials are then inside the sandbox. Every harness config directory that exists on the host (`~/.claude`,
+Every harness config directory that exists on the host (`~/.claude`,
 `~/.codex`, and so on) is mounted read-write into the guest. The harness's credentials are inside
 the sandbox. See [Run the harness inside](/docs/use/inside).
 
@@ -108,7 +106,7 @@ A `boxer.toml`, a skill or a plugin in a repository is code you are about to run
 | `setup`, `image_setup`, `start`, `[tasks]` | `[prep]` commands, and hooks and MCP servers named in a harness's configuration |
 
 Treat a repository's boxer configuration like its `Makefile` or its `package.json` install
-scripts. boxer never fetches configuration or content from the network. 
+scripts. boxer never fetches configuration or content from the network.
 
 ## Forwarded ports and URLs
 
@@ -153,7 +151,7 @@ Both lists are forwarded **by name**:
   user can read. boxer deletes it as soon as the command returns.
 
 Both lists reach `setup` and `image_setup` as well as ordinary commands, so an install that needs a
-registry token has it. They never reach the pack. 
+registry token has it. They never reach the pack.
 
 ## What boxer records
 

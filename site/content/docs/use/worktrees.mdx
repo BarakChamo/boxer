@@ -15,10 +15,9 @@ boxer run -c 'npm test'      # its own sandbox, host port and node_modules
 The default is `isolation = "worktree"`. Two worktrees never share a sandbox, so two agents cannot
 overwrite each other's `node_modules` or race on a port.
 
-## Commit a boxer.toml
+## Keep ports out of boxer.toml
 
-Every worktree cut from a branch inherits that branch's `boxer.toml`. Keep host-specific values out
-of it. Ports are the usual problem:
+Every worktree reads the same `boxer.toml`, so keep host-specific values out of it, ports most of all:
 
 ```toml
 [network]
@@ -29,7 +28,7 @@ A fixed host port fails with a busy-address error as soon as a second worktree s
 
 ## Find each worktree's dev server
 
-With `auto:`, every worktree gets its own host port, and none of them is at `localhost:3000`. Run
+With `auto:`, every worktree gets its own host port, which is not the guest port. Run
 `boxer status` to see the port for the current worktree.
 
 To give each worktree a name instead, turn on `[urls]`:
@@ -52,11 +51,9 @@ Agents read the name with `boxer url`. For setup and naming rules, see
 
 ## Size the sandboxes
 
-Each sandbox has its own memory and disk. The default is `cpus = 4` and `memory = "4G"`, so four
-sandboxes ask for 16 GB.
+Each sandbox has its own memory and disk. The default is `cpus = 4` and `memory = "4G"` per sandbox.
 
-In a measured run, four concurrent node sandboxes used about 4 GB resident memory and 2.7 GB of
-disk. That is roughly 1 GB and 700 MB each. The host has to cover the allocation, so lower it if
+In a measured run, each of four concurrent node sandboxes used about 1 GB of resident memory and 700 MB of disk. The host has to cover the allocation, so lower it if
 you run several:
 
 ```toml

@@ -3,26 +3,26 @@ title: What is boxer
 description: Install boxer into your coding agent once. Every worktree it works in gets its own sandbox, automatically.
 ---
 
-boxer gives every git worktree its own sandbox and runs your coding agent's commands in it. You
-install it into your agent once. After that you work as usual, and boxer handles the sandboxes.
+boxer gives every git worktree its own sandbox and runs your coding agent's commands in it.
+Install it into your agent once, then work as usual.
 
 ![Three coding agents in three git worktrees, each running in its own boxer microVM with its own dev server URL](/hero.svg)
 
 ## Why
 
 Codex and Claude Code create worktrees themselves, and orchestrators like Conductor run a task per
-worktree. Each worktree has its own files, but every task still shares your machine. Two dev
-servers fight over port 3000, one task's install breaks another's, and every command runs against
-your own system. boxer gives each worktree its own sandbox:
+worktree. Each worktree has its own files, but every task still shares your machine. Dev servers
+fight over ports, one task's install breaks another's, and every command runs against your own
+system. boxer gives each worktree its own sandbox:
 
 - **A sandbox per worktree**, created when an agent starts working there, including worktrees the
   agent or an orchestrator creates.
-- **No change to your agent.** A hook rewrites `npm test` into the sandbox before the shell runs it.
-- **No port clashes.** Every worktree serves port 3000 inside its sandbox, and gets its own
-  `https://<branch>.<repo>.localhost` outside.
+- **Your agent doesn't change.** A hook runs `npm test` in the sandbox instead of on your machine.
+- **No port clashes.** Each worktree's dev servers get their own ports, or named URLs like
+  `https://fix-ui.myapp.localhost`.
 - **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree.
-- **33 ms per command**, within 4 ms of `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
-- **Local.** No account, no upload. See how it [compares](/docs/comparison) with the alternatives.
+- **Fast.** 33 ms per command, about the same as `docker exec`. See [Benchmarks](/docs/evals/benchmarks).
+- **Local.** No account, no upload. See how it [compares](/docs/comparison).
 
 ## Do I need boxer?
 
@@ -34,7 +34,7 @@ Probably, if either of these is true:
   sandbox instead of on your machine.
 
 boxer does not protect the code in your project. The sandbox works on your real files, so an agent
-that deletes them deletes them. Commit often. [Security](/docs/concepts/security) has the details.
+that deletes them deletes them. See [Security](/docs/concepts/security).
 
 **The terms, in one line each.** A *sandbox* is a separate place for commands to run. A *microVM*
 is a small virtual computer with its own operating system, which is what boxer uses by default. A
@@ -49,11 +49,11 @@ command, which is how boxer steps in. An *MCP server* gives an agent extra tools
 
 | You are | Start here |
 | --- | --- |
-| Using Claude Code or Codex | [Quickstart](/docs/quickstart). About five commands. |
+| Using Claude Code or Codex | [Quickstart](/docs/quickstart) |
 | Running an orchestrator like Conductor or T3 Code | [Quickstart](/docs/quickstart) steps 1 to 3, then [Orchestrators](/docs/orchestrators) |
 | Already managing containers with your own scripts and hooks | [Coming from your own scripts](/docs/configure/from-scripts) |
 | Set on Docker, or bringing your own images, services and devcontainer | [Bring your Docker setup](/docs/configure/docker) |
-| New to all of this | [Quickstart](/docs/quickstart). You do not need to know containers. |
+| New to all of this | [Quickstart](/docs/quickstart) |
 | Building your own tools on top | [Build on boxer](/docs/reference/building-on-boxer) |
 
 ## What happens while your agent works
@@ -87,14 +87,11 @@ Once boxer is installed into your agent, this happens on its own:
 | Skill, in `.claude/skills/boxer/` | explains to the agent how commands run here and what to do if one is refused | no |
 | Subagent, in `.claude/agents/boxed.md` | a subagent that runs everything through boxer | no |
 
-The hooks do the work. The other pieces help the agent understand the sandbox, so it does not
-fight it. Commit the files. A worktree is cut from a branch, and the hooks have to be on it.
+The hooks do the work. The other pieces tell the agent how the sandbox works.
 
 ## How boxer connects to each agent
 
-Agents expose different extension points. boxer uses the best one each agent has. Best means the
-agent keeps working unchanged and a command cannot slip past to your machine. From best to
-weakest:
+boxer uses the strongest integration each agent supports:
 
 | Level | How it works | Used for |
 | --- | --- | --- |

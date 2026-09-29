@@ -1,8 +1,7 @@
 # boxer
 
-**Parallel coding agents, each in its own sandbox.** boxer gives every git worktree its own
-microVM, dev server and URL. Install it into your agent once, and every task it starts is isolated
-from your machine and from the others.
+**Parallel coding agents, each in its own sandbox.** A microVM, dev server and URL for every git
+worktree, set up once per agent.
 
 [![CI](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml/badge.svg)](https://github.com/BarakChamo/boxer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/BarakChamo/boxer)](https://github.com/BarakChamo/boxer/releases)
@@ -18,25 +17,24 @@ from your machine and from the others.
 
 ## Highlights
 
-- **A sandbox per worktree**, created when an agent starts working there. This includes worktrees
-  the agent or an orchestrator creates.
-- **No change to your agent.** A hook rewrites `npm test` into the sandbox before the shell runs it.
-  Output and exit codes come back as usual.
-- **No more port clashes.** Every worktree serves port 3000 inside its sandbox, and gets its own
-  host port outside, or a named `https://<branch>.<repo>.localhost` URL with
-  [portless](https://github.com/vercel-labs/portless).
-- **A real boundary.** Each sandbox is a microVM with its own kernel. It sees only the worktree, and
-  reaches only the hosts you allow.
-- **33 ms per command** in a running sandbox, within 4 ms of `docker exec`. A Next.js session is
-  ready in 7.6 s, against 6.8 s with no sandbox.
-- **Works with 10 coding agents and 6 orchestrators**, including Claude Code, Codex, Gemini CLI,
-  OpenCode, Conductor and T3 Code. Most are tested with live models in a 55-setup matrix.
-- **Local and open source.** No account, no upload.
+- **A sandbox per worktree.** Created when an agent starts working there, including worktrees the
+  agent or an orchestrator creates. Removed when the worktree goes.
+- **Your agent doesn't change.** `npm test`, `pytest` and `make` run in the sandbox. Output and exit
+  codes come back as usual.
+- **No port clashes.** Each worktree's dev servers get their own ports, or named URLs like
+  `https://fix-ui.myapp.localhost` with [portless](https://github.com/vercel-labs/portless).
+- **A real boundary.** Each sandbox is a microVM with its own kernel, and reaches only the hosts you
+  allow.
+- **Fast.** 33 ms per command, about the same as `docker exec`.
+- **Works with your setup.** Your images and devcontainer, docker or podman if you prefer, and
+  services like Postgres in the sandbox.
+- **Works with your tools.** Claude Code, Codex, Gemini CLI, Copilot CLI, OpenCode, pi, Grok, Kimi
+  Code, Conductor, T3 Code and more.
 
 ## Install
 
 ```sh
-curl -sSL https://smolmachines.com/install.sh | bash                            # smolvm, the microVM runtime
+curl -sSL https://smolmachines.com/install.sh | bash                                  # smolvm
 curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
 ```
 
@@ -51,14 +49,14 @@ boxer install claude-code
 git add .claude .mcp.json && git commit -m "Run agent commands in boxer"
 ```
 
-That is the setup. From then on:
+Then:
 
 1. **A session starts in a worktree.** boxer creates that worktree's sandbox, runs your `setup`,
    starts your dev server, and tells the agent where it is.
 2. **The agent runs `npm test`.** The hook runs it in the sandbox. The agent sees the normal output.
 3. **Another session starts in another worktree.** It gets its own sandbox, with its own ports,
    tools and processes.
-4. **A worktree is deleted.** boxer removes its sandbox in the background.
+4. **A worktree is deleted.** Its sandbox is removed.
 
 ```console
 $ boxer ls        # two agent sessions, two worktrees (some columns left out)
@@ -67,8 +65,8 @@ mild-lynx    running  add-auth  https://add-auth.myapp.localhost:1355
 olive-comet  running  fix-ui    https://fix-ui.myapp.localhost:1355
 ```
 
-`git`, `gh` and `ssh` stay on your machine. The [Quickstart](https://barakchamo.github.io/boxer/docs/quickstart)
-covers the details.
+`git`, `gh` and `ssh` stay on your machine. See the
+[Quickstart](https://barakchamo.github.io/boxer/docs/quickstart).
 
 ## Works with
 

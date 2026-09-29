@@ -1,9 +1,7 @@
 # Examples
 
 Working configurations for common projects. Each directory is a runnable project, a config to drop
-into an existing one, or a program that uses boxer as a library. The test suite loads every
-`boxer.toml` and `devcontainer.json` here, and every `boxer.toml` except `monorepo`'s has been run
-on a real sandbox.
+into an existing one, or a program that uses boxer as a library. Every `boxer.toml` here except `monorepo`'s has been run on a real sandbox.
 
 | example | kind | shows |
 | --- | --- | --- |
