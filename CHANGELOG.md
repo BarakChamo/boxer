@@ -15,7 +15,34 @@ All notable changes to this project are documented here. The format follows
   boxer started stops with the last route; `gc --all` reports a stopped sandbox and keeps a running
   one.
 
+### Changed
+- `boxer capsule inspect --json` uses the manifest's snake_case field names, like every other
+  `--json` shape. It is new since 1.0.
+- The documentation site and READMEs were reorganised around setup paths: one page per agent and
+  per orchestrator, a Quickstart, pages for Docker users and for people coming from their own
+  scripts, and a comparison with the alternatives. Tests now fail when a CLI flag, `boxer.toml` key,
+  `BOXER_*` variable or `pkg/boxer` identifier is missing from its reference page.
+
+### Deprecated
+- `require_linked_worktree` and `reuse_existing`. Neither ever had an effect. They still load, with a
+  warning naming what to use instead, and will be removed in 2.0.
+
 ### Fixed
+- **`boxer install codex` and `boxer install dsh` deleted the user's own hooks.** They copied the
+  bundled `hooks.json` over an existing `.codex/hooks.json` or `.dsh/hooks.json`. Both now merge,
+  as `.claude/settings.json` always did, and a second install adds nothing.
+- **A task's `env` table was parsed and never applied.** It now reaches the command.
+- **Apple `container` ignored a task's `timeout`.** It is now enforced, as on smolvm, docker and
+  podman. A timed-out command no longer waits for a child process that still holds its output.
+- **docker, podman and Apple `container` raced on a shared output buffer.** Callers that pass one
+  writer for stdout and stderr (the MCP tool, the setup probe) had two goroutines write to it at
+  once. The streams are now serialised.
+- **`boxer watch` ran forever once its reader went away.** It now exits when a write fails.
+- **`[harness.<name>]` accepted any `enforcement` or `isolation` value.** Both are now checked
+  against the same values as the top-level keys, so a typo is an error instead of a silent
+  fallback.
+- `make clean-evals` now also removes the matrix transcripts and traces in `$TMPDIR`.
+
 - **smolvm on Linux lost every `start` service a moment after `boxer up`.** With no workload
   given, smolvm launches the image's own `CMD` as the first container and execs join it; for
   `node` or `python3` that is a REPL that exits on its closed stdin, taking the services and

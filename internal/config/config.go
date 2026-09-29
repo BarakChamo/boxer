@@ -185,6 +185,10 @@ type Config struct {
 	// often leaves a pack per version, each of them hundreds of megabytes, and all of them younger
 	// than idle_timeout. 0 keeps every pack the idle rule allows.
 	PacksKeepLast int `toml:"packs_keep_last"`
+	// Deprecated keys. 1.0 accepted both and neither ever did anything, so they still load, with a
+	// warning, rather than break a boxer.toml that 1.0 read without complaint. Remove in 2.0.
+	RequireLinkedWorktree bool `toml:"require_linked_worktree"`
+	ReuseExisting         bool `toml:"reuse_existing"`
 	// WarmOnSessionStart makes the SessionStart hook provision in a detached `boxer up` and
 	// return at once, so the session is never blocked on a VM create.
 	WarmOnSessionStart bool `toml:"warm_on_session_start"`
@@ -296,6 +300,7 @@ func Defaults() Config {
 		ReclaimEvery:         "6h",
 		MinFreeGB:            5,
 		PacksKeepLast:        5,
+		ReuseExisting:        true,
 		ReadyTimeout:         "60s",
 		Integration:          "outside",
 		Mode:                 "rewrite",
@@ -424,6 +429,11 @@ func (c *Config) merge(path string) error {
 	if len(unknown) > 0 {
 		return fmt.Errorf("%s: unknown key(s): %s", path, strings.Join(unknown, ", "))
 	}
+	for key, instead := range deprecatedKeys {
+		if md.IsDefined(key) {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("%s: %s has no effect and will be removed in 2.0; %s", path, key, instead))
+		}
+	}
 	for _, k := range md.Keys() {
 		if len(k) > 0 {
 			c.Sources[k[0]] = path
@@ -431,6 +441,12 @@ func (c *Config) merge(path string) error {
 	}
 	c.Files = append(c.Files, path)
 	return nil
+}
+
+// deprecatedKeys still load, with a warning that says what to use instead.
+var deprecatedKeys = map[string]string{
+	"require_linked_worktree": `use require_worktree = "require"`,
+	"reuse_existing":          "a scope always reuses its sandbox; delete the line",
 }
 
 // envKeys are the scalar settings that may be overridden from the environment (R-CFG: every key

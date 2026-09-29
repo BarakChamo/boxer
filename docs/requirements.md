@@ -170,7 +170,8 @@ Requirements:
   refused, and under a hook-capable harness the refusal happens in `PreToolUse` with an explanation,
   not as a shell error.
 - **R-WT-3.** The main checkout counts as a worktree. `require_worktree = "require"` refuses it and
-  demands a linked worktree; `"warn"`, the default, runs and warns.
+  demands a linked worktree; `"warn"`, the default, runs and warns. `require_linked_worktree` is
+  deprecated: it loads with a warning and has no effect.
 - **R-WT-4.** The worktree root is mounted into the guest at a fixed path (`/workspace` by default),
   and cwd is translated on every `run`: host `<worktree>/a/b` becomes guest `/workspace/a/b`.
 

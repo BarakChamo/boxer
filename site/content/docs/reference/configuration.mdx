@@ -761,6 +761,19 @@ sink     = "otel"
 endpoint = "http://127.0.0.1:4318"
 ```
 
+## Deprecated
+
+These still load, so a `boxer.toml` that boxer 1.0 read keeps working. Each has no effect, prints a
+warning, and will be removed in 2.0.
+
+### `require_linked_worktree`
+
+`bool`, default `false`. Use `require_worktree = "require"` instead.
+
+### `reuse_existing`
+
+`bool`, default `true`. A scope always reuses its sandbox. Delete the line.
+
 ## Environment variables
 
 Eighteen scalar keys can be set from the environment, for a harness that offers no other way to

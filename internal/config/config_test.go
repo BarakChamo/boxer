@@ -77,13 +77,21 @@ func TestHarnessOverrideEnumsAreChecked(t *testing.T) {
 	}
 }
 
-// Keys that were accepted and did nothing are gone; naming one is the same error as a typo.
-func TestRemovedKeysAreErrors(t *testing.T) {
+// 1.0 accepted these two keys, and neither did anything. They still load, so a boxer.toml 1.0 read
+// keeps working, and each one says what to use instead.
+func TestDeprecatedKeysLoadWithAWarning(t *testing.T) {
 	d := t.TempDir()
-	for _, k := range []string{"require_linked_worktree = true", "reuse_existing = false"} {
-		p := write(t, d, "r.toml", k+"\n")
-		if _, err := LoadFiles(p); err == nil || !strings.Contains(err.Error(), "unknown key") {
-			t.Errorf("%s: want unknown key error, got %v", k, err)
+	for _, c := range []struct{ line, want string }{
+		{"require_linked_worktree = true", `require_worktree = "require"`},
+		{"reuse_existing = false", "always reuses"},
+	} {
+		p := write(t, d, "r.toml", c.line+"\n")
+		cfg, err := LoadFiles(p)
+		if err != nil {
+			t.Fatalf("%s: a key 1.0 accepted must still load: %v", c.line, err)
+		}
+		if !strings.Contains(strings.Join(cfg.Warnings, "\n"), c.want) {
+			t.Errorf("%s: want a warning naming %q, got %v", c.line, c.want, cfg.Warnings)
 		}
 	}
 }
