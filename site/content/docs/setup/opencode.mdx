@@ -3,8 +3,8 @@ title: OpenCode
 description: Route OpenCode's shell commands into the sandbox with a plugin.
 ---
 
-OpenCode has no hooks, but it loads TypeScript plugins. boxer's plugin rewrites each intercepted
-command to `boxer run` before OpenCode runs it.
+OpenCode has no hooks, but it loads TypeScript plugins. boxer's plugin creates the sandbox when a
+session starts, and rewrites each intercepted command to `boxer run` before OpenCode runs it.
 
 ## Set up
 

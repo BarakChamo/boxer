@@ -87,8 +87,8 @@ format supports them:
 | **Skill** | Explains to the agent how commands run here. |
 | **Subagent** | A helper agent that runs everything through boxer (Claude Code only). |
 
-Existing hooks and settings are kept. The files need to be on the branch, so worktrees cut from it,
-including ones your agent or orchestrator creates, get them too.
+Existing hooks and settings are kept. Claude Code reads the files from each worktree, so they need to
+be on the branch worktrees are cut from. Codex reads them from the main checkout.
 
 <Callout title="Just trying it?">
 Run `boxer install claude-code --user` instead. It writes the hooks to `~/.claude/settings.json`,

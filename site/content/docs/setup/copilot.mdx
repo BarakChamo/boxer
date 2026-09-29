@@ -26,6 +26,10 @@ there is nothing to commit.
 In a repository with no `boxer.toml`, boxer still sandboxes the intercepted commands, using an image
 picked from the lockfile.
 
+Copilot's hook runs only before each command. It has no session-start event, so the sandbox is
+created on the first intercepted command, and `warm_on_session_start` does nothing. Run
+`boxer install git` to start each new worktree's sandbox as soon as git creates it.
+
 ## Check it
 
 ```sh

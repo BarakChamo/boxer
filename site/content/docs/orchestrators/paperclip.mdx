@@ -25,8 +25,8 @@ Use the user layer. Paperclip does not bypass Codex's hook trust, and it builds 
 
 ## Check it
 
-Paperclip does not pass boxer's trace variable through, so run `boxer doctor` in the task's
-worktree to confirm the integration is active.
+Run `boxer integrations` to confirm the user-level Codex hook is in `~/.codex/config.toml`. Then
+ask an agent to run `python3 -c 'import sys; print(sys.platform)'` in a task. It prints `linux`.
 
 Turn on isolated workspaces in Paperclip's experimental settings. Without them, every run shares
 the project checkout, and so shares one sandbox.

@@ -198,6 +198,8 @@ a [named pack](#boxer-pack).
 ```sh
 boxer url [PORT]
 boxer open [PORT]
+boxer url --all
+boxer open --all
 ```
 
 Prints the address of this worktree's server, which is its [`[urls]`](/docs/configure/urls) name or else
@@ -205,6 +207,10 @@ Prints the address of this worktree's server, which is its [`[urls]`](/docs/conf
 `open` also opens the address in a browser when a person is at the terminal. The command exits 4
 when this scope has no sandbox. It exits 1 when the sandbox forwards no ports, or not the one you
 named.
+
+`--all` lists every running sandbox's servers on the configured backend, one `name<TAB>address` line
+each, and works outside a repository. `open --all` also opens each one. It exits 1 when no running
+sandbox forwards a port.
 
 ## `boxer backends`
 
@@ -360,7 +366,7 @@ log.
 ## `boxer watch`
 
 ```sh
-boxer watch [--interval 1s] [--json]
+boxer watch [-A] [--interval 1s] [--json]
 ```
 
 Streams sandbox state changes on the configured backend, and events from the file sink when it is
@@ -368,6 +374,7 @@ on, until interrupted. Exit 1 when the backend cannot be listed.
 
 | Flag | Default | |
 | --- | --- | --- |
+| `-A`, `--all-backends` | `false` | Every installed backend, as `ls -A` |
 | `--interval D` | `1s` | How often to compare listings |
 | `--json` | `false` | [One object per line](/docs/reference/json#watching) |
 

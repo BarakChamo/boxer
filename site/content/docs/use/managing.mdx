@@ -60,8 +60,14 @@ boxer gc              # sandboxes whose worktree is gone or unused past idle_tim
 boxer gc --all        # also every stopped sandbox and every unreferenced pack (running ones stay)
 ```
 
-`idle_timeout` defaults to `2h`. `auto_reclaim` is on by default. With it on, ordinary commands run
-the same sweep in the background, at most once every `reclaim_every` (`6h`).
+`idle_timeout` defaults to `2h`. `auto_reclaim` is on by default. With it on, ordinary boxer
+commands run the same sweep in the background, at most once every `reclaim_every` (`6h`). No
+daemon runs it, so nothing is reclaimed until some boxer command runs.
+
+The sweep deletes, rather than stops, a sandbox unused past `idle_timeout`, even when its worktree
+still exists. The next command creates it again: `image_setup` comes from the pack on smolvm,
+`setup` is not repeated because its work is in the worktree, and data a service kept inside the
+sandbox, such as a database, is gone.
 
 ## Check the backends
 

@@ -1046,13 +1046,57 @@ func urlCmd(open bool, e *box.Env, args []string, stdout, stderr io.Writer) int 
 	}
 	fmt.Fprintln(stdout, u)
 	if open && cli.Detect(stdout, os.Getenv) == cli.Human {
-		opener := "xdg-open"
-		if runtime.GOOS == "darwin" {
-			opener = "open"
-		}
-		_ = exec.Command(opener, u).Start()
+		openURL(u)
 	}
 	return 0
+}
+
+// urlAllCmd prints, and with open opens, every running sandbox's servers on this backend: one line
+// per server, the sandbox's name and then its address. Several agents in several worktrees each
+// run a dev server, and finding them one worktree at a time was the chore this removes.
+func urlAllCmd(open bool, stdout, stderr io.Writer) int {
+	ms, err := vm.Owned(vm.Host(hostBackend()))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
+	human := cli.Detect(stdout, os.Getenv) == cli.Human
+	n := 0
+	for _, m := range ms {
+		if !m.Running() {
+			continue
+		}
+		urls := box.MachineURLs(m)
+		for guest, host := range box.PortsOf(m) {
+			if _, named := urls[guest]; !named {
+				if urls == nil {
+					urls = map[string]string{}
+				}
+				urls[guest] = "http://127.0.0.1:" + host
+			}
+		}
+		for _, guest := range sortedMapKeys(urls) {
+			fmt.Fprintf(stdout, "%s\t%s\n", scope.Slug(m.Name), urls[guest])
+			if open && human {
+				openURL(urls[guest])
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		fmt.Fprintln(stderr, "boxer: no running sandbox forwards a port")
+		return 1
+	}
+	return 0
+}
+
+func openURL(u string) {
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	_ = exec.Command(opener, u).Start()
 }
 
 // completionCmd prints a shell completion script. The command list is static: it is the set of

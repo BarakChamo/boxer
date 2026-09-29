@@ -10,12 +10,15 @@ boxer adds a `PreToolUse` hook to Claude Code. When Claude runs `npm test`, the 
 
 ```sh
 boxer install claude-code
-git add .claude .mcp.json
+git add .claude/settings.json .claude/skills .claude/agents .mcp.json
 git commit -m "Run Claude Code's commands in boxer"
 ```
 
 The first time you open the repository, Claude Code asks you to approve the `boxer` MCP server from
 `.mcp.json`. Approve it.
+
+`claude --worktree` creates worktrees in `.claude/worktrees/`. Add that directory to `.gitignore` so
+`git add .claude` never stages them.
 
 ## What it writes
 

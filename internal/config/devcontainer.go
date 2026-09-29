@@ -195,11 +195,11 @@ func (d devcontainer) unsupported() []string {
 		}
 		sort.Strings(names)
 		out = append(out, "`features` needs an image build, which boxer does not do ("+strings.Join(names, ", ")+
-			"). Install them in `setup`, or build an image yourself and set `image` to the archive.")
+			"). Install them in `image_setup`, or build an image yourself and set `image` to it.")
 	}
 	if d.Build != nil || d.DockerFile != "" {
 		out = append(out, "`build`/`dockerFile` needs an image build, which boxer does not do. "+
-			"Build it with your own tooling, `docker save` it, and set `image` to the archive.")
+			"Build it yourself and set `image` to it: the tag on docker or podman, or a `docker save` archive on smolvm.")
 	}
 	var widen []string
 	if len(d.RunArgs) > 0 {

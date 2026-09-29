@@ -89,3 +89,25 @@ func TestCacheCanBeDisabledOrNarrowed(t *testing.T) {
 		t.Errorf("want only yarn, got %v", got)
 	}
 }
+
+// pnpm and poetry keep their caches in different places on macOS and Linux. The macOS path was
+// once used everywhere, so a Linux host never got those caches.
+func TestCachePathsFollowTheHostOS(t *testing.T) {
+	host := func(goos, lock string) string {
+		for _, c := range cacheMountsFor(goos) {
+			if c.lockfile == lock {
+				return c.host
+			}
+		}
+		return ""
+	}
+	if got := host("linux", "pnpm-lock.yaml"); got != "~/.local/share/pnpm/store" {
+		t.Errorf("linux pnpm: %s", got)
+	}
+	if got := host("darwin", "pnpm-lock.yaml"); got != "~/Library/pnpm/store" {
+		t.Errorf("darwin pnpm: %s", got)
+	}
+	if got := host("linux", "poetry.lock"); got != "~/.cache/pypoetry" {
+		t.Errorf("linux poetry: %s", got)
+	}
+}

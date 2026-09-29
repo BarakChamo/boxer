@@ -92,6 +92,12 @@ boxer: installing codex in the sandbox (once per host)
 On smolvm, boxer saves the result as a [pack](/docs/concepts/scopes-and-packs), and later VMs start
 with the harness installed. Other backends install it once per sandbox.
 
+The install uses `npm`, and for some harnesses `apt-get`. The default inside image has both. With
+your own `image`, make sure it has Node and npm, or add them in `image_setup`.
+
+`secrets` and `env_passthrough` do not reach the harness process in inside mode. The harness gets
+its own login variables, listed below.
+
 If the install is interrupted, run `boxer up --recreate`.
 
 ## Paths

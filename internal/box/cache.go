@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -16,14 +17,13 @@ import (
 //
 // Mounting that cache in keeps the install *inside* the guest, which is the part that matters for
 // correctness: every binary is still chosen and unpacked for the guest's own platform, so nothing
-// here can produce the `invalid ELF header` that a host-side install risks. It is strictly a
-// speed change with no semantic one, which is why it is the default and `[prep]` is not.
+// here can produce the `invalid ELF header` that a host-side install risks.
 //
-// Read-only on purpose, and the limit is worth stating: npm wants to *write* to its cache, so a
-// read-only mount makes the host cache a source to read from rather than a cache to fill. The
-// guest still keeps its own writable cache and still benefits. A writable shared mount across
-// several concurrent sandboxes is a corruption question rather than a performance one, and is not
-// taken here without measuring it.
+// Read-only on purpose, and off by default because of what that costs: the mount sits where the
+// tool writes its own cache, so a clean install of what the host already has works, and installing
+// anything the host has not cached fails (npm: EROFS on _cacache/tmp, measured). A writable shared
+// mount across several concurrent sandboxes is a corruption question rather than a performance
+// one, and is not taken here without measuring it.
 type cacheMount struct {
 	lockfile string // what proves the project uses this manager
 	host     string // where the host keeps it; ~ is expanded, $(cmd) is asked
@@ -31,16 +31,26 @@ type cacheMount struct {
 }
 
 // The guest paths assume the tool runs as root, which is what every image boxer detects does.
-var cacheMounts = []cacheMount{
-	{"package-lock.json", "~/.npm", "/root/.npm"},
-	{"pnpm-lock.yaml", "~/Library/pnpm/store", "/root/.local/share/pnpm/store"},
-	{"yarn.lock", "~/.cache/yarn", "/root/.cache/yarn"},
-	{"bun.lock", "~/.bun/install/cache", "/root/.bun/install/cache"},
-	{"bun.lockb", "~/.bun/install/cache", "/root/.bun/install/cache"},
-	{"uv.lock", "~/.cache/uv", "/root/.cache/uv"},
-	{"poetry.lock", "~/Library/Caches/pypoetry", "/root/.cache/pypoetry"},
-	{"Cargo.lock", "~/.cargo/registry", "/usr/local/cargo/registry"},
-	{"go.sum", "$GOMODCACHE", "/go/pkg/mod"},
+var cacheMounts = cacheMountsFor(runtime.GOOS)
+
+// cacheMountsFor is the table for one host OS: pnpm and poetry keep their caches in a different
+// place on macOS than on Linux, and a macOS path on Linux mounts nothing.
+func cacheMountsFor(goos string) []cacheMount {
+	pnpm, poetry := "~/.local/share/pnpm/store", "~/.cache/pypoetry"
+	if goos == "darwin" {
+		pnpm, poetry = "~/Library/pnpm/store", "~/Library/Caches/pypoetry"
+	}
+	return []cacheMount{
+		{"package-lock.json", "~/.npm", "/root/.npm"},
+		{"pnpm-lock.yaml", pnpm, "/root/.local/share/pnpm/store"},
+		{"yarn.lock", "~/.cache/yarn", "/root/.cache/yarn"},
+		{"bun.lock", "~/.bun/install/cache", "/root/.bun/install/cache"},
+		{"bun.lockb", "~/.bun/install/cache", "/root/.bun/install/cache"},
+		{"uv.lock", "~/.cache/uv", "/root/.cache/uv"},
+		{"poetry.lock", poetry, "/root/.cache/pypoetry"},
+		{"Cargo.lock", "~/.cargo/registry", "/usr/local/cargo/registry"},
+		{"go.sum", "$GOMODCACHE", "/go/pkg/mod"},
+	}
 }
 
 // CacheMounts returns the read-only host cache mounts for this worktree, in `host:guest:ro` form.

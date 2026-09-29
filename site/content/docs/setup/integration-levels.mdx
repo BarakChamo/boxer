@@ -78,8 +78,7 @@ a hook does.
 `boxer install opencode` and `boxer install pi` write them. pi loads project extensions only once
 the project is trusted. See [pi](/docs/setup/pi).
 
-The rewrite happens in-process and writes no rewrite line to the trace. The evaluation matrix
-reads OpenCode's evidence from the guest instead.
+The plugin and extension call `boxer hook`, so their rewrites appear in the trace like any hook's.
 
 ## PATH shims
 

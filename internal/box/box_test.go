@@ -348,6 +348,10 @@ func TestCreateWaitsForAConcurrentCreator(t *testing.T) {
 func TestImageDetectorTable(t *testing.T) {
 	vmtest.Install(t)
 	for _, tc := range []struct{ file, image string }{
+		{"Gemfile.lock", "ruby:3-slim-bookworm"},
+		{"pom.xml", "maven:3-eclipse-temurin-21"},
+		{"build.gradle", "gradle:8-jdk21"},
+		{"build.gradle.kts", "gradle:8-jdk21"},
 		{"bun.lock", "oven/bun:1-slim"},
 		{"bun.lockb", "oven/bun:1-slim"},
 		{"pnpm-lock.yaml", "node:24-bookworm-slim"},
@@ -1337,5 +1341,42 @@ func TestRebuildClearsTheSetupRecordWithoutAPack(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("a rebuild with no pack kept the setup record, so setup would not run again")
+	}
+}
+
+// A Rails or Spring app with a package.json for its assets gets its server's language, not Node.
+func TestServerLanguageWinsOverAssetLockfiles(t *testing.T) {
+	vmtest.Install(t)
+	for _, tc := range []struct{ lock, image string }{{"Gemfile.lock", "ruby:3-slim-bookworm"}, {"pom.xml", "maven:3-eclipse-temurin-21"}} {
+		dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+		for _, f := range []string{tc.lock, "package-lock.json"} {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e, err := Resolve(dir, "", scope.Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if img, _ := e.Image(); !strings.HasSuffix(img, tc.image) {
+			t.Errorf("%s with package-lock.json: got %s, want %s", tc.lock, img, tc.image)
+		}
+	}
+}
+
+// A secret the repository declares but the host does not set is named once, not dropped silently.
+func TestUnsetSecretIsNamedOnce(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"secrets = [\"BOXER_UNSET_SECRET_X\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	e.Stderr = &errOut
+	e.HostSecrets()
+	e.HostSecrets()
+	if n := strings.Count(errOut.String(), "BOXER_UNSET_SECRET_X is not set"); n != 1 {
+		t.Fatalf("want the missing secret named once, got %d:\n%s", n, errOut.String())
 	}
 }

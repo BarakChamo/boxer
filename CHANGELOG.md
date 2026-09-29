@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-29
+
 ### Added
+- `boxer url --all` and `boxer open --all` list, or open, every running sandbox's servers.
+- `boxer watch -A` watches every installed backend, as `ls -A` lists them.
+- Image detection for Ruby (`Gemfile.lock`), Maven (`pom.xml`) and Gradle (`build.gradle`,
+  `build.gradle.kts`). They win over a `package.json` kept for assets.
 - `scripts/linux-smoke.sh` runs the smoke suite on Linux from a Mac, in a throwaway Lima VM with
   nested virtualization, against smolvm, docker and podman installed natively. smolvm on Linux had
   never been run before; it needs `/dev/kvm`, which nested virtualization provides on Apple M3 and
@@ -32,6 +38,10 @@ All notable changes to this project are documented here. The format follows
   warning naming what to use instead, and will be removed in 2.0.
 
 ### Fixed
+- The pnpm and poetry cache paths were macOS-only, so Linux hosts never got those caches.
+- A secret listed in `secrets` but not set on the host was dropped silently. boxer now names it once.
+- The devcontainer `build` refusal gave smolvm advice on every backend. It now says what to do on
+  each.
 - **`start` services and the `ready` probe got none of `[env]`, `env_passthrough` or `secrets`.**
   `setup`, `image_setup` and `boxer run` always did, and the docs said `start` did too. A dev server
   or database that read `DATABASE_URL` or a secret started without it. Found by setup simulations

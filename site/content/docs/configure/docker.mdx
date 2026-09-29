@@ -73,7 +73,7 @@ image_setup = [
 setup = ["npm ci"]
 start = [
   "redis-server --save '' --appendonly no",
-  "su postgres -c 'postgres -D /var/lib/postgresql/data -k /tmp'",
+      "su postgres -c 'postgres -D /var/lib/postgresql/data -k /tmp -h 0.0.0.0'",
   "npx next dev -H 0.0.0.0 -p 3000",
 ]
 ready = "pg_isready -h 127.0.0.1 -U postgres && redis-cli ping"
@@ -90,7 +90,10 @@ REDIS_URL = "redis://127.0.0.1:6379"
 - `image_setup` installs the services once. On smolvm, the result is cached, so the next worktree
   boots in about 2 seconds instead of reinstalling.
 - `start` runs them every time the sandbox starts. Put the Postgres socket in `/tmp`, because `/run`
-  is empty at boot.
+  is empty at boot. `-h 0.0.0.0` lets a forwarded port reach it, if you add `auto:5432` to `ports`
+  and a `host all all all trust` line to `pg_hba.conf`.
+- `apt-get` or `apk` in `image_setup` needs the distribution's mirror in `allow_hosts`, such as
+  `deb.debian.org` or `dl-cdn.alpinelinux.org`.
 - `ready` waits for both before the agent's first command.
 - The database starts from the state `image_setup` left. Data written later is lost when the
   sandbox is removed. `setup` runs before `start`, so seed the database from a

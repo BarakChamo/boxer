@@ -14,6 +14,9 @@ git add .codex .agents
 git commit -m "Run Codex's commands in boxer"
 ```
 
+Codex reads project hooks from the main checkout's files, not from the branch a worktree is on.
+Every worktree of this checkout uses them either way. Committing them shares them with your team.
+
 Then do two things `boxer install` cannot:
 
 1. **Trust the project hooks.** Codex loads project hooks only from a trusted project. Run `/hooks`

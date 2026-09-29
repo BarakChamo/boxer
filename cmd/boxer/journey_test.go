@@ -519,3 +519,57 @@ func TestStatusReportsForwardedPorts(t *testing.T) {
 		t.Fatalf("the human form must say where to point a browser: %d %s", code, out)
 	}
 }
+
+// url --all names every running sandbox's server, so finding several agents' dev servers is one
+// command instead of one per worktree.
+func TestURLAllListsEveryRunningServer(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n[network]\nmode = \"allowlist\"\nports = [\"auto:3000\"]\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	code, out := call(t, nil, "url", "--all")
+	if code != 0 || !strings.Contains(out, "http://127.0.0.1:") {
+		t.Fatalf("url --all: %d %s", code, out)
+	}
+}
+
+// watch -A covers every installed backend and still reports the configured one's sandboxes.
+func TestWatchAllBackendsSeesTheSandbox(t *testing.T) {
+	vmtest.Install(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, out)
+	}
+	r, w := io.Pipe()
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"watch", "-A", "--json", "--interval", "50ms"}, strings.NewReader(""), w, io.Discard)
+	}()
+	sc := bufio.NewScanner(r)
+	got := make(chan string, 1)
+	go func() {
+		if sc.Scan() {
+			got <- sc.Text()
+		}
+	}()
+	select {
+	case line := <-got:
+		if !strings.Contains(line, `"change":"present"`) {
+			t.Errorf("first line should report the existing sandbox: %s", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("watch -A reported nothing")
+	}
+	_ = r.Close()
+	call(t, nil, "down")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Error("watch -A kept running after its reader closed")
+	}
+}

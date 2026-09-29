@@ -62,6 +62,8 @@ type Env struct {
 	Stderr  io.Writer
 	// Warnings collected during resolution, printed by doctor and by run when relevant.
 	Warnings []string
+	// secretsWarned stops HostSecrets naming the same missing secret on every exec.
+	secretsWarned bool
 	// FromPack names a saved pack (`boxer pack save`) this sandbox must be created from, instead
 	// of the automatic environment/harness/image ladder. It is set by `boxer pack use` only.
 	FromPack string
@@ -232,6 +234,12 @@ func (e *Env) Image() (string, string) {
 // binary that only ships a glibc build stops working, and that failure is much harder to read
 // than a missing compiler. `image = "node:24-alpine"` is one line for anyone who wants it.
 var detectors = []struct{ file, image string }{
+	// Ruby and JVM first: a Rails or Spring app often carries a package.json for its assets, and
+	// the language that runs the server is the one the image has to have.
+	{"Gemfile.lock", "ruby:3-slim-bookworm"},
+	{"pom.xml", "maven:3-eclipse-temurin-21"},
+	{"build.gradle", "gradle:8-jdk21"},
+	{"build.gradle.kts", "gradle:8-jdk21"},
 	{"bun.lock", "oven/bun:1-slim"},
 	{"bun.lockb", "oven/bun:1-slim"},
 	{"pnpm-lock.yaml", "node:24-bookworm-slim"},
@@ -1070,6 +1078,17 @@ func DeniedHosts(client vm.Backend, name string, cfg config.Config, since time.T
 func (e *Env) HostSecrets() []string {
 	names := append(append([]string{}, e.Cfg.Secrets...), e.Cfg.EnvPassthrough...)
 	slices.Sort(names)
+	// A secret the repository declared but the host does not set is the likeliest reason a test
+	// that needs it fails, and dropping it silently made that hard to see. env_passthrough is
+	// optional by nature (CI is unset on a laptop), so only `secrets` are named.
+	if !e.secretsWarned && e.Stderr != nil {
+		for _, k := range e.Cfg.Secrets {
+			if _, ok := os.LookupEnv(k); !ok {
+				fmt.Fprintf(e.Stderr, "boxer: warning: secret %s is not set on the host, so the sandbox will not have it\n", k)
+			}
+		}
+		e.secretsWarned = true
+	}
 	out := []string{}
 	for _, k := range slices.Compact(names) {
 		if _, ok := os.LookupEnv(k); ok {

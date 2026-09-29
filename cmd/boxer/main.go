@@ -59,6 +59,7 @@ See what is here
   boxer integrations [add NAME]        harnesses, orchestrators and tools, and whether boxer is wired into each
                                        add: <harness>, skill (npx skills), plugin (npx plugins), git, conductor
   boxer url [PORT] | boxer open [PORT] where this worktree's server is, by name when [urls] gives it one
+  boxer url --all | boxer open --all  every running sandbox's servers
 
 Manage sandboxes
   boxer stop|rm [NAME...] [--all|--gone|--stopped] [-i] [-y]   stop or remove; -i to choose
@@ -82,7 +83,7 @@ Run and configure
   boxer capsule new [-o PATH]      write a replayable manifest of the last run in this scope
   boxer capsule inspect|replay <path>  read one, or run it again and say whether it reproduced
   boxer logs [--scope NAME] [-n N] [--json]  read the event log ([telemetry] sink = "file")
-  boxer watch [--json]             stream sandbox state changes as they happen
+  boxer watch [-A] [--json]        stream sandbox state changes as they happen (-A: every backend)
   boxer shim install [dir]         write PATH shims for the intercept list
   boxer hook <harness>             harness hook entry point (reads JSON on stdin)
   boxer mcp                        MCP server exposing boxer_run and boxer_status
@@ -175,6 +176,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "completion":
 		return completionCmd(args[1:], stdout, stderr)
 	case "url", "open":
+		if len(args) > 1 && args[1] == "--all" {
+			return urlAllCmd(args[0] == "open", stdout, stderr)
+		}
 		e, err := box.Resolve("", "", scope.Identity{})
 		if err != nil {
 			fmt.Fprintln(stderr, err)
@@ -1225,6 +1229,8 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "one JSON document per line")
 	interval := fs.Duration("interval", time.Second, "how often to look for state changes")
+	all := fs.Bool("all-backends", false, "watch every installed backend, not only the configured one")
+	fs.BoolVar(all, "A", false, "shorthand for --all-backends")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -1246,10 +1252,19 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 		sentEvents = len(seenNow) // only what happens from now on
 	}
 	for {
-		ms, err := vm.Owned(client)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
+		var ms []vm.Machine
+		if *all {
+			// Every installed backend, as `ls -A` sees them. A backend that fails to answer is
+			// reported and skipped for this round rather than ending the watch.
+			for _, h := range listMachines(true, stderr) {
+				ms = append(ms, h.m)
+			}
+		} else {
+			var err error
+			if ms, err = vm.Owned(client); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 		}
 		now := map[string]string{}
 		for _, m := range ms {
