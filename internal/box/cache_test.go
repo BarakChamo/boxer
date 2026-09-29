@@ -26,6 +26,7 @@ func cacheEnv(t *testing.T, cfg config.Config, lockfiles ...string) *Env {
 // sandbox, and mounting a cache for a manager the project does not use is noise.
 func TestOnlyCachesThatBothSidesHaveAreMounted(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.Cache.Enabled = true
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	if err := os.MkdirAll(filepath.Join(home, ".npm"), 0o755); err != nil {
@@ -55,7 +56,9 @@ func TestCacheMountsAreReadOnly(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".npm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range cacheEnv(t, config.Defaults(), "package-lock.json").CacheMounts() {
+	on := config.Defaults()
+	on.Cache.Enabled = true
+	for _, m := range cacheEnv(t, on, "package-lock.json").CacheMounts() {
 		if !strings.HasSuffix(m, ":ro") {
 			t.Errorf("%q is not read-only", m)
 		}
@@ -72,13 +75,14 @@ func TestCacheCanBeDisabledOrNarrowed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	off := config.Defaults()
-	off.Cache.Enabled = false
-	if got := cacheEnv(t, off, "package-lock.json").CacheMounts(); len(got) != 0 {
-		t.Errorf("disabled, but mounted %v", got)
+	// Off by default: a read-only cache at the tool's own path breaks installing anything the
+	// host has not cached (npm fails with EROFS), so mounting one has to be a choice.
+	if got := cacheEnv(t, config.Defaults(), "package-lock.json").CacheMounts(); len(got) != 0 {
+		t.Errorf("off by default, but mounted %v", got)
 	}
 
 	narrow := config.Defaults()
+	narrow.Cache.Enabled = true
 	narrow.Cache.Managers = []string{"yarn"}
 	got := cacheEnv(t, narrow, "package-lock.json", "yarn.lock").CacheMounts()
 	if len(got) != 1 || !strings.Contains(got[0], "yarn") {

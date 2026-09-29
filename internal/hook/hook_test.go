@@ -328,3 +328,27 @@ func TestCopilotDialect(t *testing.T) {
 		}
 	}
 }
+
+// A boxer.toml that does not load must not turn the sandbox off. The hook once allowed everything
+// in that case, so a TOML mistake ran every intercepted command on the host without a word.
+func TestBrokenConfigRefusesWhatWouldBeSandboxed(t *testing.T) {
+	vmtest.Install(t)
+	// env_passthrough after [env] is a nested key TOML cannot decode into a string map: the exact
+	// mistake the docs once printed.
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"[env]\nNODE_ENV = \"dev\"\nenv_passthrough = [\"CI\"]\n")
+	ask := func(cmd string) (map[string]any, int) {
+		out, _, code := call(t, "claude-code", map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": cmd}, "cwd": dir})
+		return out, code
+	}
+	out, _ := ask("npm test")
+	if hso(out)["permissionDecision"] != "deny" || !strings.Contains(hso(out)["permissionDecisionReason"].(string), "could not be loaded") {
+		t.Fatalf("an intercepted command must be refused, naming the config error: %v", out)
+	}
+	if out, _ := ask("git status"); out != nil {
+		t.Fatalf("a passthrough command is still allowed: %v", out)
+	}
+	t.Setenv("BOXER_MODE", "off")
+	if out, _ := ask("npm test"); out != nil {
+		t.Fatalf("BOXER_MODE=off lets it through: %v", out)
+	}
+}

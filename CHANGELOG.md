@@ -23,11 +23,26 @@ All notable changes to this project are documented here. The format follows
   scripts, and a comparison with the alternatives. Tests now fail when a CLI flag, `boxer.toml` key,
   `BOXER_*` variable or `pkg/boxer` identifier is missing from its reference page.
 
+- `[cache]` is now off by default. The read-only host cache sits where each tool writes its own,
+  so installing any package the host had not cached failed (`npm install` with `EROFS`). It is
+  opt-in, with that limit documented.
+
 ### Deprecated
 - `require_linked_worktree` and `reuse_existing`. Neither ever had an effect. They still load, with a
   warning naming what to use instead, and will be removed in 2.0.
 
 ### Fixed
+- **`start` services and the `ready` probe got none of `[env]`, `env_passthrough` or `secrets`.**
+  `setup`, `image_setup` and `boxer run` always did, and the docs said `start` did too. A dev server
+  or database that read `DATABASE_URL` or a secret started without it. Found by setup simulations
+  on Rails and Django, and verified on smolvm.
+- **A `boxer.toml` that failed to parse turned the sandbox off.** The hook allowed every command,
+  so intercepted commands ran on the host without a word. It now refuses any command the default
+  `intercept` list would sandbox, naming the error. `BOXER_MODE=off` still lets you through.
+- **`image_setup` ran as the image's user, not root,** on every backend, so an image ending in
+  `USER node` could not install system packages. It now runs as root, as documented.
+- **The docs' own `[env]` example was invalid TOML.** It put `env_passthrough` and `secrets` after
+  `[env]`, which makes them part of that table, and the file failed to load.
 - **`boxer install codex` and `boxer install dsh` deleted the user's own hooks.** They copied the
   bundled `hooks.json` over an existing `.codex/hooks.json` or `.dsh/hooks.json`. Both now merge,
   as `.claude/settings.json` always did, and a second install adds nothing.

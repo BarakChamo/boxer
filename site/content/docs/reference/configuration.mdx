@@ -144,8 +144,9 @@ on_sandbox_unavailable = "passthrough"
 
 `[]string`, default below.
 
-Programs whose commands run in the sandbox. A compound command is wrapped whole when any segment
-starts with one of them. `["*"]` intercepts every program not in `passthrough`. Not settable from
+Programs whose commands run in the sandbox. A program matches by name, after skipping leading `VAR=value` assignments and any path, so
+`bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths. A
+compound command is wrapped whole when any `&&`, `||`, `;` or `|` segment matches. `["*"]` intercepts every program not in `passthrough`. Not settable from
 the environment.
 
 ```toml
@@ -319,14 +320,15 @@ target = "linux/arm64/musl"
 
 ### `cache.enabled`
 
-`bool`, default `true`.
+`bool`, default `false`. Env none.
 
 Mount the host's package caches into the guest, read-only. Installs still run in the guest, so only
-the download is saved.
+the download is saved. Installing a package the host has not cached fails, because the tool
+cannot write to its read-only cache. See [host package caches](/docs/configure/environment#host-package-caches).
 
 ```toml
 [cache]
-enabled = false
+enabled = true
 ```
 
 ### `cache.managers`

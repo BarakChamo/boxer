@@ -41,8 +41,7 @@ egress log.
 When a backend lacks a feature, boxer refuses with an error that names it.
 
 Everything else works the same on all four: hooks, shims, the MCP server, tasks, URLs, devcontainer
-support, `[prep]` and cache mounts. On every backend the sandbox sees the worktree, read-only
-package caches and your `mounts`. `git`, `gh` and `ssh` run on the host. Forwarded ports and the
+support, `[prep]` and cache mounts. On every backend the sandbox sees the worktree, your `mounts`, and read-only package caches when `[cache]` is on. `git`, `gh` and `ssh` run on the host. Forwarded ports and the
 portless proxy bind `127.0.0.1`. See the [security model](/docs/concepts/security).
 
 ## Choose a backend

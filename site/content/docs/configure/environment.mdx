@@ -91,13 +91,21 @@ Both run again.
 
 ### Host package caches
 
-boxer mounts the host's package cache into the guest read-only. It picks the cache by lockfile:
-`~/.npm` for `package-lock.json`, and the pnpm, yarn, bun, uv, poetry, cargo and Go caches for
-theirs. The install still runs in the guest, so native binaries are built for the guest.
+boxer can mount the host's package cache into the guest, read-only, to save downloads. It is off
+by default. It picks the cache by lockfile: `~/.npm` for `package-lock.json`, and the pnpm, yarn,
+bun, uv, poetry, cargo and Go caches for theirs. The install still runs in the guest, so native
+binaries are built for the guest.
+
+<Callout type="warn">
+The mount is read-only and sits where the tool writes its cache. A clean install of a lockfile the
+host has already installed works. Installing anything the host has not cached fails, for example
+`npm install <new-package>` with `EROFS: read-only file system`. Turn it on only for projects
+whose agents do not add dependencies.
+</Callout>
 
 ```toml
 [cache]
-enabled  = true          # the default
+enabled  = true          # off by default
 managers = ["auto"]      # or a list: npm, pnpm, yarn, bun, uv, poetry, cargo, go
 ```
 
@@ -203,12 +211,15 @@ To give each worktree's server a name instead of a port number, turn on
 ## Set environment variables and secrets
 
 ```toml
-[env]
-NODE_ENV = "development"          # stored in the pack
-
 env_passthrough = ["CI"]          # copied from the host on each run; the default
 secrets = ["NPM_TOKEN"]           # the same, and kept out of argv
+
+[env]
+NODE_ENV = "development"          # stored in the pack
 ```
+
+Top-level keys such as `env_passthrough` and `secrets` must come before the first `[table]`. TOML
+puts every key after `[env]` into that table, and boxer then refuses to load the file.
 
 - `[env]` is part of the pack key. Put nothing secret there.
 - boxer reads `env_passthrough` and `secrets` from the host every time.

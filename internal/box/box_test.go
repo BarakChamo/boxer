@@ -767,6 +767,71 @@ func TestStartAndReady(t *testing.T) {
 	}
 }
 
+// start and ready see the same environment as setup and boxer run. They once got none of it, so
+// a dev server that read DATABASE_URL from [env], or a key from `secrets`, started without it.
+func TestStartAndReadyGetTheEnvironment(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	t.Setenv("BOXER_TEST_SECRET", "s3cret")
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n"+
+		"secrets = [\"BOXER_TEST_SECRET\"]\nstart = [\"echo serving\"]\nready = \"true\"\n[env]\nDATABASE_URL = \"postgres://db\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	for _, line := range strings.Split(string(b), "\n") {
+		isStart := strings.Contains(line, "nohup")
+		isReady := strings.Contains(line, "machine exec") && strings.HasSuffix(strings.TrimSpace(line), " true")
+		if !isStart && !isReady {
+			continue
+		}
+		if !strings.Contains(line, "DATABASE_URL=postgres://db") || !strings.Contains(line, "BOXER_TEST_SECRET") {
+			t.Errorf("a start or ready exec is missing [env] or secrets:\n%s", line)
+		}
+		if strings.Contains(line, "s3cret") {
+			t.Errorf("a secret value reached argv:\n%s", line)
+		}
+	}
+	if !strings.Contains(string(b), "nohup") {
+		t.Fatalf("no start exec logged:\n%s", b)
+	}
+}
+
+// image_setup installs system packages, so it runs as root whatever the image's USER or `user` is.
+func TestImageSetupRunsAsRoot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\nuser = \"node\"\nimage_setup = [\"echo installing-system-packages\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	found := false
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.Contains(line, "installing-system-packages") || strings.Contains(line, "image-setup-done") {
+			found = true
+			if !strings.Contains(line, "-u 0") {
+				t.Errorf("an image_setup step did not run as root:\n%s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no image_setup exec logged:\n%s", b)
+	}
+}
+
 // A sandbox that never becomes ready must fail with a reason and the service's own last words,
 // not hang, pretend to be up, or send the reader looking for a log file.
 func TestReadyTimesOutWithSomewhereToLook(t *testing.T) {

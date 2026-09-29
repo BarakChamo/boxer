@@ -79,7 +79,9 @@ All but the last run the harness on the host. boxer calls this **outside**. See
 | `tool` | Denies the shell command and points the agent at `boxer_run`. For harnesses that can block a command but not rewrite one. |
 | `off` | Leaves boxer installed and does nothing. |
 
-Hooks and shims act only on commands whose first word is on `intercept`. The default list is
+Hooks act on commands whose program is on `intercept`, matched by name after skipping `VAR=value`
+prefixes and any path, in any part of a `&&`, `||`, `;` or `|` chain. If one part matches, the whole
+line runs in the sandbox. Shims act only on the programs they are named after. The default list is
 `npm`, `npx`, `pnpm`, `yarn`, `bun`, `node`, `python`, `pip`, `uv`, `pytest`, `cargo`, `go`, `make`
 and a few more. See [Integration levels](/docs/setup/integration-levels) for each level.
 

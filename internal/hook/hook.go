@@ -5,8 +5,10 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -204,6 +206,19 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 		}
 		if purpose == "intercept" && e != nil && e.Cfg.Mode != "off" && e.Cfg.OnSandboxUnavailable == "fail" {
 			return deny(d, stdout, err.Error(), "")
+		}
+		// A configuration that does not load must not turn boxer off. Allowing everything here
+		// once ran every intercepted command on the host, silently, because of a TOML typo. With
+		// no configuration to read, judge the command by the default intercept list and refuse
+		// what would have been sandboxed, naming the error.
+		var cerr *box.ConfigError
+		if purpose == "intercept" && errors.As(err, &cerr) && os.Getenv("BOXER_MODE") != "off" {
+			cmd, _ := toolArgs(d, in)["command"].(string)
+			def := config.Defaults()
+			if decide.Decide(decide.Input{Command: cmd, Mode: def.Mode, Intercept: def.Intercept, Passthrough: def.Passthrough}).Action != decide.Allow {
+				return deny(d, stdout, "boxer.toml could not be loaded, so this command was not run: "+err.Error(),
+					"fix boxer.toml (boxer doctor shows the error), or set BOXER_MODE=off to run it on the host")
+			}
 		}
 		return 0
 	}

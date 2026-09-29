@@ -19,8 +19,10 @@ boxer run --task test
 
 boxer looks the name up in `boxer.toml` and runs that command in the guest.
 
-Hooks and shims catch a command by its first word. `npm test` is caught, but
-`NODE_ENV=test ./node_modules/.bin/jest` runs on the host. A task does not depend on that match.
+Hooks catch a command by its program name, after skipping `VAR=value` prefixes and any path, and
+check every part of a `&&`, `||`, `;` or `|` chain. `NODE_ENV=test ./node_modules/.bin/npm test` is
+caught. `jest` runs on the host, because `jest` is not on the default `intercept` list. A task does
+not depend on that match.
 
 ## Describe a task
 

@@ -32,8 +32,9 @@ Probably, if either of these is true:
 
 - **You run more than one agent at a time.** Each one gets its own dev server, ports and installed
   tools, so they stop breaking each other.
-- **You let an agent run commands on its own.** An install script or a stray `rm` runs in the
-  sandbox instead of on your machine.
+- **You let an agent run commands on its own.** Its builds, tests and installs run in the
+  sandbox instead of on your machine. Programs not on the `intercept` list, like `rm`, still run on
+  your machine unless you add them.
 
 boxer does not protect the code in your project. The sandbox works on your real files, so an agent
 that deletes them deletes them. See [Security](/docs/concepts/security).

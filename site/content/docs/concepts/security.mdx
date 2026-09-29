@@ -10,7 +10,7 @@ description: What the sandbox isolates on each backend, what it does not, and th
 | --- | --- |
 | **Isolated** | Commands on `intercept` run in the guest. They cannot read your home directory, SSH keys, cloud credentials or any other host path boxer does not mount. |
 | **On the host on purpose** | `git`, `gh`, `ssh`, `boxer` and `smolvm` (`passthrough`). Hooks and MCP servers named in the harness's configuration. Commands not on `intercept`. `[prep]` commands. |
-| **Exposed to the guest** | The worktree, read-write. Host package caches, read-only. Anything in `mounts`. |
+| **Exposed to the guest** | The worktree, read-write. Anything in `mounts`. Host package caches, read-only, if `[cache]` is on. |
 | **Exposed to the host** | Ports in `network.ports`, bound to `127.0.0.1`. |
 | **Threat model** | A careless or destructive agent. boxer is not built to stop an agent that sets out to reach the host. |
 
@@ -29,7 +29,7 @@ A sandbox sees only what boxer mounts into it:
 
 - the git worktree, read-write
 - the host's package caches for the lockfiles the worktree has (`~/.npm` for `package-lock.json`,
-  and so on), read-only, unless `[cache] enabled = false`
+  and so on), read-only, when `[cache] enabled = true`
 - anything you list in `mounts`
 
 On the default backend, smolvm, the network is an allowlist. It holds the registry hosts the image

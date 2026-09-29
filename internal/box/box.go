@@ -74,6 +74,14 @@ type Env struct {
 }
 
 // Resolve builds an Env for cwd. harness may be empty; id fields may be empty.
+// ConfigError is a boxer.toml or devcontainer.json that could not be loaded. It is not "boxer is not
+// in use here": the repository asked for a sandbox and said how, so callers that route commands
+// must refuse them rather than let them run on the host.
+type ConfigError struct{ Err error }
+
+func (c *ConfigError) Error() string { return c.Err.Error() }
+func (c *ConfigError) Unwrap() error { return c.Err }
+
 func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if cwd == "" {
 		var err error
@@ -95,7 +103,7 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	}
 	cfg, err := config.Load(g.Toplevel, repoRoot)
 	if err != nil {
-		return nil, err
+		return nil, &ConfigError{Err: err}
 	}
 	if harness != "" {
 		cfg = cfg.ForHarness(harness)
@@ -1114,7 +1122,10 @@ func (e *Env) startServices() error {
 		// Detached and disowned: the command that launches a server must not wait for it.
 		line := "cd " + e.MountAt() + " && nohup " + shellWords(guestShell(cmd)) + " >>" + startLog + " 2>&1 &"
 		var out strings.Builder
+		// Services see the same environment as `setup` and every `boxer run`: a dev server that
+		// reads DATABASE_URL or a secret from [env] or `secrets` needs it when it starts.
 		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), User: e.Cfg.User,
+			Env: e.GuestEnv(), SecretEnv: e.HostSecrets(),
 			Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", line)
 		if err != nil || code != 0 {
 			return e.fail(&Error{Reason: fmt.Sprintf("start step failed (exit %d): %s", code, cmd), Cause: "START_FAILED", Scope: e.Scope,
@@ -1152,7 +1163,10 @@ func (e *Env) waitReady() error {
 	// interval, so a service that takes a minute is polled no harder than before.
 	wait := 25 * time.Millisecond
 	for {
-		if _, code, err := vm.Output(e.VM, e.Scope.Key, e.MountAt(), guestShell(e.Cfg.Ready)...); err == nil && code == 0 {
+		var probe bytes.Buffer
+		if code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), User: e.Cfg.User,
+			Env: e.GuestEnv(), SecretEnv: e.HostSecrets(),
+			Stdin: strings.NewReader(""), Stdout: &probe, Stderr: &probe}, guestShell(e.Cfg.Ready)...); err == nil && code == 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -1439,7 +1453,7 @@ func (e *Env) imageSetup() (ran bool, err error) {
 	// A transport failure is not a missing marker. Treating it as one re-ran every setup step on
 	// a VM that had already run them, which for a repository whose setup installs dependencies is
 	// minutes, not milliseconds.
-	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "test -f "+imageSetupMarker)
+	out, code, err := e.rootOutput("sh", "-c", "test -f "+imageSetupMarker)
 	if err != nil || vm.TransportFailure(out) {
 		return false, e.fail(&Error{Reason: "could not read the setup marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
@@ -1452,7 +1466,9 @@ func (e *Env) imageSetup() (ran bool, err error) {
 		stepStart := time.Now()
 		// Setup sees the same environment as every later command: a build that needs a registry
 		// token or a proxy setting needs it while installing, not only when running.
-		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), Env: e.GuestEnv(),
+		// As root, whatever the image's USER: image_setup installs system packages, and an image that
+		// ends in `USER node` would otherwise fail on the first apt-get.
+		code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.MountAt(), User: "0", Env: e.GuestEnv(),
 			SecretEnv: e.HostSecrets(),
 			Stdin:     strings.NewReader(""), Stdout: e.Stderr, Stderr: e.Stderr}, guestShell(cmd)...)
 		if err != nil || code != 0 {
@@ -1460,11 +1476,18 @@ func (e *Env) imageSetup() (ran bool, err error) {
 			return false, e.fail(e.setupError("image setup", "`image_setup`", code, cmd, stepStart))
 		}
 	}
-	_, code, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "mkdir -p /var/lib/boxer && touch "+imageSetupMarker)
+	_, code, err = e.rootOutput("sh", "-c", "mkdir -p /var/lib/boxer && touch "+imageSetupMarker)
 	if err == nil && code != 0 {
 		err = fmt.Errorf("writing the setup marker exited %d", code)
 	}
 	return err == nil, err
+}
+
+// rootOutput runs argv in the guest as root and returns its combined output.
+func (e *Env) rootOutput(argv ...string) (string, int, error) {
+	var buf bytes.Buffer
+	code, err := e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, User: "0", Stdin: strings.NewReader(""), Stdout: &buf, Stderr: &buf}, argv...)
+	return buf.String(), code, err
 }
 
 func errText(err error) string {

@@ -287,7 +287,7 @@ type Config struct {
 func Defaults() Config {
 	return Config{
 		Backend:              "smolvm",
-		Cache:                CacheConfig{Enabled: true, Managers: []string{"auto"}},
+		Cache:                CacheConfig{Enabled: false, Managers: []string{"auto"}},
 		Prep:                 PrepConfig{Target: "auto"},
 		URLs:                 URLsConfig{Provider: "portless"},
 		Isolation:            "worktree",
