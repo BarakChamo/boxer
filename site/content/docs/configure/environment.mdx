@@ -57,8 +57,10 @@ Measured on an M4 with the pack already built:
 | `node:24-bookworm` | 9.5s | 26.2s |
 
 - Alpine uses musl, not glibc. A dependency that ships only a glibc prebuilt fails there.
-- A slim image has no compiler. If a dependency builds from source, install the toolchain in
-  `image_setup`. You do not need the full image.
+- The Node, Python and Ruby slim images have no compiler. If a dependency builds from source,
+  install the toolchain in `image_setup`. You do not need the full image. The Rust and Go images
+  can build, but Rust's has no `clippy` or `rustfmt`: add them with `rustup component add` in
+  `image_setup`, with `static.rust-lang.org` in `allow_hosts`.
 
 You can also use a local image. boxer pulls nothing for it, so you do not need to allow a registry
 host:
@@ -242,6 +244,8 @@ Top-level keys such as `env_passthrough` and `secrets` must come before the firs
 puts every key after `[env]` into that table, and boxer then refuses to load the file.
 
 - `[env]` is part of the pack key. Put nothing secret there.
+- A gitignored `.env.local` is not in a new worktree. Export the values it holds in the shell that
+  starts the agent and list them in `secrets`, or copy the file in with a `[prep]` command.
 - boxer reads `env_passthrough` and `secrets` from the host every time.
 
 [Security](/docs/concepts/security#secrets) explains how secrets reach the guest.

@@ -209,7 +209,8 @@ type Config struct {
 
 	// Cache mounts the host's package caches into the guest, read-only. The install still runs
 	// in the guest, so every binary is still chosen for the guest's platform; only the download
-	// is saved. Enabled by default because it cannot change a result, only a duration.
+	// is saved. Off by default: the mount is read-only at the tool's own cache path, so installing
+	// anything the host has not cached fails (npm: EROFS). See internal/box/cache.go.
 	Cache CacheConfig `toml:"cache"`
 
 	// URLs names forwarded ports through portless. See URLsConfig.

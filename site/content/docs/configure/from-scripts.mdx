@@ -31,9 +31,14 @@ boxer adds to your configuration. It does not replace it.
   limit it to commands outside boxer's `intercept` list. Two hooks that both rewrite the same
   command conflict, and which one wins depends on the agent.
 - **Your git hook stays.** `boxer install git` adds a marked block to your existing
-  `post-checkout` hook, and honours `core.hooksPath`. With husky, that hook lives in `.husky/`,
-  which is committed, so commit the change too. It runs `boxer up --detach` on any checkout
-  that changes files, which does nothing when the sandbox is already running.
+  `post-checkout` hook, and honours `core.hooksPath`. It runs `boxer up --detach` on any checkout
+  that changes files, which does nothing when the sandbox is already running. With husky, do not
+  run `boxer install git`: husky's hooks path is a generated, gitignored wrapper. Add this line to
+  `.husky/post-checkout` instead, and commit it:
+
+  ```sh
+  [ "$3" = "1" ] && command -v boxer >/dev/null 2>&1 && boxer up --detach >/dev/null 2>&1
+  ```
 - **You choose which commands go to the sandbox.** `intercept` lists the programs that run in the
   sandbox. Everything else, including `docker`, runs on your machine as before.
 

@@ -38,7 +38,8 @@ backend = "smolvm"     # smolvm | container | docker | podman
 All four keep secrets off argv and mark the sandboxes they own with labels. Only smolvm has an
 egress log.
 
-When a backend lacks a feature, boxer refuses with an error that names it.
+When a backend lacks a feature, boxer refuses with an error that names it. On docker and podman,
+`cpus` and `memory` become the container's `--cpus` and `-m` limits.
 
 Everything else works the same on all four: hooks, shims, the MCP server, tasks, URLs, devcontainer
 support, `[prep]` and cache mounts. On every backend the sandbox sees the worktree, your `mounts`, and read-only package caches when `[cache]` is on. `git`, `gh` and `ssh` run on the host. Forwarded ports and the

@@ -50,7 +50,9 @@ A [scope](/docs/concepts/scopes-and-packs#scope) is what one sandbox belongs to.
 `string`, default `"worktree"`. One of `repo`, `worktree`, `session`, `subagent`. Env `BOXER_ISOLATION`.
 
 What a sandbox is keyed to. `session` and `subagent` need an id from the harness or the
-[identity flags](/docs/reference/cli#identity-flags).
+[identity flags](/docs/reference/cli#identity-flags). Session and subagent sandboxes in one worktree
+all mount that same worktree, so two dev servers or installs there still write to the same
+`node_modules` and build directories. For dev servers, give each session its own worktree.
 
 ```toml
 isolation = "session"
@@ -144,7 +146,9 @@ on_sandbox_unavailable = "passthrough"
 
 `[]string`, default below.
 
-Programs whose commands run in the sandbox. A program matches by name, after skipping leading `VAR=value` assignments and any path, so
+Programs whose commands run in the sandbox. The sandbox's `PATH` is the image's own, without `node_modules/.bin`, so run project tools as
+`npx vite` or `npm run dev` rather than adding bare `vite` or `tsc` here. A program matches by
+name, after skipping leading `VAR=value` assignments and any path, so
 `bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths. A
 compound command is wrapped whole when any `&&`, `||`, `;` or `|` segment matches. `["*"]` intercepts every program not in `passthrough`. Not settable from
 the environment.
@@ -199,6 +203,9 @@ picks the image from the first lockfile found in the worktree.
 
 | Lockfile | Image |
 | --- | --- |
+| `Gemfile.lock` | `ruby:3-slim-bookworm` |
+| `pom.xml` | `maven:3-eclipse-temurin-21` |
+| `build.gradle`, `build.gradle.kts` | `gradle:8-jdk21` |
 | `bun.lock`, `bun.lockb` | `oven/bun:1-slim` |
 | `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock` | `node:24-bookworm-slim` |
 | `uv.lock`, `requirements.txt`, `pyproject.toml` | `python:3.12-slim-bookworm` |
@@ -207,8 +214,8 @@ picks the image from the first lockfile found in the worktree.
 | none | `debian:bookworm-slim` |
 
 With `integration = "inside"` and no image, the default is
-`mirror.gcr.io/library/node:24-bookworm-slim`. The inferred images carry no compiler. Add one in
-`image_setup`. See [choosing an image](/docs/configure/environment#choose-an-image).
+`mirror.gcr.io/library/node:24-bookworm-slim`. The Node, Python and Ruby images carry no compiler.
+Add one in `image_setup`. See [choosing an image](/docs/configure/environment#choose-an-image).
 
 ```toml
 image = "node:24-alpine"
@@ -623,7 +630,8 @@ destroy_on = ["session_end"]
 `bool`, default `false`. Env `BOXER_WARM_ON_SESSION_START`.
 
 When `true`, the session-start hook provisions in a detached `boxer up` and returns at once, so the
-session never waits for a create.
+session never waits for a create. The first intercepted command waits for it instead. When `false`,
+the session-start hook waits for the sandbox, up to the hook's 10-minute limit.
 
 ```toml
 warm_on_session_start = true

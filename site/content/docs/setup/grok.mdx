@@ -16,6 +16,9 @@ git commit -m "Run Grok's commands in boxer"
 Grok loads project hooks only from a trusted folder. Launch it once with `--trust`. For headless
 runs, set `GROK_FOLDER_TRUST=0`.
 
+`boxer doctor` cannot see whether Grok trusts the folder. The check below is the only proof the hook
+runs.
+
 ## What it writes
 
 | File | What it is |

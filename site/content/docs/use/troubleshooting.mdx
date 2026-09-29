@@ -125,6 +125,15 @@ removed by hand.
 **Fix.** Add `'127.0.0.1'` and `'localhost'` for a forwarded port, and `'*.localhost'` for a
 `[urls]` name. See [URLs](/docs/configure/urls#nextjs).
 
+## A `start` service died
+
+**Cause:** boxer starts `start` services once and does not restart them. A crashed dev server or
+database stays down.
+
+**Fix:** `boxer stop && boxer up` restarts the sandbox and runs `start` again, keeping its data.
+`boxer up --recreate` also works, but deletes the sandbox and anything a service stored in it. The
+service's output is in `/tmp/boxer-start.log`.
+
 ## An interactive harness hangs
 
 A harness in a terminal pane (herdr, for example) stops with no output.

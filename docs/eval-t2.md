@@ -1,65 +1,63 @@
-# boxer eval report — tier t2 — 2026-09-22T01:43:39+08:00
+# boxer eval report — tier t2 — 2026-09-29T17:30:29+07:00
 
 | Cell | Status | Time | Notes |
 | --- | --- | --- | --- |
-| acp-claude/inside/acp/worktree | pass | 18.599s | $0.0225; |
-| acp-codex/inside/acp/worktree | pass | 11.226s | $0.0112; |
-| acp-gemini/inside/acp/worktree | skip | 129ms | $0.0013; inside gemini: GEMINI_API_KEY or GOOGLE_API_KEY is not set |
-| acp-grok/inside/acp/worktree | pass | 17.394s | $0.0209; |
-| acp-kimi/inside/acp/worktree | pass | 11.068s | $0.0182; |
-| acp-opencode/inside/acp/worktree | pass | 13.432s | $0.0238; |
-| claude-code/off/plugin/worktree | pass | 11.244s | $0.0174; |
-| claude-code/rewrite/both/worktree | pass | 14.582s | $0.0157; |
-| claude-code/rewrite/plugin/repo | pass | 33.868s | $0.0413; |
-| claude-code/rewrite/plugin/worktree | pass | 11.915s | $0.0222; |
-| claude-code/rewrite/project/worktree | pass | 22.863s | $0.0344; |
-| claude-code/tool/plugin/worktree | pass | 6.99s | $0.0122; |
+| acp-claude/inside/acp/worktree | fail | 10.532s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1009104443run: session/prompt: Internal error: API Error: 402 A positive credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dtop-up to continue.: [session/create] sessionId=4ece95e9-1238-4c20-a31a-a66b41f4d24a phase=models durationMs=1 totalMs=215; [session/create] sessionId=4ece95e9-1238-4c20-a31a-a66b41f4d24a phase=modes durationMs=1 totalMs=216; [session/create] sessionId=4ece95e9-1238-4c20-a31a-a66b41f4d24a phase=register durationMs=2 totalMs=218; |
+| acp-codex/inside/acp/worktree | skip | 15.188s | provider stopped the turn: quota":{"token_count":null,"model_usage":[]}}}} --- stderr --- |
+| acp-gemini/inside/acp/worktree | skip | 111ms | inside gemini: GEMINI_API_KEY or GOOGLE_API_KEY is not set |
+| acp-grok/inside/acp/worktree | fail | 6.279s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-32501770run: session/prompt: Internal error: "http_status": 402; }; [2m2026-09-29T10:28:51.458460Z[0m [31mERROR[0m git_cli: Command::output() FAILED (spawn error) [3merror[0m[2m=[0mNo such file or directory (os error 2) [3merror_kind[0m[2m=[0mNotFound [3mcwd[0m[2m=[0m/private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-32501770/repo; |
+| acp-kimi/inside/acp/worktree | skip | 5.442s | provider stopped the turn: quota, API onboarding, third-party tool setup, and error codes. Use when the user asks how Kimi Code works, how to set something up, or what a Kimi Code error m |
+| acp-opencode/inside/acp/worktree | fail | 6.721s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1150008110run: session/prompt: Internal error: A positive credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dtop-up to continue.: errorName: "APIError",; },; }; |
+| claude-code/off/plugin/worktree | fail | 2.029s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1827061603run: exit status 1; |
+| claude-code/rewrite/both/worktree | fail | 2.4s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2800323211run: exit status 1; |
+| claude-code/rewrite/plugin/repo | fail | 2.215s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1693224361run: exit status 1; |
+| claude-code/rewrite/plugin/worktree | fail | 7.049s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2311862924run: exit status 1; |
+| claude-code/rewrite/project/worktree | fail | 2.195s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1086618691run: exit status 1; |
+| claude-code/tool/plugin/worktree | fail | 2.3s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-438907773run: exit status 1; |
 | claude-code/tool/plugin/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
-| claude-code/tool/project/worktree | pass | 21.027s | $0.0264; |
-| codex/off/project/worktree | pass | 12.008s | $0.0173; |
-| codex/rewrite/project/worktree | pass | 15.114s | $0.0205; |
-| copilot/off/user/worktree | pass | 16.137s | $0.0154; |
-| copilot/rewrite/user/worktree | pass | 14.704s | $0.0088; |
-| copilot/tool/user/worktree | fail | 19.814s | 1 denial(s); $0.0191; kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2308130267deny: 1 denial(s): the agent had to be corrected; |
-| dsh/off/project/worktree | pass | 40.046s | $0.0150; |
-| dsh/tool/project/worktree | pass | 10.401s | $0.0053; |
+| claude-code/tool/project/worktree | fail | 2.434s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2739146540run: exit status 1; |
+| codex/off/project/worktree | fail | 12.673s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3256314645run: exit status 1; |
+| codex/rewrite/project/worktree | fail | 14.745s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2711586078run: exit status 1; |
+| copilot/off/user/worktree | fail | 6.324s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2645692082run: exit status 1; |
+| copilot/rewrite/user/worktree | fail | 7.129s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3983636459run: exit status 1; |
+| copilot/tool/user/worktree | fail | 5.654s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1096403495run: exit status 1; |
+| dsh/off/project/worktree | fail | 2.369s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-21613719run: exit status 1; |
+| dsh/tool/project/worktree | fail | 2.743s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3485984911run: exit status 1; |
 | dsh/tool/project/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
 | gemini-cli/off/plugin/worktree | skip | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
 | gemini-cli/rewrite/plugin/worktree | skip | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
 | gemini-cli/rewrite/project/worktree | skip | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
 | gemini-cli/tool/plugin/worktree | skip | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
 | gemini-cli/tool/plugin/worktree/noncompliant | skip | 0s | GEMINI_API_KEY or GOOGLE_API_KEY is not set (Gemini CLI speaks only the Gemini API, which the AI Gateway does not serve) |
-| grok/off/user/worktree | pass | 9.703s | $0.0143; |
-| grok/rewrite/project/worktree | pass | 13.338s | $0.0151; |
-| grok/rewrite/user/worktree | pass | 11.211s | $0.0340; |
-| grok/tool/user/worktree | pass | 12.442s | 1 denial(s); $0.0144; |
+| grok/off/user/worktree | fail | 2.696s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2270435810run: exit status 1; |
+| grok/rewrite/project/worktree | fail | 2.765s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2828692423run: exit status 1; |
+| grok/rewrite/user/worktree | fail | 3.012s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2239240196run: exit status 1; |
+| grok/tool/user/worktree | fail | 2.426s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-76410486run: exit status 1; |
 | grok/tool/user/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
-| herdr/rewrite/project/worktree | pass | 15.058s | $0.0246; |
-| inside-claude/inside/shell/worktree | fail | 7.115s | $0.0058; kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3349777337guest: final answer "", wanted "Linux"; guest-canary: the canary was not written in the guest; |
-| inside-codex/inside/shell/worktree | pass | 3m4.085s | $0.1607; |
-| inside-copilot/inside/shell/worktree | pass | 39.182s | $0.0401; |
-| inside-gemini/inside/shell/worktree | skip | 110ms | inside gemini: GEMINI_API_KEY or GOOGLE_API_KEY is not set |
-| inside-grok/inside/shell/worktree | pass | 17.015s | $0.0317; |
-| inside-kimi/inside/shell/worktree | pass | 27.286s | $0.0218; |
-| inside-opencode/inside/shell/worktree | pass | 12.092s | $0.0176; |
-| inside-pi/inside/shell/worktree | pass | 33.213s | $0.0281; |
-| kimi/off/user/worktree | pass | 9.611s | $0.0098; |
-| kimi/tool/user/worktree | fail | 9.957s | 1 denial(s); $0.0106; kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-4121760502deny: 1 denial(s): the agent had to be corrected; |
+| herdr/rewrite/project/worktree | skip | 9.009s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7 |
+| inside-claude/inside/shell/worktree | skip | 8.389s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-codex/inside/shell/worktree | skip | 46.338s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-copilot/inside/shell/worktree | skip | 28.546s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-gemini/inside/shell/worktree | skip | 88ms | inside gemini: GEMINI_API_KEY or GOOGLE_API_KEY is not set |
+| inside-grok/inside/shell/worktree | skip | 5.862s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-kimi/inside/shell/worktree | skip | 28.077s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-opencode/inside/shell/worktree | skip | 6.147s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| inside-pi/inside/shell/worktree | skip | 27.392s | provider stopped the turn: credit balance is required for all requests, including BYOK, so fallback providers remain available. Add credits at https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E% |
+| kimi/off/user/worktree | fail | 2.469s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2817107398run: exit status 1; |
+| kimi/tool/user/worktree | fail | 2.453s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-791811613run: exit status 1; |
 | kimi/tool/user/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
 | multica/rewrite/project/worktree | skip | 0s | multica has no server configured (multica setup, then multica daemon start); checklist in docs/orchestrators.md |
-| opencode/off/project/worktree | pass | 22.364s | $0.0203; |
-| opencode/rewrite/project/worktree | pass | 14.96s | $0.0210; |
-| opencode/tool/project/worktree | pass | 14.154s | $0.0374; |
+| opencode/off/project/worktree | fail | 4.398s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3450198400run: exit status 1; |
+| opencode/rewrite/project/worktree | fail | 11.825s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3543132251run: exit status 1; |
+| opencode/tool/project/worktree | fail | 4.33s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1540021444run: exit status 1; |
 | opencode/tool/project/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
-| openhands/rewrite/sdk/worktree | pass | 20.515s | $0.0203; |
-| paperclip/rewrite/project/worktree | pass | 2m47.173s | $0.1988; |
-| pi/off/project/worktree | pass | 5.911s | $0.0043; |
-| pi/rewrite/project/worktree | pass | 2m33.488s | $0.0366; |
-| pi/tool/project/worktree | pass | 7.221s | $0.0069; |
+| openhands/rewrite/sdk/worktree | skip | 8.927s | provider stopped the turn: Conversation run failed for id=b21e3509-bb91-453f-97c0-7bc695971892: litellm.APIError: APIError: OpenAIException - A positive credit balance is required for all requests, including BYOK, so fallback p |
+| paperclip/rewrite/project/worktree | fail | 13.114s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-1670233136run: paperclip run failed; |
+| pi/off/project/worktree | fail | 2.286s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-4058094554run: exit status 1; |
+| pi/rewrite/project/worktree | fail | 2.545s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3346928138run: exit status 1; |
+| pi/tool/project/worktree | fail | 2.01s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-2932579976run: exit status 1; |
 | pi/tool/project/worktree/noncompliant | skip | 0s | noncompliant cells are scripted; t1 only |
-| t3code/inside/shim/worktree | pass | 54.929s | $0.0507; |
-| t3code/rewrite/project/worktree | pass | 16.26s | $0.0224; |
+| t3code/inside/shim/worktree | fail | 51.066s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-3748928214run: exit status 1: "Claude gave up after repeated API errors."; |
+| t3code/rewrite/project/worktree | fail | 9.108s | kept: /private/var/folders/lj/1jp7bc4d3937mqtz18vkd_pm0000gn/T/boxer-eval-4284247440run: exit status 1: "Claude gave up after repeated API errors."; |
 
-**passed 40 · failed 3 · skipped 14**
-
-**gateway spend this run: $1.2163** (per-cell figures are in the notes; BOXER_EVAL_BUDGET_USD caps a run)
+**passed 0 · failed 32 · skipped 25**

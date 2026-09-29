@@ -29,7 +29,9 @@ follow its [orchestrator page](/docs/orchestrators).
    not on the branch, the agent in that worktree runs on your machine.
 2. **Run `boxer doctor`.** It lists the integrations it finds and warns about any that will not
    hold.
-3. **Check with a real command.** Ask the agent to run `node -p process.platform` (or
+3. **Expect the first session to wait.** It boots the sandbox and runs `setup` before the agent
+   starts. Set `warm_on_session_start = true` to start the agent at once and boot in the background.
+4. **Check with a real command.** Ask the agent to run `node -p process.platform` (or
    `python3 -c 'import sys; print(sys.platform)'`). It prints `linux` from the sandbox, even on a
    Mac.
 

@@ -1,13 +1,13 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 120 }] }
+      { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 600 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 60 }] }
     ],
     "SubagentStart": [
-      { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 120 }] }
+      { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 600 }] }
     ],
     "SubagentStop": [
       { "hooks": [{ "type": "command", "command": "boxer hook grok", "timeout": 60 }] }

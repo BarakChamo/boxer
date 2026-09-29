@@ -357,3 +357,43 @@ func TestWriteAllReportsAnUnwritableDestination(t *testing.T) {
 		t.Fatal("RenderSkills must report it too")
 	}
 }
+
+// The session-start hook waits for the sandbox: image pull, pack build, setup and ready. At 120s a
+// cold first boot outlasted it, the agent killed the hook, and the session started without boxer's
+// brief. Every provisioning event now allows ten minutes.
+func TestProvisioningHooksAllowASlowFirstBoot(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join("templates", "plugin", "*", "hooks", "hooks.json"))
+	if len(files) < 4 {
+		t.Fatalf("found only %d hooks files", len(files))
+	}
+	provisioning := map[string]bool{"SessionStart": true, "SubagentStart": true, "UserPromptSubmit": true}
+	for _, f := range files {
+		var doc struct {
+			Hooks map[string][]struct {
+				Hooks []struct {
+					Timeout float64 `json:"timeout"`
+				} `json:"hooks"`
+			} `json:"hooks"`
+		}
+		b, _ := os.ReadFile(f)
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		for event, groups := range doc.Hooks {
+			if !provisioning[event] {
+				continue
+			}
+			for _, g := range groups {
+				for _, h := range g.Hooks {
+					secs := h.Timeout
+					if strings.Contains(f, "gemini") {
+						secs /= 1000 // Gemini CLI counts milliseconds
+					}
+					if secs < 600 {
+						t.Errorf("%s: %s allows %gs; a cold first boot needs up to 600s", f, event, secs)
+					}
+				}
+			}
+		}
+	}
+}

@@ -23,6 +23,12 @@ boxer install codex --user
 Use the user layer. Paperclip does not bypass Codex's hook trust, and it builds its managed
 `CODEX_HOME` from `~/.codex/config.toml`, which is where `--user` writes.
 
+## Secrets
+
+Paperclip starts the agent with its own environment, not your shell's. A variable listed in
+`secrets` must be set where Paperclip runs, or in Paperclip's own settings for the agent. For Codex,
+also see [Codex secrets](/docs/setup/codex#secrets).
+
 ## Check it
 
 Run `boxer integrations` to confirm the user-level Codex hook is in `~/.codex/config.toml`. Then

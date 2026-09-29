@@ -38,7 +38,7 @@ curl -sSL https://smolmachines.com/install.sh | bash                            
 curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh    # boxer
 ```
 
-Or `go install github.com/BarakChamo/boxer/cmd/boxer@latest`. macOS on Apple Silicon, Linux on
+Or `go install github.com/BarakChamo/boxer/cmd/boxer@latest`. macOS on Apple Silicon (Intel Macs with docker or podman), Linux on
 x86-64 or arm64.
 
 ## Get started

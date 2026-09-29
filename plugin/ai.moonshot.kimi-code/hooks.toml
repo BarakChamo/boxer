@@ -5,7 +5,7 @@
 [[hooks]]
 event = "SessionStart"
 command = "boxer hook kimi"
-timeout = 120
+timeout = 600
 
 [[hooks]]
 event = "SessionEnd"

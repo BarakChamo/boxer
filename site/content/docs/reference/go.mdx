@@ -208,8 +208,15 @@ type Machine struct {
 func (m Machine) Running() bool
 ```
 
-One sandbox on any backend. `Name` is the scope key. `Labels` carry the `boxer.*` keys, such as
-`boxer.root` for the worktree. `CreatedAt` is Unix seconds.
+One sandbox on any backend. `Name` is the scope key. `CreatedAt` is Unix seconds. `Labels` carry
+boxer's `boxer.*` keys, which are stable:
+
+| Label | Value |
+| --- | --- |
+| `boxer.root` | the worktree |
+| `boxer.isolation` | the isolation it was created with |
+| `boxer.port.<guest>` | the host port a guest port is forwarded to |
+| `boxer.harness`, `boxer.session`, `boxer.agent` | the identity it was created for, when set |
 
 ## Scope
 

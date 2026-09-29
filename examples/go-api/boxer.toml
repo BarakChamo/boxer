@@ -3,8 +3,7 @@
 image = "mirror.gcr.io/library/golang:1.24-alpine"
 
 # No dependencies to fetch here. With some, add `go mod download` to setup and
-# "proxy.golang.org", "sum.golang.org" to allow_hosts; the host's module cache is mounted
-# read-only when go.sum is present.
+# "proxy.golang.org", "sum.golang.org" to allow_hosts.
 start = ["go run ."]
 ready = "wget -q -O /dev/null http://127.0.0.1:8080/"
 ready_timeout = "120s"

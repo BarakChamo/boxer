@@ -38,6 +38,10 @@ All notable changes to this project are documented here. The format follows
   warning naming what to use instead, and will be removed in 2.0.
 
 ### Fixed
+- **A slow first boot lost the agent's session brief.** The session-start hook waits for the sandbox,
+  and boxer installed it with a 120 s limit, which image pull plus `setup` plus `ready` could
+  exceed. The agent killed the hook and started without the brief. Every provisioning hook now
+  allows 600 s. Re-run `boxer install <harness>` to pick it up; `boxer doctor` flags the old files.
 - The pnpm and poetry cache paths were macOS-only, so Linux hosts never got those caches.
 - A secret listed in `secrets` but not set on the host was dropped silently. boxer now names it once.
 - The devcontainer `build` refusal gave smolvm advice on every backend. It now says what to do on
