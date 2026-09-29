@@ -1086,7 +1086,10 @@ func TestFailedRunNamesTheDeniedHost(t *testing.T) {
 	stamp := func(at time.Time, dest string) string {
 		return `[{"timestamp":"` + at.UTC().Format(time.RFC3339) + `","operation":"resolve","dest":"` + dest + `"}]`
 	}
-	vmtest.SetEgress(t, stamp(time.Now(), "registry.npmjs.org"))
+	// Stamped a second ahead: the denial happens during the command. Stamped with time.Now(), it
+	// could land in the second before the command started whenever a second boundary fell between
+	// here and Run, and be correctly excluded, which failed this test on a slow CI runner.
+	vmtest.SetEgress(t, stamp(time.Now().Add(time.Second), "registry.npmjs.org"))
 	var out bytes.Buffer
 	if code, _ := e.Run([]string{"false"}, RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errOut}); code != 1 {
 		t.Fatalf("exit: %d", code)
