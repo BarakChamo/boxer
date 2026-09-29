@@ -265,6 +265,15 @@ The manifest, with the same field names as `capsule.toml`. Empty optional fields
 }
 ```
 
+| Field | |
+| --- | --- |
+| `version`, `created`, `scope` | Manifest version, when it was captured, and the sandbox it came from |
+| `image`, `pack` | The image, and the environment pack when one was in use |
+| `run` | `{ task, command, dir }`: the command, and `dir` relative to the worktree |
+| `git` | `{ head, dirty, patch }`: the commit, whether the worktree had changes, and the patch file for them |
+| `config` | `{ image, image_setup, setup, env, mounts, network_mode, allow_hosts }`: the settings that shape the guest |
+| `expect` | `{ exit, failing_tests }`: what a replay must reproduce |
+
 ## Exit codes
 
 | Code | Meaning |
