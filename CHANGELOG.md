@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-30
+
 ### Added
 - `start` services are supervised. A service that exits non-zero is restarted after 1 s, then 2, 4
   and up to 30 s. After five quick crashes in a row, boxer stops and the start log says so.
