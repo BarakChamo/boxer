@@ -630,6 +630,10 @@ func (e *Env) create() error {
 // every inside sandbox on the host failed to start with an error about a host nobody had asked
 // for. A host that does not resolve cannot be reached through the allowlist anyway; dropping it
 // loses nothing but the failure. Address ranges never reach it: they are CIDR rules, split off before.
+// lookupHost is the resolver resolvable asks; tests replace it, because some networks answer
+// every name and a test that depends on the local resolver skips there and proves nothing.
+var lookupHost = net.DefaultResolver.LookupHost
+
 func (e *Env) resolvable(hosts []string) []string {
 	if e.Cfg.Network.Mode != "allowlist" || len(hosts) == 0 {
 		return hosts
@@ -647,7 +651,7 @@ func (e *Env) resolvable(hosts []string) []string {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			addrs, err := net.DefaultResolver.LookupHost(ctx, name)
+			addrs, err := lookupHost(ctx, name)
 			ok[i] = err == nil && len(addrs) > 0
 		}(i, name)
 	}

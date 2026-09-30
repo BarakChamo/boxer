@@ -2,6 +2,7 @@ package box
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -415,15 +416,22 @@ func TestSetupMarkerDiesWithTheWorktree(t *testing.T) {
 // One retired hostname on the allowlist made smolvm refuse to create any sandbox that listed it.
 // A host that does not resolve is left out, by name; wildcards and addresses are not looked up.
 func TestUnresolvableAllowlistHostsAreDropped(t *testing.T) {
-	// Some networks answer every name, even under .invalid (RFC 6761), and then nothing is
-	// unresolvable. smolvm resolves through the same resolver, so it would not refuse either.
-	if addrs, err := net.LookupHost("no-such-host.invalid"); err == nil {
-		t.Skipf("this network's resolver answers for .invalid (%v); nothing here is unresolvable", addrs)
+	// A stub resolver: some networks answer every name, even under .invalid, and a test on the
+	// real one skipped there — which is how it went stale unnoticed.
+	old := lookupHost
+	lookupHost = func(_ context.Context, name string) ([]string, error) {
+		if name == "no-such-host.invalid" {
+			return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+		}
+		return []string{"127.0.0.1"}, nil
 	}
+	t.Cleanup(func() { lookupHost = old })
 	var w bytes.Buffer
 	e := &Env{Cfg: config.Defaults(), Stderr: &w}
-	got := e.resolvable([]string{"localhost", "no-such-host.invalid", "*.npmjs.org", "10.0.0.1", "localhost:8080"})
-	if strings.Join(got, " ") != "localhost *.npmjs.org 10.0.0.1 localhost:8080" {
+	// Only hostnames reach resolvable: config.SplitAllow has already taken addresses and ranges
+	// out as CIDR rules, and refused wildcards and ports. An address that does arrive is kept.
+	got := e.resolvable([]string{"localhost", "no-such-host.invalid", "10.0.0.1"})
+	if strings.Join(got, " ") != "localhost 10.0.0.1" {
 		t.Fatalf("kept %v", got)
 	}
 	if !strings.Contains(w.String(), "no-such-host.invalid") {
