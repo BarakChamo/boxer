@@ -236,7 +236,10 @@ var edges = map[string]bool{
 
 // mayRun are lines that run an intercepted program only on some condition the oracle's shell does
 // not meet.
-var mayRun = map[string]bool{"case $x in a) npm test;; esac": true, "f() { npm test; }": true}
+// A login shell (`bash -lc`) reads /etc/profile first, and on macOS that runs path_helper, which
+// rebuilds PATH without the oracle's stubs: there it runs no npm the oracle can see, though for an
+// agent it runs npm.
+var mayRun = map[string]bool{"case $x in a) npm test;; esac": true, "f() { npm test; }": true, `bash -lc "npm run build"`: true}
 
 func TestReaderEdgeCases(t *testing.T) {
 	for c, want := range edges {
