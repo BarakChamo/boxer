@@ -113,4 +113,7 @@ clean-evals:      ## reclaim what the evaluation suite leaves on this host: scra
 	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs \
 	  "$${TMPDIR:-/tmp}"/boxer-sdlc-base-* "$${TMPDIR:-/tmp}"/bxm-* \
 	  "$${TMPDIR:-/tmp}"/matrix-*.agent.log "$${TMPDIR:-/tmp}"/matrix-*.trace.log
+	@# Claude Code keeps a directory per working directory under /tmp/claude-<uid>, named after the
+	@# path, so every eval repo it ran in leaves one. Only the eval repos' are removed.
+	rm -rf /tmp/claude-$$(id -u)/*-T-boxer-eval-* /tmp/claude-$$(id -u)/*-T-boxer-sdlc-base-*
 	@echo "reclaimed the eval scratch directories and pack cache"
