@@ -112,7 +112,7 @@ Add a `boxer.toml` to the repository root. This one is for a Next.js app:
 ```toml title="boxer.toml"
 image = "mirror.gcr.io/library/node:24-alpine"
 setup = ["npm ci"]                                       # runs when a worktree's sandbox is created
-start = ["npx next dev -H 0.0.0.0 -p 3000"]              # starts with the sandbox
+start = ["npx next dev --webpack -H 0.0.0.0 -p 3000"]    # starts with the sandbox
 ready = "wget -q -O /dev/null http://127.0.0.1:3000/"    # the sandbox is ready when this passes
 
 [network]

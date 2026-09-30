@@ -213,7 +213,8 @@ case "$verb" in
         *"touch /tmp/boxer-started"*) touch "$dir/$name.started"; exit 0;;
         # Stopping services kills guest processes by pid file; on the host that would be a kill
         # of whatever those pids are here. Modelled: the marker goes, nothing is signalled.
-        *"/tmp/boxer-svc/*.pid"*) rm -f "$dir/$name.started"; exit 0;;
+        *"/tmp/boxer-svc/*.pid"*) rm -f "$dir/$name.started"; [ -f "$FAKE_STATE.stuck" ] && echo stuck; exit 0;;
+        *"rm -rf /tmp/boxer-svc"*) rm -f "$dir/$name.started"; exit 0;;
         *"touch /var/lib/boxer/image-setup-done"*) touch "$dir/$name.setup"; exit 0;;
         *"test -f /var/lib/boxer/harness-"*)
           h=${*##*harness-}; [ -f "$dir/$name.harness-${h%% *}" ] && exit 0 || exit 1;;

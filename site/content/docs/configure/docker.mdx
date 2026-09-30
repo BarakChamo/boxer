@@ -92,7 +92,7 @@ volumes = ["pgdata:/var/lib/postgresql/data"]
 start = [
   "redis-server --save '' --appendonly no",
   "PGDATA=/var/lib/postgresql/data; chown postgres:postgres $PGDATA && chmod 700 $PGDATA && { [ -f $PGDATA/PG_VERSION ] || su postgres -c \"initdb -D $PGDATA --auth=trust\"; } && exec su postgres -c \"postgres -D $PGDATA -k /tmp -h 0.0.0.0\"",
-  "npx next dev -H 0.0.0.0 -p 3000",
+  "npx next dev --webpack -H 0.0.0.0 -p 3000",
 ]
 ready = "pg_isready -h 127.0.0.1 -U postgres && redis-cli ping"
 

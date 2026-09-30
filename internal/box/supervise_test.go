@@ -86,3 +86,33 @@ func TestRestartServicesRelaunchesWithoutRecreating(t *testing.T) {
 		t.Fatalf("restarting a sandbox that is not there must say so: %v", err)
 	}
 }
+
+// A service another exec cannot signal (Docker under Ubuntu's AppArmor) is stopped by restarting
+// the sandbox, and restart still relaunches it.
+func TestRestartServicesFallsBackWhenAServiceWillNotStop(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"start = [\"echo serving\"]\nready = \"true\"\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(os.Getenv("FAKE_STATE")+".stuck", nil, 0o644)
+	before, _ := os.ReadFile(log)
+	if err := e.RestartServices(); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	after := string(b[len(before):])
+	if !strings.Contains(after, "machine stop") || !strings.Contains(after, "machine start") {
+		t.Fatalf("a stuck service must be stopped by restarting the sandbox:\n%s", after)
+	}
+	if n := launches(after); n != 1 {
+		t.Fatalf("and relaunched once, launched %d times:\n%s", n, after)
+	}
+}

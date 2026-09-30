@@ -149,7 +149,9 @@ sandbox and what is in it stay: an installed package, a database's files. Use it
 something a server reads only at start, or when a service gave up after five quick crashes (see
 [`restart`](/docs/reference/configuration#restart)).
 
-Exits 1 with cause `NO_SANDBOX` when the sandbox is not running. Takes the
+When a service cannot be signalled, as with docker under Ubuntu's AppArmor, boxer stops and
+starts the sandbox instead, which ends every process in it and keeps its files. Exits 1 with cause
+`NO_SANDBOX` when the sandbox is not running. Takes the
 [identity flags](#identity-flags).
 
 ## `boxer ls`

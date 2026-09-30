@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +70,26 @@ func TestReachableURLs(t *testing.T) {
 	}
 	if len(ReachableURLs(vm.Machine{})) != 0 {
 		t.Fatal("no ports, no URLs")
+	}
+}
+
+// Polling is on by default where host edits do not reach dev-server watchers, and a value in
+// [env] always wins, including an empty one that turns it off.
+func TestGuestEnvPollsWhereWatchersMissHostEdits(t *testing.T) {
+	e := &Env{}
+	for backend, want := range map[string]bool{"smolvm": true, "": true, "container": true, "docker": false} {
+		e.Cfg.Backend, e.Cfg.Env = backend, nil
+		got := strings.Join(e.GuestEnv(), " ")
+		if has := strings.Contains(got, "WATCHPACK_POLLING=true") && strings.Contains(got, "CHOKIDAR_USEPOLLING=1"); has != want {
+			t.Errorf("%q: %q", backend, got)
+		}
+	}
+	if PollsForHostEdits("podman", "darwin") == PollsForHostEdits("podman", "linux") {
+		t.Error("podman polls on a Mac only")
+	}
+	e.Cfg.Backend, e.Cfg.Env = "smolvm", map[string]string{"WATCHPACK_POLLING": "", "NODE_ENV": "development"}
+	got := e.GuestEnv()
+	if strings.Join(got, " ") != "NODE_ENV=development WATCHPACK_POLLING= CHOKIDAR_USEPOLLING=1" {
+		t.Fatalf("[env] must win: %v", got)
 	}
 }

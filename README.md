@@ -106,7 +106,7 @@ your lockfile.
 ```toml
 image = "mirror.gcr.io/library/node:24-alpine"
 setup = ["npm ci"]                        # once per worktree
-start = ["npx next dev -H 0.0.0.0 -p 3000"]   # listen on 0.0.0.0
+start = ["npx next dev --webpack -H 0.0.0.0 -p 3000"]   # 0.0.0.0; webpack reloads on host edits
 ready = "wget -q -O /dev/null http://127.0.0.1:3000/"
 
 [network]

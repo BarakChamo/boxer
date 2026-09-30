@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -1060,11 +1061,34 @@ func (e *Env) packed(image string) string {
 // it travels into the environment pack, while EnvPassthrough and Secrets are read from the host at
 // run time and never snapshotted.
 func (e *Env) GuestEnv() []string {
-	out := make([]string, 0, len(e.Cfg.Env))
+	out := make([]string, 0, len(e.Cfg.Env)+2)
 	for _, k := range sortedKeys(e.Cfg.Env) {
 		out = append(out, k+"="+e.Cfg.Env[k])
 	}
+	if PollsForHostEdits(e.Cfg.Backend, runtime.GOOS) {
+		for _, kv := range [][2]string{{"CHOKIDAR_USEPOLLING", "1"}, {"WATCHPACK_POLLING", "true"}} {
+			if _, set := e.Cfg.Env[kv[0]]; !set {
+				out = append(out, kv[0]+"="+kv[1])
+			}
+		}
+	}
 	return out
+}
+
+// PollsForHostEdits reports a backend whose shared worktree does not deliver host edits the way
+// dev-server watchers read them, so boxer turns on their polling mode by default. Measured with a
+// Next.js 16 dev server, five host edits each: on smolvm, webpack and Turbopack both saw none;
+// on Apple container and podman's Mac VM nothing inotify-based saw any; OrbStack's docker saw all
+// of them. With WATCHPACK_POLLING webpack saw all five everywhere. Turbopack has no polling that
+// works on these backends, which doctor says for a Next.js project.
+func PollsForHostEdits(backend, goos string) bool {
+	switch backend {
+	case "", "smolvm", "container":
+		return true
+	case "podman":
+		return goos == "darwin"
+	}
+	return false
 }
 
 // DeniedHosts lists the distinct hosts the egress allowlist refused at or after since, newest
@@ -1239,13 +1263,32 @@ func superviseScript(pid, cmd, restart string) string {
 // StopServices stops every `start` service and its children, and clears the marker that says
 // they are running, so the next startServices launches them again.
 func (e *Env) StopServices() error {
+	// Signal each supervisor's process group, then report any that is still alive. "stuck" is not
+	// an error in the script: the caller decides what to do about it.
 	stop := "for f in " + serviceDir + "/*.pid; do [ -f \"$f\" ] || continue; p=$(cat \"$f\"); " +
-		"kill -TERM -\"$p\" 2>/dev/null || { pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; }; rm -f \"$f\"; done; rm -f " + startMarker
+		"kill -TERM -\"$p\" 2>/dev/null || { pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; }; " +
+		"sleep 0.2; kill -0 \"$p\" 2>/dev/null && echo stuck; rm -f \"$f\"; done; rm -f " + startMarker
 	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", stop)
 	if err != nil || code != 0 {
 		return fmt.Errorf("stopping services: %s", firstNonEmpty(errText(err), strings.TrimSpace(out)))
 	}
-	return nil
+	if !strings.Contains(out, "stuck") {
+		return nil
+	}
+	// A process boxer started could not be signalled from another exec. Docker on Ubuntu does
+	// this: AppArmor stacks docker-default with unconfined for every `docker exec`, and
+	// docker-default only accepts signals from plain docker-default, so even root is refused.
+	// Stopping the sandbox ends every process in it and keeps its files, so it is the same
+	// restart by other means.
+	if err := e.VM.Stop(e.Scope.Key); err != nil {
+		return fmt.Errorf("stopping services: a service would not stop, and neither would the sandbox: %w", err)
+	}
+	if err := e.VM.Start(e.Scope.Key); err != nil {
+		return fmt.Errorf("stopping services: restarting the sandbox: %w", err)
+	}
+	e.seen = nil
+	_, _, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "rm -rf "+serviceDir+" "+startMarker)
+	return err
 }
 
 // RestartServices stops the `start` services and launches them again, then waits for `ready`,

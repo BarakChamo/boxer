@@ -86,6 +86,23 @@ so those failures count as model failures. [`prep`](/docs/configure/environment)
 host-side step that runs before the sandbox starts. Grok never shows boxer's brief to the model. Its
 cell fails.
 
+## Tool mode
+
+In tool mode the shell tool refuses intercepted commands and the model has to use `boxer_run`.
+Through 1.3, the Copilot and Kimi tool-mode cells failed in every recorded run the same way: the model
+tried the shell first, was refused, and switched. Their brief never reached the model, because
+neither harness has a hook that injects one at session start, and `boxer_run` described itself as
+"for build, test, install, and script commands", which `uname` is not.
+
+The MCP server now sends the brief as its `instructions`, and `boxer_run`'s description names what
+this repository's shell refuses. Measured on 2026-09-30, three runs each:
+
+| cell | before | after |
+| --- | ---: | ---: |
+| `copilot/tool/user/worktree` | 0 of 3 | 3 of 3 |
+| `kimi/tool/user/worktree` | 1 of 3 | 3 of 3 |
+| `opencode/tool/project/worktree` | not rerun | 3 of 3 |
+
 ## Known limits
 
 **PATH shims fail under a login shell.** A login shell rebuilds `PATH`. On macOS,
@@ -120,7 +137,24 @@ write-then-rename saves to files under `src/`, one second apart. The watcher was
 On Apple `container` and podman the watcher was running, and it saw an edit made inside the sandbox.
 Only host edits were missing. On smolvm, a plain `fs.watch` sometimes reported an edit against the
 directory rather than the file (2 of 5 in-place edits in one round). chokidar still named the file every
-time. The smoke suite's `file watching` cells hold this table to the truth on every backend.
+time.
+
+chokidar is not what Next.js uses, and the smolvm row above does not hold for it. A Next.js 16.3.7
+dev server on `node:24-bookworm-slim`, five edits on the host per cell, each checked by fetching the
+page for up to 8 seconds:
+
+| backend | Turbopack | Turbopack, `pollIntervalMs: 500` | webpack | webpack, `WATCHPACK_POLLING` |
+| --- | ---: | ---: | ---: | ---: |
+| smolvm 1.16.1 | 0 of 5 | 0 of 5 | 0 of 5 | 5 of 5 |
+| docker, OrbStack 29.4.0 | 5 of 5 | not run | 5 of 5 | not needed |
+| Apple `container` 1.4.1 | 0 of 5 | 0 of 5 | 0 of 5 | 5 of 5 |
+
+`WATCHPACK_POLLING` set on Turbopack changed nothing on Apple `container` (0 of 5). On Apple
+`container`, `pollIntervalMs` also stopped Turbopack from seeing an edit made inside the sandbox, in
+both of two tries. Without it, such an edit is seen at once. boxer now sets `WATCHPACK_POLLING` and `CHOKIDAR_USEPOLLING` on
+smolvm, Apple `container` and podman on a Mac. The Next.js example, created with `create-next-app`
+and run with `--webpack`, then served 10 of 10 host edits on smolvm with nothing set by hand. The
+smoke suite's `file watching` cells check the inotify and polling rows on every backend.
 
 ## Reading a run
 

@@ -149,9 +149,23 @@ on_sandbox_unavailable = "passthrough"
 Programs whose commands run in the sandbox. The sandbox's `PATH` is the image's own, without `node_modules/.bin`, so run project tools as
 `npx vite` or `npm run dev` rather than adding bare `vite` or `tsc` here. A program matches by
 name, after skipping leading `VAR=value` assignments and any path, so
-`bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths. A
-compound command is wrapped whole when any `&&`, `||`, `;` or `|` segment matches. `["*"]` intercepts every program not in `passthrough`. Not settable from
-the environment.
+`bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths.
+
+boxer reads the whole line the way a shell would, and wraps it whole when any program in it
+matches. That includes:
+
+- every command joined by `&&`, `||`, `;`, `|`, `&` or a newline
+- commands inside `$(...)`, backticks and `<(...)`, even in double quotes
+- the line given to `sh -c`, `bash -lc` and the others, and to `eval`
+- the program behind `env`, `sudo`, `nohup`, `nice`, `time`, `timeout`, `xargs`, `command`,
+  `exec` and similar wrappers
+- the commands inside `if`, `while`, `until`, `for`, `case` and `{ ... }`
+
+Text in quotes is text: `git commit -m "fix npm test"` stays on the host. A line boxer cannot read,
+such as one with an unclosed quote, goes to the sandbox. A script run by path (`bash build.sh`,
+`./build.sh`) is one program, its own name, and boxer does not read inside it: add the script's
+name, or intercept the tools it calls through PATH shims (`enforcement = "both"`, the default).
+`["*"]` intercepts every program not in `passthrough`. Not settable from the environment.
 
 ```toml
 intercept = ["npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno",
@@ -181,8 +195,10 @@ intercept_also = ["bundle", "rake", "rails", "rspec"]
 
 `[]string`, default `["git", "gh", "ssh", "boxer", "smolvm"]`.
 
-Programs that always run on the host. A compound command with any passthrough segment is not
-wrapped. Not settable from the environment.
+Programs that never send a line to the sandbox by themselves. A line made only of passthrough
+and unlisted programs runs on the host. A line that also runs an intercepted program is wrapped
+whole, so `git pull && npm ci` runs both in the sandbox. `boxer` is always treated as passthrough.
+Not settable from the environment.
 
 ```toml
 passthrough = ["git", "gh", "ssh", "boxer", "smolvm", "terraform"]

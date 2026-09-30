@@ -137,25 +137,26 @@ restart, and `gave up after 5 quick crashes` when boxer stopped. Fix what it say
 
 ## A dev server does not reload after an edit
 
-**Cause:** on Apple `container`, and on podman on a Mac, your edits reach the sandbox's files but do
-not raise the inotify events a watcher waits for. The watcher sees edits made inside the sandbox
-only. smolvm and OrbStack's docker pass them through.
+**Cause:** your edits reach the sandbox's files, but on smolvm, Apple `container` and podman on a
+Mac they do not raise the events most watchers wait for. Next.js saw none of five edits on any of
+them. An edit made inside the sandbox, such as one the agent runs, is seen everywhere. OrbStack's
+docker passes your edits through.
 
-**Fix:** turn on the watcher's polling mode in `[env]`, then `boxer up --recreate`.
+**Fix:** boxer already sets polling for webpack and chokidar on those backends:
+`WATCHPACK_POLLING=true` and `CHOKIDAR_USEPOLLING=1`, unless `[env]` sets them. What is left is
+Turbopack, the default in Next.js 16, which has no polling that works there. Its
+`watchOptions.pollIntervalMs` did not help, and on Apple `container` it stopped even the sandbox's
+own edits from reloading. Run webpack
+instead:
 
 ```toml
-[env]
-CHOKIDAR_USEPOLLING = "1"     # Vite, and anything built on chokidar
-WATCHPACK_POLLING = "true"    # Next.js and webpack
+start = ["npx next dev --webpack -H 0.0.0.0 -p 3000"]
 ```
 
-Polling costs some CPU for a large tree. `CHOKIDAR_USEPOLLING` was measured: a chokidar watcher saw
-none of 20 edits without it and all 20 with it, on Apple `container` and on podman.
-`WATCHPACK_POLLING` is watchpack's own switch and was not measured, nor were Turbopack, Vite's
-`server.watch.usePolling`, or watchers outside Node (Spring DevTools, Rails). For those, use the
-tool's own polling option. An edit the agent makes runs in the sandbox and raises events on every
-backend. See [file watching](/docs/evals/results#file-watching)
-for how this is tested.
+`boxer doctor` warns a Next.js project about this. For a watcher outside Node, such as Spring
+DevTools or Rails, use its own polling option. To turn boxer's polling off, set the variable
+yourself, for example `WATCHPACK_POLLING = ""` in `[env]`. Polling costs some CPU on a large tree.
+See [file watching](/docs/evals/results#file-watching) for the measurements.
 
 ## An interactive harness hangs
 

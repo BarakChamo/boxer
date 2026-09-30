@@ -19,12 +19,12 @@ backend = "smolvm"     # smolvm | container | docker | podman
 
 ## Compare backends
 
-| backend | a sandbox is | kernel | egress allowlist | packs | fork | host edits reach file watchers |
+| backend | a sandbox is | kernel | egress allowlist | packs | fork | host edits reach a dev server |
 | --- | --- | --- | --- | --- | --- | --- |
-| `smolvm` (default) | a microVM | one per sandbox | yes | yes | yes | yes |
-| `container` (Apple, macOS 26 on Apple Silicon) | a lightweight VM per container | one per sandbox | no | no | no | no, on a Mac: use polling |
+| `smolvm` (default) | a microVM | one per sandbox | yes | yes | yes | through polling, which boxer turns on |
+| `container` (Apple, macOS 26 on Apple Silicon) | a lightweight VM per container | one per sandbox | no | no | no | through polling, which boxer turns on |
 | `docker` | a container | shared by every sandbox on the machine | no | no | no | yes, with OrbStack |
-| `podman` | a container | shared by every sandbox on the machine | no | no | no | no, on a Mac: use polling |
+| `podman` | a container | shared by every sandbox on the machine | no | no | no | on a Mac, through polling, which boxer turns on |
 
 - **Kernel.** An escape from a microVM lands in one guest. An escape from a container lands in the
   kernel every other sandbox on the machine uses. On a Mac, docker and podman run their containers
@@ -34,9 +34,11 @@ backend = "smolvm"     # smolvm | container | docker | podman
 - **Packs.** smolvm caches each [environment pack](/docs/concepts/scopes-and-packs#packs), so
   `image_setup` runs once per host. On the other backends it runs once per sandbox.
 - **Fork.** `boxer fork` needs copy-on-write VM branching. Only smolvm has it.
-- **File watchers.** A dev server that reloads on save watches the worktree with inotify. Apple
-  `container` and podman's Mac VM do not pass your edits to inotify, so the server never reloads.
-  Turn on its polling mode. See [a dev server does not reload](/docs/use/troubleshooting#a-dev-server-does-not-reload-after-an-edit).
+- **File watchers.** A dev server reloads when its file watcher sees an edit. On smolvm, Apple
+  `container` and podman's Mac VM, most watchers miss edits you make on your machine, so boxer sets
+  `WATCHPACK_POLLING` and `CHOKIDAR_USEPOLLING` in the sandbox. Next.js's Turbopack has no polling
+  that works there: run `next dev --webpack`. See
+  [a dev server does not reload](/docs/use/troubleshooting#a-dev-server-does-not-reload-after-an-edit).
 
 All four keep secrets off argv and mark the sandboxes they own with labels. Only smolvm has an
 egress log.
@@ -165,6 +167,7 @@ deletes a real sandbox on each backend.
 | --- | --- | --- |
 | podman on the `libkrun` provider | It cannot bind-mount host paths, so no worktree can be mounted. A machine created under one provider is invisible to `podman machine` commands run under another. | Use the `applehv` provider on a Mac: `CONTAINERS_MACHINE_PROVIDER=applehv podman machine init`. |
 | Apple `container` without its service or kernel | Every create fails. | Run `container system start`, then `container system kernel set --recommended`. |
+| docker on Ubuntu, with AppArmor | A process started by one `docker exec` cannot signal one started by another, even as root, because AppArmor stacks each exec's profile. `boxer restart` cannot stop a service with a signal there. | Nothing: boxer restarts the container instead, which keeps its files. A `kill` you run inside the sandbox is refused the same way. |
 | podman storage errors | After heavy use, overlay mounts fail with `input/output error`, from the Mac client and inside the VM. | Run `podman machine stop && podman machine start`. This cleared it without losing anything. |
 
 boxer handles these itself:

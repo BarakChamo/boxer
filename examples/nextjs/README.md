@@ -22,6 +22,8 @@ Gotchas:
 
 - `-H 0.0.0.0` on `next dev` is required. Bound to loopback, the server never sees the forwarded
   port.
+- `--webpack` keeps hot reload working. Turbopack, the default in Next.js 16, does not see edits
+  made on your machine on smolvm. Next.js 15 and earlier use webpack already; drop the flag there.
 - `allowedDevOrigins` in `next.config.ts` stops Next.js 15 warning about cross-origin dev chunks.
   `*.localhost` covers every worktree's name.
 - `npm ci` needs a `package-lock.json`. Use `npm install` in `setup` if there is none.

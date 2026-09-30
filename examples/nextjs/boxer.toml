@@ -10,7 +10,9 @@ setup = ["npm ci --no-audit --no-fund"]
 
 # Started detached every time the sandbox starts, after setup. -H 0.0.0.0 matters: a forwarded
 # port arrives on the guest's interface, so a server bound to 127.0.0.1 never sees it.
-start = ["npx next dev -p 3000 -H 0.0.0.0"]
+# --webpack because Turbopack, Next.js 16's default, does not reload on edits made outside the
+# sandbox on smolvm; webpack does, with the WATCHPACK_POLLING boxer sets. Next.js 15: drop it.
+start = ["npx next dev --webpack -p 3000 -H 0.0.0.0"]
 
 # `boxer up` returns when this passes, not when the process merely exists.
 ready = "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""

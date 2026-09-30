@@ -13,7 +13,7 @@
   "remoteUser": "node",
 
   // Every start (boxer's start). Bind 0.0.0.0 or the forwarded port reaches nothing.
-  "postStartCommand": "npx next dev -p 3000 -H 0.0.0.0",
+  "postStartCommand": "npx next dev --webpack -p 3000 -H 0.0.0.0",
 
   // Each worktree gets its own free host port for 3000 (requireLocalPort defaults to false), and
   // the label names its URL when [urls] is on: web.<repo>.localhost.

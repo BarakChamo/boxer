@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -248,6 +249,9 @@ func collectDoctor(e *box.Env, resolveErr error) *doctorReport {
 	if w := interceptSuggestion(e.Scope.Root, e.Cfg.Intercepted()); w != "" {
 		r.Warnings = append(r.Warnings, w)
 	}
+	if w := turbopackWarning(e.Scope.Root, e.Cfg.Backend, runtime.GOOS); w != "" {
+		r.Warnings = append(r.Warnings, w)
+	}
 	if w := loginShellDemotesShims(e); w != "" {
 		r.Warnings = append(r.Warnings, w)
 	}
@@ -445,4 +449,18 @@ func quoteJoin(xs []string) string {
 		q[i] = strconv.Quote(x)
 	}
 	return strings.Join(q, ", ")
+}
+
+// turbopackWarning names the one dev-server setup boxer's default polling cannot fix: Next.js's
+// Turbopack, which on these backends saw none of five host edits with or without its own
+// watchOptions.pollIntervalMs. Webpack with WATCHPACK_POLLING, which boxer sets, saw all five.
+func turbopackWarning(root, backend, goos string) string {
+	if !box.PollsForHostEdits(backend, goos) {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil || !strings.Contains(string(b), `"next"`) {
+		return ""
+	}
+	return "Next.js with Turbopack does not reload on edits made outside the sandbox on this backend. Run `next dev --webpack` (boxer sets WATCHPACK_POLLING for it), or use backend = \"docker\""
 }

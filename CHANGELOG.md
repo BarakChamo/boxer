@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- On smolvm, Apple `container` and podman on a Mac, boxer sets `WATCHPACK_POLLING=true` and
+  `CHOKIDAR_USEPOLLING=1` in the sandbox unless `[env]` sets them. Next.js saw none of five edits
+  made on the host without it, on all three, and every one with it. `boxer doctor` warns a Next.js
+  project that Turbopack has no polling that works there, and the Next.js examples use
+  `next dev --webpack`.
+- In tool mode, the MCP server sends boxer's brief as its `instructions`, and `boxer_run`'s
+  description names what this repository's shell tool refuses. Copilot and Kimi tool-mode cells had
+  needed a correction in every recorded run; with this, they passed 6 of 6, against 1 of 6 without.
+
+### Fixed
+- The docs said smolvm passes host edits to file watchers. That was measured with chokidar only;
+  Next.js's watchers see none of them.
+
+### Fixed
+- `boxer restart` on docker under Ubuntu's AppArmor could not stop a service: AppArmor refuses a
+  signal from one `docker exec` to a process another started, even as root. It now restarts the
+  container when a service will not stop. Found by the Linux smoke suite, which had not run since
+  1.1.
+- The hook read a command by splitting on `&&`, `||`, `|` and `;` and taking each part's first
+  word, so many shapes ran an intercepted program on the host: `true & npm i`,
+  `sh -c 'npm i'`, `env npm i`, `sudo npm i`, `timeout 60 npm test`, `if npm test; then`,
+  `echo $(npm bin)`, `eval npm test`, and any line that started with `boxer`. It now reads the line
+  with shell quoting: separators including `&`, command substitution, `sh -c` and `eval`, common
+  wrappers and compound commands. Text in quotes is text, and a line it cannot read goes to the
+  sandbox. A test runs every case through a real bash with recording stubs on PATH and requires the
+  two to agree.
+- The configuration reference said a line with any passthrough program is not wrapped. A line that
+  also runs an intercepted program is wrapped whole, and now says so.
+
 ## [1.3.0] - 2026-09-30
 
 ### Added

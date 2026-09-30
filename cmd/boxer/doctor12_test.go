@@ -119,3 +119,20 @@ func TestRestartCommandAndGCDryRun(t *testing.T) {
 		t.Fatalf("gc: %d %s", code, out)
 	}
 }
+
+func TestTurbopackWarning(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"dependencies":{"next":"16"}}`), 0o644)
+	if w := turbopackWarning(dir, "smolvm", "darwin"); !strings.Contains(w, "next dev --webpack") {
+		t.Fatalf("smolvm: %q", w)
+	}
+	if w := turbopackWarning(dir, "docker", "darwin"); w != "" {
+		t.Fatalf("docker passes host edits through: %q", w)
+	}
+	if w := turbopackWarning(dir, "podman", "linux"); w != "" {
+		t.Fatalf("podman on Linux shares the host kernel's inotify: %q", w)
+	}
+	if w := turbopackWarning(t.TempDir(), "smolvm", "darwin"); w != "" {
+		t.Fatalf("not a Next.js project: %q", w)
+	}
+}

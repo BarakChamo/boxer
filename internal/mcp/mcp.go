@@ -115,11 +115,18 @@ func (s *Server) handle(req request) response {
 	switch req.Method {
 	case "initialize":
 		s.sessionStart()
-		res.Result = map[string]any{
+		result := map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "boxer", "version": s.Version},
 		}
+		// The brief, as the server's instructions: a client that shows them to the model gives it
+		// the rules before its first command, which is the only time they prevent a denial. Copilot
+		// has no session-start hook to inject them, so this is where it can learn them.
+		if e, err := s.Resolve("", s.Harness, scope.Identity{}); err == nil {
+			result["instructions"] = box.InstructionsFor(e.Cfg, "")
+		}
+		res.Result = result
 	case "ping":
 		res.Result = map[string]any{}
 	case "resources/list":
@@ -141,7 +148,7 @@ func (s *Server) handle(req request) response {
 			{"uri": briefURI, "mimeType": "text/markdown", "text": box.InstructionsFor(e.Cfg, "")},
 		}}
 	case "tools/list":
-		res.Result = map[string]any{"tools": tools}
+		res.Result = map[string]any{"tools": s.toolList()}
 	case "tools/call":
 		var p struct {
 			Name string         `json:"name"`
@@ -157,6 +164,34 @@ func (s *Server) handle(req request) response {
 		res.Error = &rpcError{-32601, "method not found: " + req.Method}
 	}
 	return res
+}
+
+// toolList is the tool set with boxer_run's description naming what this repository's shell tool
+// refuses. Under tool mode a model reads the description before choosing a tool, and a generic
+// "use this for build and test commands" sent it to the shell for anything that did not sound like
+// one — `uname` under intercept = ["*"] — to be denied and corrected every time.
+func (s *Server) toolList() []map[string]any {
+	e, err := s.Resolve("", s.Harness, scope.Identity{})
+	if err != nil || e.Cfg.Mode != "tool" {
+		return tools
+	}
+	which := "commands that run " + strings.Join(e.Cfg.Intercepted(), ", ")
+	if in := e.Cfg.Intercepted(); len(in) == 1 && in[0] == "*" {
+		which = "every command except " + strings.Join(e.Cfg.Passthrough, ", ")
+	}
+	out := make([]map[string]any, len(tools))
+	for i, t := range tools {
+		c := map[string]any{}
+		for k, v := range t {
+			c[k] = v
+		}
+		if c["name"] == "boxer_run" {
+			c["description"] = c["description"].(string) + " In this repository the shell tool refuses " + which +
+				": run those with this tool from the start, not the shell."
+		}
+		out[i] = c
+	}
+	return out
 }
 
 // sessionStart warms the server's own scope in the background when configuration allows; the

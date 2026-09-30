@@ -44,9 +44,6 @@ func Decide(in Input) Decision {
 	if in.Mode == "off" || cmd == "" {
 		return Decision{Action: Allow}
 	}
-	if isBoxer(cmd) {
-		return Decision{Action: Allow}
-	}
 	if !needsSandbox(cmd, in.Intercept, in.Passthrough) {
 		return Decision{Action: Allow}
 	}
@@ -63,14 +60,19 @@ func Decide(in Input) Decision {
 	}
 }
 
-// needsSandbox is true when any segment of a compound command starts with an intercepted
-// program and no segment is exempt by the passthrough list. Compound input is wrapped whole
-// (R-CMD-3), so one intercepted segment decides for all.
+// needsSandbox is true when any program the line runs is intercepted and not passthrough,
+// including programs inside command substitution, `sh -c`, `eval` and wrappers such as `env`,
+// `sudo` and `timeout`. The line is then wrapped whole (R-CMD-3). boxer itself always stays on
+// the host: a line that is only `boxer run ...` is already sandboxed, and wrapping it would run
+// boxer inside the guest. A line boxer cannot read is sandboxed rather than let through.
 func needsSandbox(cmd string, intercept, passthrough []string) bool {
 	all := len(intercept) == 1 && intercept[0] == "*"
-	for _, seg := range splitSegments(cmd) {
-		prog := firstProgram(seg)
-		if prog == "" || slices.Contains(passthrough, prog) {
+	progs, ok := programs(cmd, 0)
+	if !ok {
+		return len(intercept) > 0
+	}
+	for _, prog := range progs {
+		if prog == "" || prog == "boxer" || slices.Contains(passthrough, prog) {
 			continue
 		}
 		if all || slices.Contains(intercept, prog) {
@@ -78,34 +80,4 @@ func needsSandbox(cmd string, intercept, passthrough []string) bool {
 		}
 	}
 	return false
-}
-
-// splitSegments breaks on the shell operators that sequence commands. Quoting is not honoured;
-// a quoted `&&` produces a spurious empty segment, which firstProgram ignores.
-func splitSegments(cmd string) []string {
-	r := strings.NewReplacer("&&", "\n", "||", "\n", "|", "\n", ";", "\n")
-	return strings.Split(r.Replace(cmd), "\n")
-}
-
-// firstProgram returns the program name of one segment, skipping leading environment
-// assignments, `cd dir &&`-style prefixes are already split off, and path prefixes.
-func firstProgram(seg string) string {
-	for _, tok := range strings.Fields(seg) {
-		if strings.Contains(tok, "=") && !strings.HasPrefix(tok, "=") {
-			continue
-		}
-		if tok == "(" || tok == "{" || tok == "!" {
-			continue
-		}
-		tok = strings.TrimLeft(tok, "({")
-		if i := strings.LastIndex(tok, "/"); i >= 0 {
-			tok = tok[i+1:]
-		}
-		return tok
-	}
-	return ""
-}
-
-func isBoxer(cmd string) bool {
-	return firstProgram(cmd) == "boxer"
 }

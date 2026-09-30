@@ -435,22 +435,22 @@ CLK=$(cd "$WORK/cl" && scopekey)
 check "rm by name removes it" 'boxer rm "$CLK" >/dev/null 2>&1 && ! boxer ls --json | grep -q "$CLK"'
 
 echo "# services are supervised, and restart relaunches them"
-# `sleep 601` is the service: a number nothing else in the guest sleeps for. The docker driver's own
-# keep-alive is `sleep 3600`, and the supervisor's script contains the command's text, so a pid is
-# taken from ps by exact argv rather than by pattern.
+# Two services, each counting its starts in the worktree, which survives every kind of restart.
+# The first crashes by itself after a second; nothing outside signals it, because on Docker under
+# Ubuntu's AppArmor one exec cannot signal a process another exec started, even as root.
 mkrepo "$WORK/sv" "$BASE
-start = [\"sleep 601\"]"
+start = [\"echo x >> /workspace/crash.runs; sleep 1; exit 3\", \"echo x >> /workspace/svc.runs; exec sleep 601\"]"
 cd "$WORK/sv"
-svc() { boxer run -c 'ps -o pid,args | awk '"'"'$2=="sleep" && $3=="601" {print $1}'"'"'' 2>/dev/null; }
-boxer up >/dev/null 2>&1
-P1=$(svc)
-boxer run -c "kill $P1" >/dev/null 2>&1; sleep 4
-P2=$(svc)
-check "a killed service is restarted" '[ -n "$P1" ] && [ -n "$P2" ] && [ "$P1" != "$P2" ]'
-check "the restart is in the start log" 'boxer run -c "grep -q \"restarting in 1s: sleep 601\" /tmp/boxer-start.log"'
-boxer restart >/dev/null 2>&1
-P3=$(svc)
-check "boxer restart relaunches exactly one" '[ -n "$P3" ] && [ "$P3" != "$P2" ] && [ "$(printf "%s\n" $P3 | wc -l | tr -d " ")" = 1 ]'
+boxer up >/dev/null 2>&1 || true
+sleep 6
+runs() { wc -l < "$WORK/sv/$1" 2>/dev/null | tr -d ' '; }
+check "a crashed service is restarted" '[ "$(runs crash.runs)" -ge 3 ]'
+check "each restart is in the start log" 'boxer run -c "grep -q \"exited 3; restarting in 1s: \" /tmp/boxer-start.log"'
+boxer restart >/dev/null 2>&1 || true
+# restart returns once the services are launched (there is no ready probe here); the relaunched
+# one records its start a moment later, and a slow host was checked before it had.
+for _ in $(seq 20); do [ "$(runs svc.runs)" = 2 ] && break; sleep 0.5; done
+check "boxer restart relaunches a service once" '[ "$(runs svc.runs)" = 2 ] && [ "$(boxer run -c "ps -o args | grep -c \"^sleep 601\"" 2>/dev/null)" = 1 ]'
 boxer down >/dev/null 2>&1 || true
 
 echo "# volumes outlive the sandbox"

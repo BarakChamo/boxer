@@ -295,3 +295,36 @@ func TestStatusSaysWhereServersAre(t *testing.T) {
 		}
 	}
 }
+
+// Under tool mode the model learns what the shell tool refuses before its first command: from the
+// server's instructions, and from boxer_run's own description.
+func TestToolModeTellsTheModelUpFront(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"mode = \"tool\"\nintercept = [\"*\"]\n")
+	in := initialize + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
+	var out bytes.Buffer
+	s := &Server{Harness: "test", Resolve: box.Resolve, Version: "t"}
+	if err := s.Serve(strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var r map[string]any
+	json.Unmarshal([]byte(lines[0]), &r)
+	if ins, _ := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(ins, "Do not run") || !strings.Contains(ins, "boxer_run") {
+		t.Fatalf("initialize must carry the brief as instructions: %s", lines[0])
+	}
+	json.Unmarshal([]byte(lines[1]), &r)
+	var desc string
+	for _, tl := range r["result"].(map[string]any)["tools"].([]any) {
+		if m := tl.(map[string]any); m["name"] == "boxer_run" {
+			desc = m["description"].(string)
+		}
+	}
+	if !strings.Contains(desc, "refuses every command except git") || !strings.Contains(desc, "from the start") {
+		t.Fatalf("boxer_run must say what the shell refuses here: %q", desc)
+	}
+	// The shared table is not changed by it: another repository gets the plain description.
+	if strings.Contains(tools[0]["description"].(string)+tools[1]["description"].(string), "refuses") {
+		t.Fatal("the package-level tool table was modified")
+	}
+}
