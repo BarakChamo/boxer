@@ -325,9 +325,11 @@ mounts = ["~/.m2:/root/.m2:ro"]
 `[]string`, default `[]`.
 
 Named directories that outlive the sandbox, as `name:/guest/path`. Each is a directory on the host,
-one per volume per scope, mounted read-write. It survives `boxer down`, `boxer rm`,
-`--recreate` and idle reclaim, so a database keeps its data. It is deleted when its worktree is
-gone, at the next `boxer gc`, or by `boxer rm --volumes`. A name is letters, digits, `-` and `_`.
+`~/.local/state/boxer/volumes/<scope>/<name>`, bind-mounted read-write on every backend. It survives
+`boxer down`, `boxer rm`, `--recreate`, `--rebuild` and idle reclaim, so a database keeps its data.
+It is deleted when its worktree is gone, at the next `boxer gc`, or by `boxer rm --volumes`. An
+orchestrator that deletes a worktree when you archive a task takes its volumes
+with it at the next sweep. Copy out what you want to keep first. A name is letters, digits, `-` and `_`.
 Volumes are not part of the environment pack.
 
 ```toml
@@ -555,7 +557,8 @@ allow_hosts = ["registry.npmjs.org", "github.com"]
 `[]string`, default `[]`.
 
 Package ecosystems whose hosts join `allow_hosts`, so you do not have to find out which CDN a
-registry downloads from. Only used under `allowlist`.
+registry downloads from. Only used under `allowlist`. Under `on` or `off` it is ignored, without an
+error, so one `boxer.toml` works on every backend.
 
 | Preset | Hosts |
 | --- | --- |

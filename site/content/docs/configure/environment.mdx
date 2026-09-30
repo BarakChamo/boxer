@@ -41,8 +41,10 @@ Any OCI reference works. Without `image`, boxer picks one from the worktree's lo
 | none of these | `debian:bookworm-slim` |
 
 Ruby and JVM lockfiles win over a `package.json` kept for assets. The default `intercept` list
-covers Node, Python, Rust, Go and make. For Ruby or Java, add your tools:
-`intercept = ["bundle", "rails", "rake", "rspec", "mvn", "gradle", "java"]`, plus anything else you run.
+covers Node, Python, Rust, Go and make. For Ruby or Java, add your tools with `intercept_also`,
+which keeps the default list: `intercept_also = ["ruby", "bundle", "rails", "rake", "rspec"]`, or
+`["gradle", "gradlew", "mvn", "mvnw", "java"]`. `./gradlew` and `bin/rails` match by name.
+`boxer doctor` prints the line for your project.
 
 pnpm needs `corepack enable` in `image_setup`, since the node image does not ship it enabled.
 
@@ -163,7 +165,7 @@ If the repository has `.devcontainer/devcontainer.json`, boxer reads it first:
 | `initializeCommand` | `[prep]` |
 
 boxer also reads the image or Dockerfile, ports, environment, bind mounts and `remoteUser`. It does
-not run Compose or install features, so `dockerComposeFile` and `features` are refused by name. [Bring your Docker setup](/docs/configure/docker#use-your-devcontainer) has what to do
+not run Compose or install features, so `dockerComposeFile` and `features` are ignored, with a warning that names them. [Bring your Docker setup](/docs/configure/docker#use-your-devcontainer) has what to do
 instead. Any key in `boxer.toml` overrides the devcontainer.
 The [configuration reference](/docs/reference/configuration#devcontainerjson) has the full mapping.
 
@@ -181,6 +183,9 @@ ready_timeout = "120s"     # the default is 60s
 ```
 
 - Each `start` line runs detached in the worktree, after `setup`, every time the sandbox starts.
+  The lines are launched in order, without waiting for each other. A server that needs the
+  database must retry until it answers, or wait for it in its own line:
+  `until pg_isready -h 127.0.0.1; do sleep 1; done; exec uvicorn main:app`.
 - A process that crashes is restarted after 1 second, then 2, 4 and up to 30. After five quick
   crashes in a row boxer stops trying. A process that exits 0 is not restarted. Set
   [`restart = "never"`](/docs/reference/configuration#restart) to turn this off.

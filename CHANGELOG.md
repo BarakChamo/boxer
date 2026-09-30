@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `pkg/boxer` `Delete` also removes the run record, last-used stamp, lock and URLs, as
+  `boxer rm` does. It used to delete only the machine.
+
 ## [1.2.0] - 2026-09-30
 
 ### Added

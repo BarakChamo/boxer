@@ -113,8 +113,17 @@ func URLs(m Machine) map[string]string { return box.ReachableURLs(m) }
 // Stop halts a machine by name; stopping a stopped machine is not an error.
 func Stop(name string) error { return host().Stop(name) }
 
-// Delete removes a machine by name.
-func Delete(name string) error { return host().Delete(name) }
+// Delete removes a machine by name, and what boxer kept about it, as `boxer rm` does: its run
+// record, last-used stamp, lock and URLs. Its named volumes are kept.
+func Delete(name string) error {
+	c := host()
+	if err := c.Delete(name); err != nil {
+		return err
+	}
+	vm.ForgetOwned(c, name)
+	box.ForgetScope(name)
+	return nil
+}
 
 func host() vm.Backend {
 	cwd, _ := os.Getwd()

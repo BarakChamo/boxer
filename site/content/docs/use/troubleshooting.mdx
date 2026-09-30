@@ -149,9 +149,12 @@ CHOKIDAR_USEPOLLING = "1"     # Vite, and anything built on chokidar
 WATCHPACK_POLLING = "true"    # Next.js and webpack
 ```
 
-Polling costs some CPU for a large tree. `CHOKIDAR_USEPOLLING` was measured: a chokidar watcher on
-Apple `container` saw none of 20 edits without it and all 20 with it. `WATCHPACK_POLLING` is
-watchpack's own switch and was not measured. See [file watching](/docs/evals/results#file-watching)
+Polling costs some CPU for a large tree. `CHOKIDAR_USEPOLLING` was measured: a chokidar watcher saw
+none of 20 edits without it and all 20 with it, on Apple `container` and on podman.
+`WATCHPACK_POLLING` is watchpack's own switch and was not measured, nor were Turbopack, Vite's
+`server.watch.usePolling`, or watchers outside Node (Spring DevTools, Rails). For those, use the
+tool's own polling option. An edit the agent makes runs in the sandbox and raises events on every
+backend. See [file watching](/docs/evals/results#file-watching)
 for how this is tested.
 
 ## An interactive harness hangs

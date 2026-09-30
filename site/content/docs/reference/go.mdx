@@ -194,7 +194,8 @@ stopped machine is not an error. Same as `boxer stop NAME`.
 func Delete(name string) error
 ```
 
-Removes one machine by name.
+Removes one machine by name, and what boxer kept about it: its run record, last-used stamp, lock and
+URLs, as `boxer rm NAME` does. Its [volumes](/docs/reference/configuration#volumes) are kept.
 
 ## LastUsed
 

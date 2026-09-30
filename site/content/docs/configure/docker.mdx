@@ -110,6 +110,8 @@ REDIS_URL = "redis://127.0.0.1:6379"
 - `volumes` keeps the database's files on your machine, one directory per worktree. They survive
   `boxer rm`, `--recreate` and idle reclaim, and are deleted when the worktree is, or by
   `boxer rm --volumes`.
+- On a Debian image (`apt-get install postgresql`), `initdb` and `postgres` are not on `PATH`. Use
+  their full path, `/usr/lib/postgresql/<version>/bin/`.
 - `start` runs them every time the sandbox starts. The Postgres line creates the database the first
   time, when the volume is empty. It changes the volume's owner first, because Postgres refuses a
   data directory it does not own. The owner changes only inside the sandbox: on your machine the

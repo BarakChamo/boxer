@@ -1,8 +1,11 @@
 package boxer_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"github.com/BarakChamo/boxer/pkg/boxer"
@@ -48,4 +51,30 @@ func TestListAllFindsTheSandbox(t *testing.T) {
 		}
 	}
 	t.Fatalf("ListAll missed the smolvm sandbox: %v", ms)
+}
+
+// Delete clears what boxer kept about the sandbox, as `boxer rm` does, and keeps its volumes.
+func TestDeleteForgetsTheScope(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	if err := client.Create(vm.CreateSpec{Name: "sb-del", Labels: map[string]string{"boxer.scope": "sb-del"}}); err != nil {
+		t.Fatal(err)
+	}
+	stamp := filepath.Join(box.LastUsedDir(), "sb-del")
+	vol := filepath.Join(box.VolumeDir(), "sb-del", "data")
+	for _, d := range []string{filepath.Dir(stamp), vol} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.WriteFile(stamp, nil, 0o644)
+	if err := boxer.Delete("sb-del"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := client.Status("sb-del"); ok {
+		t.Fatal("the machine must be gone")
+	}
+	if _, err := os.Stat(stamp); !os.IsNotExist(err) {
+		t.Fatal("the last-used stamp must go with it")
+	}
+	if _, err := os.Stat(vol); err != nil {
+		t.Fatal("volumes are kept")
+	}
 }

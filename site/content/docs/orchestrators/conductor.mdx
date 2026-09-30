@@ -45,3 +45,11 @@ sandbox too, and boxer mounts its config directory (such as `~/.claude`) read-wr
 Conductor's local workspaces are GUI-only, so this setup is verified by hand, not by the automated
 evaluations.
 </Callout>
+
+## When a workspace is archived
+
+If archiving a workspace removes its worktree (check with `git worktree list`), boxer treats the
+sandbox as gone: the next `boxer gc`, or the automatic sweep, deletes the sandbox and its
+[volumes](/docs/reference/configuration#volumes). A database kept in a volume goes with it. Dump
+what you want to keep before you archive, or run `boxer rm --gone` yourself to reclaim the space at
+once.

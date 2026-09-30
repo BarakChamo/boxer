@@ -20,8 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | 
 
 smolvm runs the sandboxes. On Linux, smolvm needs `/dev/kvm` (`sudo usermod -aG kvm $USER`, then log in again).
 
-**Prefer Docker?** Skip smolvm. Add `backend = "docker"` and `[network] mode = "on"` to your
-`boxer.toml` in step 3. You get a container per worktree instead of a microVM. See
+**Prefer Docker, podman or Apple `container`?** Skip smolvm. Add `backend = "docker"` (or `"podman"`,
+`"container"`) and `[network] mode = "on"` to your `boxer.toml` in step 3. You get a container per worktree instead of a microVM. See
 [Bring your Docker setup](/docs/configure/docker).
 
 ## 2. Connect your agent
@@ -180,7 +180,8 @@ on a Mac.
 | Watch what boxer would do, without changing anything | set `enforcement = "audit"` in `boxer.toml` |
 | Run one session on your machine | start the agent with `BOXER_MODE=off` |
 | Turn it off for the repository | set `mode = "off"` in `boxer.toml` |
-| Remove it | `boxer uninstall all` (or the harness you installed), commit the result, then `boxer down --all` |
+| Remove it from the repository | `boxer uninstall all` (or the harness you installed) and commit the result. `boxer rm --all -A --volumes -y` deletes the sandboxes and their data |
+| Remove it from this machine | also `boxer uninstall <harness> --user` if you used `--user`, then delete `~/.local/bin/boxer`, `~/.local/state/boxer` (packs, volumes, logs) and `~/.local/share/boxer` (shims) |
 
 ## Next
 

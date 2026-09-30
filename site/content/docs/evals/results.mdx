@@ -115,7 +115,7 @@ write-then-rename saves to files under `src/`, one second apart. The watcher was
 | smolvm 1.16.1 | 3 | 30 of 30 | not needed |
 | docker, OrbStack 29.4.0 | 2 | 20 of 20 | not needed |
 | Apple `container` 1.4.1 | 2 | 0 of 20 | 20 of 20 |
-| podman 5.8.2, `applehv` machine | 2 | 0 of 20 | not run |
+| podman 5.8.2, `applehv` machine | 2 | 0 of 20 | 20 of 20 |
 
 On Apple `container` and podman the watcher was running, and it saw an edit made inside the sandbox.
 Only host edits were missing. On smolvm, a plain `fs.watch` sometimes reported an edit against the
