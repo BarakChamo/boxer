@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-30
+
 ### Added
 - `network.allow_hosts` accepts addresses, CIDR blocks (`10.0.0.0/8`, IPv6 too) and inclusive
   address ranges (`10.0.0.10-10.0.0.40`), enforced by smolvm as address rules on every port.
