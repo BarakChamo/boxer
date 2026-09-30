@@ -563,6 +563,12 @@ func (e *Env) create() error {
 		now := time.Now()
 		_ = os.Chtimes(from, now, now) // a pack's mtime is its last use
 	}
+	// Hostnames and address ranges are separate rules to smolvm. Validate has already refused
+	// anything that is neither, so an error here is a list boxer built itself.
+	egress, err := config.SplitAllow(hosts)
+	if err != nil {
+		return e.fail(&Error{Reason: err.Error(), Cause: "CONFIG_INVALID", Scope: e.Scope, Fix: "fix network.allow_hosts in boxer.toml"})
+	}
 	spec := vm.CreateSpec{
 		Name:       e.Scope.Key,
 		Image:      image,
@@ -573,7 +579,8 @@ func (e *Env) create() error {
 		CPUs:       e.Cfg.CPUs,
 		MemoryMiB:  mem,
 		Network:    e.Cfg.Network.Mode,
-		AllowHosts: e.resolvable(hosts),
+		AllowHosts: e.resolvable(egress.Hosts),
+		AllowCIDRs: egress.CIDRs,
 		DNS:        e.Cfg.Network.DNS,
 		Ports:      ports,
 		KeepID:     e.keepID,
@@ -622,7 +629,7 @@ func (e *Env) create() error {
 // happened: statsig.anthropic.com stopped resolving, it was on the inside placement's list, and
 // every inside sandbox on the host failed to start with an error about a host nobody had asked
 // for. A host that does not resolve cannot be reached through the allowlist anyway; dropping it
-// loses nothing but the failure. Wildcards and addresses are passed through untouched.
+// loses nothing but the failure. Address ranges never reach it: they are CIDR rules, split off before.
 func (e *Env) resolvable(hosts []string) []string {
 	if e.Cfg.Network.Mode != "allowlist" || len(hosts) == 0 {
 		return hosts
@@ -631,10 +638,7 @@ func (e *Env) resolvable(hosts []string) []string {
 	var wg sync.WaitGroup
 	for i, h := range hosts {
 		name := h
-		if j := strings.LastIndex(name, ":"); j > 0 && !strings.Contains(name[:j], ":") {
-			name = name[:j] // host:port
-		}
-		if strings.Contains(name, "*") || net.ParseIP(name) != nil {
+		if net.ParseIP(name) != nil {
 			ok[i] = true
 			continue
 		}

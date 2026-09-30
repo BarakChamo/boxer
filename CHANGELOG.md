@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `network.allow_hosts` accepts addresses, CIDR blocks (`10.0.0.0/8`, IPv6 too) and inclusive
+  address ranges (`10.0.0.10-10.0.0.40`), enforced by smolvm as address rules on every port.
+
+### Changed
+- A wildcard (`*.example.com`) or a port (`host:443`) in `network.allow_hosts` is now an error at
+  load. smolvm accepted a wildcard and then allowed nothing, so a sandbox that looked configured
+  could reach none of those hosts. A port was refused by smolvm at create.
+
 ### Fixed
 - `pkg/boxer` `Delete` also removes the run record, last-used stamp, lock and URLs, as
   `boxer rm` does. It used to delete only the machine.

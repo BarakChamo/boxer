@@ -544,12 +544,33 @@ mode = "on"
 
 `[]string`, default `[]`.
 
-Hosts the guest may reach under `allowlist`. A failed command names the hosts the allowlist refused,
-and `boxer doctor` lists them under `denied_hosts`.
+What the guest may reach under `allowlist`. Each entry is one of these.
+
+| Entry | Example | Allows |
+| --- | --- | --- |
+| a hostname | `registry.npmjs.org` | that exact name, and the addresses it resolves to when the sandbox starts |
+| an address | `203.0.113.7`, `2001:db8::1` | that address |
+| a CIDR block | `10.0.0.0/8`, `2001:db8::/48` | every address in the block |
+| an address range | `10.0.0.10-10.0.0.40` | every address from the first to the last, inclusive |
+
+An address, block or range is reachable on every port and needs no DNS. A hostname is resolved once,
+when the sandbox starts. If its addresses change later, run `boxer up --recreate`. A name that is
+not listed does not resolve in the guest at all.
+
+These are refused when `boxer.toml` loads, with an error that names the entry:
+
+- **Wildcards**, such as `*.example.com`. smolvm matches exact names only, and it accepts a wildcard
+  without allowing anything. List each host, or use [`allow_presets`](#networkallow_presets).
+- **Ports**, such as `example.com:443` or `example.com:8000-8100`. Every allowed host or range is
+  reachable on every port.
+- **A block with host bits set**, such as `10.0.0.1/8`. The error suggests `10.0.0.0/8`.
+
+A failed command names the hosts and addresses the allowlist refused, and `boxer doctor` lists them
+under `denied_hosts`.
 
 ```toml
 [network]
-allow_hosts = ["registry.npmjs.org", "github.com"]
+allow_hosts = ["registry.npmjs.org", "github.com", "10.20.0.0/16", "192.168.1.10-192.168.1.20"]
 ```
 
 ### `network.allow_presets`

@@ -165,6 +165,8 @@ type CreateSpec struct {
 	MemoryMiB  int
 	Network    string // off | allowlist | on
 	AllowHosts []string
+	// AllowCIDRs are address blocks the guest may reach on every port, under allowlist.
+	AllowCIDRs []string
 	Ports      []string
 	// DNS is the resolver the guest should use. Empty means boxer picks the host's (see dns.go);
 	// "off" leaves smolvm's public-resolver default alone.
@@ -209,6 +211,9 @@ func (c Client) Create(s CreateSpec) error {
 	case "allowlist":
 		for _, h := range s.AllowHosts {
 			args = append(args, "--allow-host", h)
+		}
+		for _, c := range s.AllowCIDRs {
+			args = append(args, "--allow-cidr", c)
 		}
 	}
 	// Point a networked guest at the host's caching resolver rather than smolvm's public default:

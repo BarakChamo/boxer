@@ -499,6 +499,30 @@ allow_presets = [\"alpine\"]"
   boxer down >/dev/null 2>&1 || true
 fi
 
+echo "# allowlist address ranges"
+# A CIDR block, a first-last range and one address, each checked at both of its edges. Anycast
+# resolvers are used because every network routes them and none of them move.
+if needs allowlist "an address range allows exactly its addresses"; then
+  mkrepo "$WORK/rng" "$BASE
+[network]
+allow_hosts = [\"1.1.1.0/30\", \"8.8.8.8-8.8.8.9\", \"9.9.9.9\"]"
+  cd "$WORK/rng"
+  RNG=$(boxer run -c 'for h in 1.1.1.1 1.1.1.3 1.1.1.4 8.8.8.8 8.8.8.9 8.8.4.4 9.9.9.9 149.112.112.112; do nc -z -w3 $h 443 && printf "%s:open " $h || printf "%s:shut " $h; done' 2>/dev/null)
+  echo "  ..   $RNG"
+  check "an address range allows exactly its addresses" '[ "$RNG" = "1.1.1.1:open 1.1.1.3:open 1.1.1.4:shut 8.8.8.8:open 8.8.8.9:open 8.8.4.4:shut 9.9.9.9:open 149.112.112.112:shut " ]'
+  boxer down >/dev/null 2>&1 || true
+fi
+# Its own file, not BASE: BASE carries a network table on backends without an allowlist, and the
+# refusal must fire whatever network.mode says.
+mkrepo "$WORK/wc" 'image = "alpine"
+require_worktree = "off"
+[network]
+mode = "off"
+allow_hosts = ["*.npmjs.org"]'
+# `|| true` inside the subshell: boxer is meant to fail here, and under pipefail its exit status
+# would otherwise fail the pipeline even when grep matched.
+check "a wildcard is refused at load, by name" '(cd "$WORK/wc" && boxer up 2>&1 || true) | grep -q "wildcards are not supported"'
+
 echo "# file watching: a host edit reaches a watcher in the guest"
 # inotify is what fs.watch, chokidar and watchpack use by default. Apple container and podman's
 # macOS machine share the worktree over virtiofs without forwarding host changes as inotify events,

@@ -638,6 +638,9 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	if _, err := SplitAllow(c.Network.AllowHosts); err != nil {
+		return err
+	}
 	for _, p := range c.Network.AllowPresets {
 		if _, ok := Presets[p]; !ok {
 			return fmt.Errorf("network.allow_presets contains %q; allowed: %s", p, strings.Join(PresetNames(), " | "))

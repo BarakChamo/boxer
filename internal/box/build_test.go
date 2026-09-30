@@ -152,3 +152,30 @@ func TestBuildOnAContainerBackendAndItsFailures(t *testing.T) {
 		t.Fatal("a path outside the worktree is shown whole")
 	}
 }
+
+// Ranges reach smolvm as --allow-cidr, hostnames as --allow-host, and a range is never dropped as
+// a host that does not resolve.
+func TestAllowRangesBecomeCIDRRules(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	_, log := vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"image = \"alpine\"\n[network]\nallow_hosts = [\"registry.npmjs.org\", \"10.0.0.0/8\", \"192.168.1.10-192.168.1.13\", \"203.0.113.7\"]\n")
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	for _, want := range []string{"--allow-host registry.npmjs.org", "--allow-cidr 10.0.0.0/8", "--allow-cidr 192.168.1.10/31", "--allow-cidr 192.168.1.12/31", "--allow-cidr 203.0.113.7/32"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("create is missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "--allow-host 10.0.0.0/8") || strings.Contains(s, "--allow-host 203.0.113.7") {
+		t.Errorf("an address must not be passed as a hostname:\n%s", s)
+	}
+}

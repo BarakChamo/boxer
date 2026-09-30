@@ -285,6 +285,10 @@ allow_hosts = ["registry.npmjs.org"]
 | `"on"` | everything |
 | `"off"` | nothing |
 
+`allow_hosts` takes exact hostnames, addresses, CIDR blocks (`10.20.0.0/16`) and address ranges
+(`192.168.1.10-192.168.1.20`), for a private registry or a service on your network. Wildcards and
+ports are refused. See [`allow_hosts`](/docs/reference/configuration#networkallow_hosts).
+
 Only smolvm enforces `allowlist`. docker, podman and Apple `container` refuse it, so set `"on"` or
 `"off"` there. See [Backends](/docs/backends).
 
