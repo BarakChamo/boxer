@@ -110,11 +110,18 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 			inWord = true
 			i = j
 		case c == '$' && i+1 < len(r) && r[i+1] == '(':
-			if i+2 < len(r) && r[i+2] == '(' { // $(( arithmetic )) runs nothing
+			if i+2 < len(r) && r[i+2] == '(' {
+				// $(( arithmetic )) runs nothing itself, but a $(...) inside it still runs: only
+				// the substitutions inside the expression are read, never the expression.
 				j := matchParen(r, i+2)
 				if j < 0 {
 					return nil, nil, false
 				}
+				_, inner, ok := lex(string(r[i+3 : j]))
+				if !ok {
+					return nil, nil, false
+				}
+				subs = append(subs, inner...)
 				inWord = true
 				i = j + 1
 				continue
@@ -193,7 +200,13 @@ func doubleQuoted(r []rune, from int) (end int, subs []string, ok bool) {
 			if j < 0 {
 				return 0, nil, false
 			}
-			if i+2 < len(r) && r[i+2] != '(' {
+			if i+2 < len(r) && r[i+2] == '(' { // arithmetic: only what it substitutes
+				_, inner, ok := lex(string(r[i+3 : j]))
+				if !ok {
+					return 0, nil, false
+				}
+				subs = append(subs, inner...)
+			} else {
 				subs = append(subs, string(r[i+2:j]))
 			}
 			i = j
@@ -260,12 +273,12 @@ func isDigits(s string) bool {
 var keywords = map[string]bool{
 	"if": true, "then": true, "else": true, "elif": true, "fi": true, "do": true, "done": true,
 	"while": true, "until": true, "!": true, "{": true, "}": true, "esac": true,
-	"[[": true, "]]": true, "function": true, "coproc": true,
+	"]]": true, "function": true, "coproc": true,
 }
 
 // headers name a construct whose remaining words are data, not a program: `for x in a b`,
 // `case $x in`, `select x in a b`.
-var headers = map[string]bool{"for": true, "case": true, "select": true}
+var headers = map[string]bool{"for": true, "case": true, "select": true, "[[": true}
 
 // wrappers run the program given in their arguments. The value lists the options that take a
 // separate argument, so the argument is not mistaken for the program.
@@ -286,7 +299,7 @@ var wrappers = map[string]string{
 	"caffeinate": "-w -t",
 	"chronic":    "",
 	"unbuffer":   "",
-	"watch":      "-n -d",
+	"setsid":     "",
 	"strace":     "-o -e -p -s",
 	"arch":       "",
 }
@@ -315,22 +328,67 @@ func program(words []string, depth int) ([]string, bool) {
 	if i >= len(words) {
 		return nil, true
 	}
-	name := path.Base(words[i])
+	// A program name still holding $, a glob or a brace is decided when the line runs, not here:
+	// `$x i` after `x=npm`, `np[m] i`, `{npm,i}`. It cannot be read, so it is not let through.
+	// The basename decides: `$HOME/.cargo/bin/cargo` is cargo, whatever HOME is.
+	raw := words[i]
+	name := path.Base(raw)
+	if name != "[" && strings.ContainsAny(name, "$*?[{") {
+		return nil, false
+	}
 	rest := words[i+1:]
 	switch {
 	case name == "eval":
 		return programs(strings.Join(rest, " "), depth+1)
 	case shells[name]:
+		return shellLine(raw, rest, depth)
+	case name == "watch":
+		// watch runs its arguments as one line through sh -c.
+		j := skipOptions(rest, "-n -d -c")
+		if j >= len(rest) {
+			return []string{raw}, true
+		}
+		return programs(strings.Join(rest[j:], " "), depth+1)
+	case name == "su" || name == "script" || name == "flock":
+		// su -c LINE, script -c LINE and flock FILE -c LINE hand a line to a shell; flock FILE
+		// CMD runs CMD.
 		for j, a := range rest {
-			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") {
-				if j+1 < len(rest) {
-					return programs(rest[j+1], depth+1)
-				}
-				return []string{name}, true
+			if (a == "-c" || a == "--command") && j+1 < len(rest) {
+				return programs(rest[j+1], depth+1)
 			}
 		}
-		return []string{name}, true
+		if name == "flock" {
+			j := skipOptions(rest, "-w -E")
+			if j+1 < len(rest) {
+				return program(rest[j+1:], depth+1)
+			}
+		}
+		return []string{raw}, true
+	case name == "find":
+		// find ... -exec CMD ... ; runs CMD for each match.
+		var progs []string
+		for j, a := range rest {
+			if (a == "-exec" || a == "-execdir" || a == "-ok" || a == "-okdir") && j+1 < len(rest) {
+				p, ok := program(rest[j+1:], depth+1)
+				if !ok {
+					return nil, false
+				}
+				progs = append(progs, p...)
+			}
+		}
+		return append([]string{raw}, progs...), true
+	case name == "env":
+		// env -S LINE splits LINE into a command.
+		for j, a := range rest {
+			if (a == "-S" || a == "--split-string") && j+1 < len(rest) {
+				return programs(rest[j+1], depth+1)
+			}
+			if strings.HasPrefix(a, "-S") && len(a) > 2 {
+				return programs(a[2:], depth+1)
+			}
+		}
 	}
+
 	if opts, ok := wrappers[name]; ok {
 		takes := strings.Fields(opts)
 		j := 0
@@ -362,11 +420,85 @@ func program(words []string, depth int) ([]string, bool) {
 			j++ // the duration
 		}
 		if j >= len(rest) {
-			return []string{name}, true
+			return []string{raw}, true
 		}
 		return program(rest[j:], depth+1)
 	}
-	return []string{name}, true
+	return []string{raw}, true
+}
+
+// shellLine reads what a shell runs: the line after -c (past any options and --), nothing for a
+// script named by path, and an unreadable line for one that reads its commands from stdin, where
+// boxer cannot see them (`bash <<< 'npm i'`, `echo 'npm i' | sh`).
+func shellLine(name string, rest []string, depth int) ([]string, bool) {
+	seenC, takes := false, 0
+	for j := 0; j < len(rest); j++ {
+		a := rest[j]
+		switch {
+		case takes > 0:
+			takes-- // an option's argument: -o pipefail, -O extglob, --rcfile file
+		case a == "--":
+			// Options end. With -c the next word is the line; without it, a script by path.
+			if j+1 < len(rest) {
+				if seenC {
+					return programs(rest[j+1], depth+1)
+				}
+				return []string{name}, true
+			}
+		case strings.HasPrefix(a, "--"):
+			switch a {
+			case "--rcfile", "--init-file":
+				takes++
+			case "--version", "--help":
+				return []string{name}, true
+			}
+		case strings.HasPrefix(a, "-") || strings.HasPrefix(a, "+"):
+			if a == "-s" {
+				return nil, false // reads its commands from stdin
+			}
+			for _, f := range a[1:] {
+				switch f {
+				case 'c':
+					seenC = true
+				case 'o', 'O':
+					takes++
+				}
+			}
+		default:
+			if seenC {
+				return programs(a, depth+1) // the first word after the options is the line
+			}
+			return []string{name}, true // a script by path: one program, its own name
+		}
+	}
+	if seenC {
+		return []string{name}, true
+	}
+	return nil, false // no -c and no script: the commands come from stdin
+}
+
+// skipOptions returns the index of the first word in rest that is not an option, counting the
+// listed options' arguments as part of them.
+func skipOptions(rest []string, takesArg string) int {
+	takes := strings.Fields(takesArg)
+	j := 0
+	for j < len(rest) {
+		a := rest[j]
+		if a == "--" {
+			return j + 1
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			return j
+		}
+		j++
+		for _, o := range takes {
+			if a == o {
+				j++
+				break
+			}
+		}
+	}
+	return j
 }
 
 // isAssignment is NAME=value, the prefix that sets a variable for one command.

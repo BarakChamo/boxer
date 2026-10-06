@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/decide"
 	"github.com/BarakChamo/boxer/internal/obs"
 	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/shim"
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
@@ -254,8 +256,11 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 		return 0
 	case decide.Rewrite:
 		if !d.Rewrite {
-			// Block-only harness: shims on PATH already make the bare command sandboxed.
-			if e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both" {
+			// Block-only harness: a shim on PATH makes the bare command sandboxed, so it can be let
+			// through. Only then: with no shims installed, or a program named by path, which no
+			// PATH lookup ever reaches, letting it through ran it on the host.
+			if (e.Cfg.Enforcement == "shim" || e.Cfg.Enforcement == "both") && shimsOnPath(LaunchedPATH) &&
+				!decide.NamedByPath(cmd, e.Cfg.Intercepted()) {
 				return 0
 			}
 			return deny(d, stdout, "this repository runs commands in a sandbox", withIdentity(dec.Command, e))
@@ -264,6 +269,20 @@ func intercept(d Dialect, e *box.Env, in Input, stdout, stderr io.Writer) int {
 	default:
 		return deny(d, stdout, dec.Reason, withIdentity(dec.Fix, e))
 	}
+}
+
+// LaunchedPATH is the PATH the harness gave boxer, before boxer removed its own shims from it;
+// the boxer command sets it. It is what the agent's shell resolves programs through.
+var LaunchedPATH = os.Getenv("PATH")
+
+// shimsOnPath reports whether a boxer shim directory is on path.
+func shimsOnPath(path string) bool {
+	for _, dir := range filepath.SplitList(path) {
+		if _, err := os.Stat(filepath.Join(dir, shim.Marker)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // withIdentity threads the session and agent ids the hook received into the `boxer run` the

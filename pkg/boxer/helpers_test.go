@@ -78,3 +78,20 @@ func TestDeleteForgetsTheScope(t *testing.T) {
 		t.Fatal("volumes are kept")
 	}
 }
+
+// Stop and Delete refuse a machine boxer did not make, as `boxer stop` and `boxer rm` do.
+func TestStopAndDeleteRefuseForeignMachines(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	if err := client.Create(vm.CreateSpec{Name: "mydev"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := boxer.Delete("mydev"); err == nil {
+		t.Fatal("Delete must refuse a machine without boxer's label")
+	}
+	if err := boxer.Stop("mydev"); err == nil {
+		t.Fatal("Stop must refuse a machine without boxer's label")
+	}
+	if _, ok, _ := client.Status("mydev"); !ok {
+		t.Fatal("the foreign machine was deleted")
+	}
+}

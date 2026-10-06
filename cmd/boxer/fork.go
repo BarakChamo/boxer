@@ -145,6 +145,14 @@ func forkRm(args []string, stdout, stderr io.Writer) int {
 			code = 2
 			continue
 		}
+		if owned, err := vm.OwnsName(client, n); err != nil || !owned {
+			if err == nil {
+				err = vm.NotOwned(client, n)
+			}
+			fmt.Fprintln(stderr, err)
+			code = 1
+			continue
+		}
 		if err := client.Delete(n); err != nil {
 			fmt.Fprintln(stderr, err)
 			code = 1

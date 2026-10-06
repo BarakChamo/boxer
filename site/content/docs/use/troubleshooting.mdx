@@ -125,6 +125,15 @@ removed by hand.
 **Fix.** Add `'127.0.0.1'` and `'localhost'` for a forwarded port, and `'*.localhost'` for a
 `[urls]` name. See [URLs](/docs/configure/urls#nextjs).
 
+## A command was refused for setting a `BOXER_` variable
+
+**Cause:** the line sets one of boxer's own variables, such as `BOXER_INSIDE=1 boxer run ...` or
+`export BOXER_MODE=off`. Those are the operator's configuration, and a command setting them would
+change how boxer treats it, so the hook refuses the line.
+
+**Fix:** run the command without the setting. To change how boxer behaves, set it in `boxer.toml`
+or in the harness's own environment before it starts.
+
 ## A `start` service died
 
 **Cause:** boxer restarts a crashed service after 1 second, then 2, 4 and up to 30. After five

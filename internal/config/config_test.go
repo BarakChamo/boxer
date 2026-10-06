@@ -271,7 +271,7 @@ func TestTelemetryTable(t *testing.T) {
 	}
 	t.Setenv("BOXER_TELEMETRY_SINK", "stderr")
 	cfg, err = LoadFiles(p)
-	if err != nil || cfg.Telemetry.Sink != "stderr" || cfg.Sources["telemetry_sink"] != "BOXER_TELEMETRY_SINK" {
+	if err != nil || cfg.Telemetry.Sink != "stderr" || cfg.Sources["telemetry"] != "BOXER_TELEMETRY_SINK" {
 		t.Fatalf("environment override: %+v %v", cfg.Telemetry, cfg.Sources)
 	}
 }

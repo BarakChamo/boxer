@@ -188,17 +188,27 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if hint := loginHint(h, o.Env); hint != "" {
 		fmt.Fprintln(e.Stderr, "boxer: "+hint)
 	}
-	if _, err := e.Ensure(true, false); err != nil {
+	created, err := e.Ensure(true, false)
+	if err != nil {
 		return 1, err
 	}
 	if err := install(e, name, h); err != nil {
 		return 1, err
 	}
-	e.PackHarness()
-	env, err := guestEnv(h, o.Env)
+	// Caching the harness stops and restarts the VM. Only one this call just made can be stopped
+	// safely: another session, or a long `boxer run`, may be using an existing one, and the pack
+	// cut it off. An existing VM's harness is cached the next time a sandbox is made for it.
+	if created {
+		e.PackHarness()
+	}
+	env, secrets, err := guestEnv(h, o.Env)
 	if err != nil {
 		return 1, err
 	}
+	// The repository's own [env], then the harness's: the harness session is where the agent runs
+	// the repository's commands, so it gets what `boxer run` gives them.
+	env = append(e.GuestEnv(), env...)
+	secrets = append(secrets, e.HostSecrets()...)
 	if m, ok, err := e.Exists(); err == nil && ok {
 		env = append(env, e.ServerEnv(m)...)
 	}
@@ -206,8 +216,9 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if acp {
 		argv = append(append([]string{}, h.ACP...), args...)
 	}
-	return e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, TTY: o.TTY, User: e.Cfg.User,
-		Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr}, argv...)
+	defer e.KeepAlive()()
+	return e.VM.Exec(vm.ExecOpts{Name: e.Scope.Key, Workdir: e.GuestWorkdir(), Env: env, SecretEnv: secrets, TTY: o.TTY,
+		User: e.Cfg.User, Stdin: o.Stdin, Stdout: o.Stdout, Stderr: o.Stderr}, argv...)
 }
 
 // install runs the harness's install line once per VM, recorded by a marker file. The marker
@@ -280,25 +291,28 @@ func loginHint(h Harness, extra []string) string {
 }
 
 // guestEnv builds the guest environment: host HOME so mounted config paths resolve, the harness's
-// config variable, passthrough of its keys when set on the host, and caller extras last.
-func guestEnv(h Harness, extra []string) ([]string, error) {
+// config variable and caller extras last. The harness's own keys (API keys, OAuth tokens) are
+// returned separately, as GUEST=HOSTVAR names, so the backend passes them without their values
+// ever being in a command line; they used to be `-e KEY=value`, which any local user could read
+// in the process list.
+func guestEnv(h Harness, extra []string) (env, secrets []string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		// HOME=<empty> reaches the guest and every mounted config path resolves to "/", so the
 		// harness starts with no login and no settings and says nothing useful about why.
-		return nil, fmt.Errorf("no home directory on the host, so the guest would get HOME=: %v", err)
+		return nil, nil, fmt.Errorf("no home directory on the host, so the guest would get HOME=: %v", err)
 	}
-	env := []string{"HOME=" + home, "TERM=" + firstNonEmpty(os.Getenv("TERM"), "xterm-256color"), "LANG=C.UTF-8"}
+	env = []string{"HOME=" + home, "TERM=" + firstNonEmpty(os.Getenv("TERM"), "xterm-256color"), "LANG=C.UTF-8"}
 	if h.ConfigVar != "" {
 		env = append(env, h.ConfigVar+"="+configDir(h))
 	}
 	env = append(env, h.GuestEnv...)
 	for _, k := range h.Env {
-		if v, ok := os.LookupEnv(k); ok {
-			env = append(env, k+"="+v)
+		if _, ok := os.LookupEnv(k); ok {
+			secrets = append(secrets, k+"="+k)
 		}
 	}
-	return append(env, extra...), nil
+	return append(env, extra...), secrets, nil
 }
 
 func firstNonEmpty(a, b string) string {

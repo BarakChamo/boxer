@@ -102,10 +102,19 @@ func (e *Env) SavePack(name string) (string, error) {
 	stub := strings.TrimSuffix(side, ".smolmachine")
 	start := time.Now()
 	// smolvm packs only a stopped VM, so it is stopped and restarted around the snapshot.
+	// Written beside the old pack and moved over it only once whole: a save that fails partway
+	// (a full disk, Ctrl-C, a smolvm error) used to leave the earlier snapshot of this name
+	// truncated or gone, and that snapshot is exactly what someone saved to keep.
+	tmp := fmt.Sprintf("%s.saving-%d", stub, os.Getpid())
 	err = e.stopVM()
 	if err == nil {
-		_, err = packer.PackFromVM(e.Scope.Key, stub)
+		var made string
+		if made, err = packer.PackFromVM(e.Scope.Key, tmp); err == nil {
+			err = os.Rename(made, side)
+		}
 	}
+	_ = os.Remove(tmp)
+	_ = os.Remove(tmp + ".smolmachine")
 	serr := e.VM.Start(e.Scope.Key)
 	if serr != nil && err == nil {
 		err = serr

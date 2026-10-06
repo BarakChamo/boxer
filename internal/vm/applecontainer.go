@@ -244,13 +244,18 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 		args = append(args, "--env-file", f)
 	}
 	args = append(args, o.Name)
+	// Not with a terminal: `timeout` runs the command in a process group of its own, out of the
+	// terminal's foreground, and an interactive program stops on its first read.
+	if o.Timeout > 0 && !o.TTY {
+		argv = guestTimeout(o.Timeout, argv)
+	}
 	args = append(args, argv...)
 	a.log(args)
 
 	ctx := context.Background()
 	cancel := context.CancelFunc(func() {})
 	if o.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, o.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, o.Timeout+hostBackstop)
 	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.Bin, args...)
@@ -274,7 +279,7 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 		case err := <-done:
 			var ee *exec.ExitError
 			if asExitError(err, &ee) {
-				if rerr := runtimeFailure(a, ee.ExitCode(), head, map[int][]string{1: {"Error: "}}, classifyApple); rerr != nil {
+				if rerr := runtimeFailure(a, ee.ExitCode(), head, map[int][]string{1: appleOwnErrors}, classifyApple); rerr != nil {
 					return ee.ExitCode(), rerr
 				}
 				return ee.ExitCode(), nil
@@ -285,6 +290,16 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 			return 0, nil
 		}
 	}
+}
+
+// appleOwnErrors are the starts of the container CLI's own error lines: "Error: get failed: ..."
+// and "Error: <code>: ..." for each of its ContainerizationError codes. A bare "Error: " is not
+// one of them, because a guest program that fails prints that too (Rust's main, cobra CLIs), and
+// counting it made `boxer run -- cargo test` a backend failure with no run record.
+var appleOwnErrors = []string{
+	"Error: get failed:", "Error: unknown:", "Error: invalidArgument:", "Error: internalError:",
+	"Error: exists:", "Error: notFound:", "Error: cancelled:", "Error: invalidState:", "Error: empty:",
+	"Error: timeout:", "Error: unsupported:", "Error: interrupted:",
 }
 
 // classifyApple maps this CLI's wording onto the sentinels.

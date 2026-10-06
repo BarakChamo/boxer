@@ -139,7 +139,7 @@ This repository runs commands inside a boxer sandbox: a microVM per worktree wit
 mounted at /workspace. Files you edit on the host are the same files the sandbox sees.
 Shell commands that start with npm, npx, pnpm, yarn, bun, bunx, node, deno, python, python3, pip,
 uv, pytest, cargo, rustc, go, make, cmake are transparently executed in the sandbox; write them
-normally. git, gh, ssh, boxer, smolvm always run on the host.
+normally. git, gh, ssh, boxer, smolvm run on the host on their own; a line that also runs one of the programs above runs whole in the sandbox.
 ```
 
 On docker or podman, the first line says "a container" instead of "a microVM".
@@ -153,8 +153,9 @@ alone and it runs on your machine.
 - **Two sessions in the same worktree share its sandbox by default.** For separate ones, give each
   session its own worktree (`claude --worktree fix-ui`), or set `isolation = "session"` for a
   sandbox per session, or `"subagent"` for one per subagent.
-- **A deleted worktree's sandbox is removed.** Any boxer command starts this cleanup in the
-  background, at most every 6 hours. `boxer gc` runs it now.
+- **A deleted worktree's sandbox is removed.** Any command that uses a sandbox (`boxer run`,
+  `boxer up`, a session starting) starts this cleanup in the background, at most every 6 hours.
+  `boxer gc` runs it now.
 
 The first session in a new worktree waits for the image to download and `setup` to run. Later
 sessions start in seconds. See [Benchmarks](/docs/evals/benchmarks).

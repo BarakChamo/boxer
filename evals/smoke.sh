@@ -484,9 +484,13 @@ build = \"Dockerfile\""
   check "a changed build input is rebuilt" '[ "$(boxer run -c "cat /built.txt" 2>/dev/null)" = changed ]'
   boxer down >/dev/null 2>&1 || true
   # What the build left on the host: the tag in the builder's store, and on smolvm the archives.
-  TAG=$(basename "${IMG1:-none}" .tar | sed 's/-[0-9a-f]\{16\}$//')
-  case $BUILDER in container) container image delete "$TAG" >/dev/null 2>&1 || true ;; *) "$BUILDER" image rm -f "$TAG" >/dev/null 2>&1 || true ;; esac
-  rm -f "$STATE/images/$TAG"-*.tar
+  # The archive is named <base>-<image id>.tar, the builder's tag <base>-<scope>; both go.
+  IMGBASE=$(basename "${IMG1:-none}" .tar | sed 's/-[0-9a-f]\{16\}$//; s/-[0-9a-f]\{12\}$//')
+  case $BUILDER in
+  container) for t in $(container image list 2>/dev/null | awk -v b="$IMGBASE" 'index($1, b) {print $1":"$2}'); do container image delete "$t" >/dev/null 2>&1 || true; done ;;
+  *) for t in $("$BUILDER" images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -F "$IMGBASE"); do "$BUILDER" image rm -f "$t" >/dev/null 2>&1 || true; done ;;
+  esac
+  rm -f "$STATE/images/$IMGBASE"-*.tar
 fi
 
 echo "# allowlist presets"

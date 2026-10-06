@@ -30,7 +30,12 @@ func mainRepo(root string) string {
 	if err != nil || !g.Linked {
 		return ""
 	}
-	// CommonDir is the main repository's .git directory; its parent is that working tree.
+	// CommonDir is the main repository's .git directory; its parent is that working tree. A bare
+	// main repository's common directory is the repository itself (proj.git), whose parent is
+	// not a working tree, and writing there put hooks outside every repository.
+	if filepath.Base(g.CommonDir) != ".git" {
+		return ""
+	}
 	main := filepath.Dir(g.CommonDir)
 	if main == "" || main == root {
 		return ""
@@ -326,7 +331,13 @@ func (r *Result) replaceBlock(path, blockStart, blockEnd, block string) error {
 	s := string(cur)
 	if i := strings.Index(s, blockStart); i >= 0 {
 		if j := strings.Index(s[i:], blockEnd); j >= 0 {
-			s = s[:i] + block + s[i+j+len(blockEnd)+1:]
+			// The end marker and its newline; a file whose marker is its last byte (an editor
+			// that strips the final newline) has no newline to skip, and slicing past it panicked.
+			end := i + j + len(blockEnd)
+			if end < len(s) && s[end] == '\n' {
+				end++
+			}
+			s = s[:i] + block + s[end:]
 		} else {
 			s = s[:i] + block
 		}
@@ -349,6 +360,18 @@ func (r *Result) replaceBlock(path, blockStart, blockEnd, block string) error {
 	return nil
 }
 
+// marshalJSON indents like the files people write and leaves &, < and > as they are. Go's default
+// escapes them as \u0026 and friends, which is valid JSON and a noisy diff on every committed
+// settings file boxer touches.
+func marshalJSON(v any) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+	return bytes.TrimRight(buf.Bytes(), "\n")
+}
+
 // --- helpers --------------------------------------------------------------------------------
 
 func readJSON(path string) map[string]any {
@@ -360,15 +383,19 @@ func readJSON(path string) map[string]any {
 }
 
 func (r *Result) mergeJSON(path string, edit func(map[string]any)) error {
-	m := readJSON(path)
-	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 && len(m) == 0 {
-		return fmt.Errorf("%s exists but is not a JSON object; not touching it", path)
+	m := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
+		// Whether it parsed, not whether it had keys: `{}` is an object, and refusing it as "not
+		// JSON" made `boxer install` fail on a settings file a tool had just created.
+		if err := json.Unmarshal(b, &m); err != nil || m == nil {
+			return fmt.Errorf("%s exists but is not a JSON object; not touching it", path)
+		}
 	}
 	edit(m)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	b, _ := json.MarshalIndent(m, "", "  ")
+	b := marshalJSON(m)
 	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
 		return err
 	}

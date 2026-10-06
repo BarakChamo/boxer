@@ -105,7 +105,9 @@ func TestBoxerTomlOverridesTheDevcontainer(t *testing.T) {
 func TestDevcontainerBuildBecomesBuild(t *testing.T) {
 	for _, tc := range []struct{ name, body, build, context string }{
 		{"build", `{"build":{"dockerfile":"Dockerfile","context":".."}}`, ".devcontainer/Dockerfile", "."},
-		{"dockerFile", `{"dockerFile":"Dockerfile"}`, ".devcontainer/Dockerfile", ""},
+		{"dockerFile", `{"dockerFile":"Dockerfile"}`, ".devcontainer/Dockerfile", ".devcontainer"},
+		{"dockerFile and context", `{"dockerFile":"Dockerfile","context":".."}`, ".devcontainer/Dockerfile", "."},
+		{"build, no context", `{"build":{"dockerfile":"docker/Dockerfile"}}`, ".devcontainer/docker/Dockerfile", ".devcontainer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -362,5 +364,44 @@ func TestDevcontainerRefusesBoundaryAndAttachSettings(t *testing.T) {
 	cfg, _ := Load(dir, dir)
 	if len(cfg.Warnings) != 0 {
 		t.Errorf("an optional GPU and overrideCommand: true ask for nothing boxer lacks: %v", cfg.Warnings)
+	}
+}
+
+// What the 1.4 review found in the devcontainer mapping.
+func TestDevcontainerReviewFindings(t *testing.T) {
+	// A boxer.toml image wins over a devcontainer build.
+	dir := t.TempDir()
+	writeDC(t, dir, `{"build":{"dockerfile":"docker/Dockerfile"}}`)
+	os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte("image = \"python:3.12\"\n"), 0o644)
+	c, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Image != "python:3.12" || c.Build != "" {
+		t.Fatalf("boxer.toml's image must win: image %q build %q", c.Image, c.Build)
+	}
+	// An argv array runs as the words it names.
+	dir = t.TempDir()
+	writeDC(t, dir, `{"image":"x","postCreateCommand":["bash","-c","npm ci && npm test"]}`)
+	c, _ = Load(dir, dir)
+	if len(c.Setup) != 1 || c.Setup[0] != `bash -c 'npm ci && npm test'` {
+		t.Fatalf("setup: %q", c.Setup)
+	}
+	// Comments are stripped, strings are not touched.
+	dir = t.TempDir()
+	writeDC(t, dir, "{\n  // a comment\n  \"image\": \"x\", /* another */\n  \"postCreateCommand\": \"ls src/**/*.go\",\n  \"containerEnv\": {\"A\": \"a,]\", \"B\": \"http://x\"},\n}")
+	c, err = Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Setup[0] != "ls src/**/*.go" || c.Env["A"] != "a,]" || c.Env["B"] != "http://x" {
+		t.Fatalf("strings changed: %q %q", c.Setup, c.Env)
+	}
+	// A worktree's own devcontainer wins over the repository's.
+	repo, wt := t.TempDir(), t.TempDir()
+	writeDC(t, repo, `{"image":"repo-image"}`)
+	writeDC(t, wt, `{"image":"worktree-image"}`)
+	if c, _ := Load(wt, repo); c.Image != "worktree-image" {
+		t.Fatalf("the worktree's devcontainer must win: %q", c.Image)
 	}
 }

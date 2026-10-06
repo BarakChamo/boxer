@@ -110,18 +110,40 @@ func Ports(m Machine) map[string]string { return box.PortsOf(m) }
 // when [urls] is on and the route is registered, otherwise http://127.0.0.1:<host port>.
 func URLs(m Machine) map[string]string { return box.ReachableURLs(m) }
 
-// Stop halts a machine by name; stopping a stopped machine is not an error.
-func Stop(name string) error { return host().Stop(name) }
+// Stop halts a machine by name; stopping a stopped machine is not an error. A machine boxer did
+// not make is refused, as `boxer stop` refuses it.
+func Stop(name string) error {
+	c := host()
+	if err := mustOwn(c, name); err != nil {
+		return err
+	}
+	return c.Stop(name)
+}
 
 // Delete removes a machine by name, and what boxer kept about it, as `boxer rm` does: its run
-// record, last-used stamp, lock and URLs. Its named volumes are kept.
+// record, last-used stamp, lock and URLs. Its named volumes are kept. A machine boxer did not make
+// is refused.
 func Delete(name string) error {
 	c := host()
+	if err := mustOwn(c, name); err != nil {
+		return err
+	}
 	if err := c.Delete(name); err != nil {
 		return err
 	}
 	vm.ForgetOwned(c, name)
 	box.ForgetScope(name)
+	return nil
+}
+
+func mustOwn(c vm.Backend, name string) error {
+	owned, err := vm.OwnsName(c, name)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return vm.NotOwned(c, name)
+	}
 	return nil
 }
 

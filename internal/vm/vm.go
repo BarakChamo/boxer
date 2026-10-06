@@ -39,6 +39,44 @@ func TransportFailure(output string) bool {
 	return strings.Contains(output, "connection closed") || strings.Contains(output, "agent response frame")
 }
 
+// smolvmFailure returns smolvm's own error line from an exec's stderr, or "" when the failure was
+// the guest command's. Only smolvm's wording counts: a guest that prints "Error: tests failed" has
+// failed, and that is its exit code to report.
+func smolvmFailure(stderr string) string {
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Error: vm not found") || strings.HasPrefix(line, "Error: agent operation failed") ||
+			strings.HasPrefix(line, "Error: machine") && strings.Contains(line, "is not running") ||
+			strings.HasPrefix(line, "Error: ") && TransportFailure(line) {
+			return line
+		}
+	}
+	return ""
+}
+
+// tailBuffer keeps the last max bytes written to it.
+type tailBuffer struct {
+	max int
+	b   []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.b = append(t.b, p...)
+	if len(t.b) > t.max {
+		t.b = t.b[len(t.b)-t.max:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string { return string(t.b) }
+
+func writerOrDiscard(w io.Writer) io.Writer {
+	if w == nil {
+		return io.Discard
+	}
+	return w
+}
+
 // Client shells out to smolvm. Bin is looked up on PATH when it has no slash.
 type Client struct {
 	Bin string
@@ -360,6 +398,11 @@ func (c Client) Stop(name string) error {
 // Delete removes a machine and any children branched from it.
 func (c Client) Delete(name string) error {
 	_, err := c.output("machine", "delete", "-n", name, "--force", "--cascade")
+	// Absence is not an error (the Backend contract): a fork child deleted by its parent's
+	// cascade is gone by the time a bulk delete reaches it, and that is success.
+	if IsNotFound(err) {
+		return nil
+	}
 	return err
 }
 
@@ -409,7 +452,17 @@ func (c Client) Exec(o ExecOpts, argv ...string) (int, error) {
 	args = append(args, argv...)
 	c.log(args)
 	cmd := c.command(args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.Stdin, o.Stdout, o.Stderr
+	// smolvm's own failures exit non-zero exactly as a guest command can, and print to the same
+	// stderr. The tail is kept so the two can be told apart: a code that came from smolvm is not
+	// the command's, and recording it as one fabricated a run that never happened.
+	tail := &tailBuffer{max: 4096}
+	cmd.Stdin, cmd.Stdout = o.Stdin, o.Stdout
+	cmd.Stderr = io.MultiWriter(writerOrDiscard(o.Stderr), tail)
+	if o.Stdout != nil && o.Stdout == o.Stderr {
+		// One combined stream stays one stream: os/exec shares a single pipe only when the two
+		// writers are the same value, and that is what keeps their output in order.
+		cmd.Stdout = cmd.Stderr
+	}
 	if err := cmd.Start(); err != nil {
 		return 127, c.wrap(err)
 	}
@@ -426,6 +479,9 @@ func (c Client) Exec(o ExecOpts, argv ...string) (int, error) {
 		case err := <-done:
 			var ee *exec.ExitError
 			if errors.As(err, &ee) {
+				if own := smolvmFailure(tail.String()); own != "" {
+					return ee.ExitCode(), &Error{Backend: "smolvm", Verb: "machine", Code: ee.ExitCode(), Stderr: own, Kind: classifySmolvm(own)}
+				}
 				return ee.ExitCode(), nil
 			}
 			if err != nil {

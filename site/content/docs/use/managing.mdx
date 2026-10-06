@@ -60,9 +60,10 @@ boxer gc              # sandboxes whose worktree is gone, idle ones stopped, and
 boxer gc --all        # also every stopped sandbox and every unreferenced pack (running ones stay)
 ```
 
-`idle_timeout` defaults to `2h`. `auto_reclaim` is on by default. With it on, ordinary boxer
-commands run the same sweep in the background, at most once every `reclaim_every` (`6h`). No
-daemon runs it, so nothing is reclaimed until some boxer command runs.
+`idle_timeout` defaults to `2h`. `auto_reclaim` is on by default. With it on, every command that uses a
+sandbox (`run`, `up`, a session starting, the MCP server) runs the same sweep in the background, at
+most once every `reclaim_every` (`6h`). `ls`, `status` and `doctor` do not. No daemon runs it, so
+nothing is reclaimed until one of those commands runs.
 
 The sweep stops a sandbox unused past `idle_timeout` whose worktree still exists. That frees its
 memory and keeps its disk, so the next command starts it again with everything it had. Set

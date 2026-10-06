@@ -56,6 +56,9 @@ func parseAllow(raw string) (hosts, cidrs []string, err error) {
 	case strings.Contains(s, "*"):
 		return nil, nil, fmt.Errorf("network.allow_hosts entry %q: wildcards are not supported, because smolvm allows exact hostnames only. List each host, use an allow_presets entry, or give an address range", raw)
 	}
+	if strings.Contains(s, "%") {
+		return nil, nil, fmt.Errorf("network.allow_hosts entry %q: an IPv6 zone (%%en0) names a link on this host, not an address the sandbox can reach", raw)
+	}
 	if p, err := netip.ParsePrefix(s); err == nil {
 		if p.Masked() != p {
 			return nil, nil, fmt.Errorf("network.allow_hosts entry %q has bits set past the prefix; did you mean %s?", raw, p.Masked())
@@ -82,6 +85,11 @@ func parseAllow(raw string) (hosts, cidrs []string, err error) {
 		}
 	}
 	h := strings.TrimSuffix(s, ".")
+	// Only digits and dots is a malformed address ("10.0.0", "010.0.0.1"), not a hostname: no
+	// top-level domain is all digits.
+	if strings.Trim(h, "0123456789.") == "" {
+		return nil, nil, fmt.Errorf("network.allow_hosts entry %q is not a valid IP address", raw)
+	}
 	if !validHostname(h) {
 		return nil, nil, fmt.Errorf("network.allow_hosts entry %q is not a hostname, an address, a CIDR block or an address range", raw)
 	}

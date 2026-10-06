@@ -1,75 +1,75 @@
-# boxer eval report — tier t1 — 2026-09-30T18:30:27+07:00
+# boxer eval report — tier t1 — 2026-10-07T00:34:11+08:00
 
 | Cell | Status | Time | Notes |
 | --- | --- | --- | --- |
-| acp-claude/inside/acp/worktree | pass | 7.403s |  |
-| acp-codex/inside/acp/worktree | pass | 4.709s |  |
-| acp-gemini/inside/acp/worktree | pass | 4.486s |  |
-| acp-grok/inside/acp/worktree | pass | 5.016s |  |
-| acp-kimi/inside/acp/worktree | pass | 4.235s |  |
-| acp-opencode/inside/acp/worktree | pass | 5.775s |  |
-| claude-code/off/plugin/worktree | pass | 2.722s |  |
-| claude-code/rewrite/both/worktree | pass | 3.053s |  |
-| claude-code/rewrite/plugin/repo | pass | 2.803s |  |
-| claude-code/rewrite/plugin/session | pass | 3.134s |  |
-| claude-code/rewrite/plugin/subagent | pass | 3.941s |  |
-| claude-code/rewrite/plugin/worktree | pass | 7.647s |  |
-| claude-code/rewrite/plugin/worktree/timing-before | pass | 3.062s |  |
-| claude-code/rewrite/plugin/worktree/timing-mid | pass | 4.239s |  |
-| claude-code/rewrite/plugin/worktree/timing-never | pass | 3.081s |  |
-| claude-code/rewrite/plugin/worktree/timing-warm | pass | 2.598s |  |
-| claude-code/rewrite/project/worktree | pass | 3.072s |  |
-| claude-code/rewrite/user/worktree | pass | 2.9s |  |
-| claude-code/tool/plugin/worktree | pass | 2.769s |  |
-| claude-code/tool/plugin/worktree/noncompliant | pass | 2.868s | 1 denial(s); |
-| claude-code/tool/project/worktree | pass | 2.878s |  |
-| codex/off/project/worktree | pass | 2.001s |  |
-| codex/rewrite/both/worktree | pass | 2.078s |  |
-| codex/rewrite/project/worktree | pass | 2.219s |  |
-| codex/rewrite/user/worktree | pass | 1.978s |  |
-| codex/tool/user/worktree | pass | 2.074s |  |
-| codex/tool/user/worktree/noncompliant | pass | 1.912s | 1 denial(s); |
-| copilot/off/user/worktree | pass | 5.106s |  |
-| copilot/rewrite/user/worktree | pass | 7.84s |  |
-| copilot/tool/user/worktree | pass | 5.077s |  |
-| copilot/tool/user/worktree/noncompliant | pass | 4.857s | 1 denial(s); |
-| dsh/off/project/worktree | pass | 1.673s |  |
-| dsh/tool/project/worktree | pass | 2.229s |  |
-| dsh/tool/project/worktree/noncompliant | pass | 1.687s | 1 denial(s); |
-| gemini-cli/off/plugin/worktree | pass | 3.003s |  |
-| gemini-cli/rewrite/plugin/worktree | pass | 3.118s |  |
-| gemini-cli/rewrite/project/worktree | pass | 2.006s |  |
-| gemini-cli/tool/plugin/worktree | pass | 2.902s |  |
-| gemini-cli/tool/plugin/worktree/noncompliant | pass | 2.747s | 1 denial(s); |
-| grok/off/user/worktree | pass | 2.181s |  |
-| grok/rewrite/both/worktree | pass | 2.111s |  |
-| grok/rewrite/project/worktree | pass | 2.398s |  |
-| grok/rewrite/user/worktree | pass | 2.589s |  |
-| grok/tool/user/worktree/noncompliant | pass | 2.136s | 1 denial(s); |
-| herdr/rewrite/project/worktree | pass | 9.507s |  |
-| inside-claude/inside/shell/worktree | pass | 56.849s |  |
-| inside-codex/inside/shell/worktree | pass | 26.157s |  |
-| inside-copilot/inside/shell/worktree | pass | 27.367s |  |
-| inside-gemini/inside/shell/worktree | pass | 19.541s |  |
-| inside-grok/inside/shell/worktree | pass | 20.389s |  |
-| inside-kimi/inside/shell/worktree | pass | 24.202s |  |
-| inside-opencode/inside/shell/worktree | pass | 24.76s |  |
-| inside-pi/inside/shell/worktree | pass | 27.538s |  |
-| kimi/off/user/worktree | pass | 2.67s |  |
-| kimi/tool/user/worktree | pass | 2.811s |  |
-| kimi/tool/user/worktree/noncompliant | pass | 3.569s | 1 denial(s); |
+| acp-claude/inside/acp/worktree | pass | 11.725s |  |
+| acp-codex/inside/acp/worktree | pass | 13.755s |  |
+| acp-gemini/inside/acp/worktree | pass | 6.098s |  |
+| acp-grok/inside/acp/worktree | pass | 8.027s |  |
+| acp-kimi/inside/acp/worktree | pass | 6.195s |  |
+| acp-opencode/inside/acp/worktree | pass | 18.352s |  |
+| claude-code/off/plugin/worktree | pass | 3.207s |  |
+| claude-code/rewrite/both/worktree | pass | 3.627s |  |
+| claude-code/rewrite/plugin/repo | pass | 3.581s |  |
+| claude-code/rewrite/plugin/session | pass | 3.497s |  |
+| claude-code/rewrite/plugin/subagent | pass | 4.526s |  |
+| claude-code/rewrite/plugin/worktree | pass | 11.492s |  |
+| claude-code/rewrite/plugin/worktree/timing-before | pass | 3.4s |  |
+| claude-code/rewrite/plugin/worktree/timing-mid | pass | 4.49s |  |
+| claude-code/rewrite/plugin/worktree/timing-never | pass | 3.439s |  |
+| claude-code/rewrite/plugin/worktree/timing-warm | pass | 3.235s |  |
+| claude-code/rewrite/project/worktree | pass | 3.368s |  |
+| claude-code/rewrite/user/worktree | pass | 3.459s |  |
+| claude-code/tool/plugin/worktree | pass | 2.951s |  |
+| claude-code/tool/plugin/worktree/noncompliant | pass | 2.955s | 1 denial(s); |
+| claude-code/tool/project/worktree | pass | 3.42s |  |
+| codex/off/project/worktree | pass | 2.764s |  |
+| codex/rewrite/both/worktree | pass | 2.811s |  |
+| codex/rewrite/project/worktree | pass | 2.884s |  |
+| codex/rewrite/user/worktree | pass | 2.981s |  |
+| codex/tool/user/worktree | pass | 2.705s |  |
+| codex/tool/user/worktree/noncompliant | pass | 2.691s | 1 denial(s); |
+| copilot/off/user/worktree | pass | 7.758s |  |
+| copilot/rewrite/user/worktree | pass | 9.072s |  |
+| copilot/tool/user/worktree | pass | 8.178s |  |
+| copilot/tool/user/worktree/noncompliant | pass | 8.192s | 1 denial(s); |
+| dsh/off/project/worktree | pass | 1.676s |  |
+| dsh/tool/project/worktree | pass | 2.39s |  |
+| dsh/tool/project/worktree/noncompliant | pass | 1.804s | 1 denial(s); |
+| gemini-cli/off/plugin/worktree | pass | 3.371s |  |
+| gemini-cli/rewrite/plugin/worktree | pass | 3.399s |  |
+| gemini-cli/rewrite/project/worktree | pass | 2.005s |  |
+| gemini-cli/tool/plugin/worktree | pass | 3.166s |  |
+| gemini-cli/tool/plugin/worktree/noncompliant | pass | 3.157s | 1 denial(s); |
+| grok/off/user/worktree | pass | 2.779s |  |
+| grok/rewrite/both/worktree | pass | 2.555s |  |
+| grok/rewrite/project/worktree | pass | 2.621s |  |
+| grok/rewrite/user/worktree | pass | 2.963s |  |
+| grok/tool/user/worktree/noncompliant | pass | 2.379s | 1 denial(s); |
+| herdr/rewrite/project/worktree | pass | 7.218s |  |
+| inside-claude/inside/shell/worktree | pass | 1m1.291s |  |
+| inside-codex/inside/shell/worktree | pass | 47.421s |  |
+| inside-copilot/inside/shell/worktree | pass | 34.841s |  |
+| inside-gemini/inside/shell/worktree | pass | 16.793s |  |
+| inside-grok/inside/shell/worktree | pass | 24.84s |  |
+| inside-kimi/inside/shell/worktree | pass | 23.563s |  |
+| inside-opencode/inside/shell/worktree | pass | 29.595s |  |
+| inside-pi/inside/shell/worktree | pass | 42.165s |  |
+| kimi/off/user/worktree | pass | 1.68s |  |
+| kimi/tool/user/worktree | pass | 1.791s |  |
+| kimi/tool/user/worktree/noncompliant | pass | 1.727s | 1 denial(s); |
 | multica/rewrite/project/worktree | skip | 0s | multica has no server configured (multica setup, then multica daemon start); checklist in docs/orchestrators.md |
-| opencode/off/project/worktree | pass | 3.517s |  |
-| opencode/rewrite/project/worktree | pass | 12.042s |  |
-| opencode/tool/project/worktree | pass | 3.539s |  |
-| opencode/tool/project/worktree/noncompliant | pass | 3.54s | 1 denial(s); |
-| openhands/rewrite/sdk/worktree | pass | 6.198s |  |
-| paperclip/rewrite/project/worktree | pass | 15.041s |  |
-| pi/off/project/worktree | pass | 1.68s |  |
-| pi/rewrite/project/worktree | pass | 2.015s |  |
-| pi/tool/project/worktree | pass | 1.819s |  |
-| pi/tool/project/worktree/noncompliant | pass | 1.698s | 1 denial(s); |
-| t3code/inside/shim/worktree | pass | 51.264s |  |
-| t3code/rewrite/project/worktree | pass | 8.903s |  |
+| opencode/off/project/worktree | pass | 3.944s |  |
+| opencode/rewrite/project/worktree | pass | 8.624s |  |
+| opencode/tool/project/worktree | pass | 4.123s |  |
+| opencode/tool/project/worktree/noncompliant | pass | 3.985s | 1 denial(s); |
+| openhands/rewrite/sdk/worktree | pass | 7.074s |  |
+| paperclip/rewrite/project/worktree | pass | 14.718s |  |
+| pi/off/project/worktree | pass | 1.674s |  |
+| pi/rewrite/project/worktree | pass | 2.065s |  |
+| pi/tool/project/worktree | pass | 1.708s |  |
+| pi/tool/project/worktree/noncompliant | pass | 1.745s | 1 denial(s); |
+| t3code/inside/shim/worktree | pass | 46.352s |  |
+| t3code/rewrite/project/worktree | pass | 14.923s |  |
 
 **passed 68 · failed 0 · skipped 1**

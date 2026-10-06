@@ -123,7 +123,25 @@ func (d Docker) List() ([]Machine, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
-	return d.inspect(names...)
+	ms, err := d.inspect(names...)
+	if err == nil || !IsNotFound(err) {
+		return ms, err
+	}
+	// A container removed between ps and inspect fails the whole inspect, which made `ls`, `gc`
+	// and `down --all` fail while a parallel teardown ran. Inspect one at a time and skip the
+	// ones that are gone; they are not there to list.
+	ms = ms[:0]
+	for _, n := range names {
+		one, err := d.inspect(n)
+		if IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ms = append(ms, one...)
+	}
+	return ms, nil
 }
 
 func (d Docker) inspect(names ...string) ([]Machine, error) {
@@ -288,13 +306,18 @@ func (d Docker) Exec(o ExecOpts, argv ...string) (int, error) {
 		args = append(args, "--env-file", f)
 	}
 	args = append(args, o.Name)
+	// Not with a terminal: `timeout` runs the command in a process group of its own, out of the
+	// terminal's foreground, and an interactive program stops on its first read.
+	if o.Timeout > 0 && !o.TTY {
+		argv = guestTimeout(o.Timeout, argv)
+	}
 	args = append(args, argv...)
 	d.log(args)
 
 	ctx := context.Background()
 	cancel := context.CancelFunc(func() {})
 	if o.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, o.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, o.Timeout+hostBackstop)
 	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, d.Bin, args...)

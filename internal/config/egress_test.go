@@ -138,3 +138,11 @@ func TestRangeCIDRsRandom(t *testing.T) {
 }
 
 func u32(v uint32) [4]byte { return [4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)} }
+
+func TestMalformedAddressesAreRefused(t *testing.T) {
+	for _, bad := range []string{"10.0.0", "010.0.0.1", "fe80::1%en0", "1.2.3.4.5"} {
+		if _, err := SplitAllow([]string{bad}); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+}

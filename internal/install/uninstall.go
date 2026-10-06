@@ -30,15 +30,15 @@ func Uninstall(harness, root string) (Result, error) {
 	switch harness {
 	case "claude-code":
 		r.unmergeHooks(root, filepath.Join(root, ".claude", "settings.json"))
-		r.unsetIn(root, filepath.Join(root, ".mcp.json"), "mcpServers", "boxer")
 		r.removeTree(root, filepath.Join(root, ".claude", "skills", "boxer"))
 		r.removeFile(root, filepath.Join(root, ".claude", "agents", "boxed.md"))
+		r.shared(root, harness, sharedMCP, func() { r.unsetIn(root, filepath.Join(root, ".mcp.json"), "mcpServers", "boxer") })
 	case "codex":
 		r.unmergeHooks(root, filepath.Join(root, ".codex", "hooks.json"))
 		if main := mainRepo(root); main != "" {
 			r.unmergeHooks(main, filepath.Join(main, ".codex", "hooks.json"))
 		}
-		r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer"))
+		r.shared(root, harness, sharedSkill, func() { r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer")) })
 	case "gemini-cli":
 		r.unmergeHooks(root, filepath.Join(root, ".gemini", "settings.json"))
 		r.unsetIn(root, filepath.Join(root, ".gemini", "settings.json"), "mcpServers", "boxer")
@@ -47,26 +47,75 @@ func Uninstall(harness, root string) (Result, error) {
 	case "opencode":
 		r.removeFile(root, filepath.Join(root, ".opencode", "plugins", "boxer.ts"))
 		r.unsetIn(root, filepath.Join(root, "opencode.json"), "mcp", "boxer")
-		r.removeSection(root, filepath.Join(root, "AGENTS.md"), agents)
+		r.shared(root, harness, sharedAgents, func() { r.removeSection(root, filepath.Join(root, "AGENTS.md"), agents) })
 	case "grok":
 		r.unmergeHooks(root, filepath.Join(root, ".grok", "hooks", "boxer.json"))
-		r.unsetIn(root, filepath.Join(root, ".mcp.json"), "mcpServers", "boxer")
-		r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer"))
+		r.shared(root, harness, sharedMCP, func() { r.unsetIn(root, filepath.Join(root, ".mcp.json"), "mcpServers", "boxer") })
+		r.shared(root, harness, sharedSkill, func() { r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer")) })
 	case "pi":
 		r.removeFile(root, filepath.Join(root, ".pi", "extensions", "boxer.ts"))
-		r.removeSection(root, filepath.Join(root, "AGENTS.md"), agents)
+		r.shared(root, harness, sharedAgents, func() { r.removeSection(root, filepath.Join(root, "AGENTS.md"), agents) })
 	case "kimi":
 		r.unsetIn(root, filepath.Join(root, ".kimi-code", "mcp.json"), "mcpServers", "boxer")
-		r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer"))
+		r.shared(root, harness, sharedSkill, func() { r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer")) })
 		r.Notes = append(r.Notes, "Remove the boxer [[hooks]] entries you appended to ~/.kimi-code/config.toml by hand.")
 	case "dsh":
 		r.removeFile(root, filepath.Join(root, ".dsh", "cordis.patch.yml"))
 		r.unmergeHooks(root, filepath.Join(root, ".dsh", "hooks.json"))
-		r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer"))
+		r.shared(root, harness, sharedSkill, func() { r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer")) })
 	default:
 		return *r, fmt.Errorf("no project-level install for %q to remove", harness)
 	}
 	return *r, r.err
+}
+
+// Files several harnesses install into, and which harnesses use each. Removing one when another
+// harness still relies on it uninstalled that harness too: `boxer uninstall grok` deleted Claude
+// Code's MCP server and the skill codex, kimi and dsh read.
+var (
+	sharedMCP    = []string{"claude-code", "grok"}          // .mcp.json mcpServers.boxer
+	sharedSkill  = []string{"codex", "grok", "kimi", "dsh"} // .agents/skills/boxer
+	sharedAgents = []string{"opencode", "pi"}               // the AGENTS.md section
+)
+
+// shared runs remove unless another harness in users is still installed in root.
+func (r *Result) shared(root, harness string, users []string, remove func()) {
+	var still []string
+	for _, u := range users {
+		if u != harness && installedHere(root, u) {
+			still = append(still, u)
+		}
+	}
+	if len(still) > 0 {
+		r.Notes = append(r.Notes, "kept a file "+strings.Join(still, ", ")+" also uses; it goes with the last of them")
+		return
+	}
+	remove()
+}
+
+// installedHere reports whether a harness's own, unshared files show it is installed in root.
+func installedHere(root, h string) bool {
+	has := func(rel string, needle string) bool {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		return err == nil && (needle == "" || strings.Contains(string(b), needle))
+	}
+	switch h {
+	case "claude-code":
+		return has(".claude/settings.json", "boxer hook")
+	case "codex":
+		return has(".codex/hooks.json", "boxer hook")
+	case "grok":
+		return has(".grok/hooks/boxer.json", "")
+	case "kimi":
+		return has(".kimi-code/mcp.json", "boxer")
+	case "dsh":
+		return has(".dsh/cordis.patch.yml", "") || has(".dsh/hooks.json", "boxer hook")
+	case "opencode":
+		return has(".opencode/plugins/boxer.ts", "")
+	case "pi":
+		return has(".pi/extensions/boxer.ts", "")
+	}
+	return false
 }
 
 // UninstallUser removes what User wrote for harness.
@@ -109,6 +158,7 @@ func UninstallGit(repoRoot string) (Result, error) {
 func UninstallConductor(root string) (Result, error) {
 	r := &Result{}
 	path := filepath.Join(root, ".conductor", "settings.toml")
+	r.removeBlock(path, conductorTablesStart, conductorTablesEnd)
 	r.removeBlock(path, conductorStart, conductorEnd)
 	r.pruneDirs(root, filepath.Dir(path))
 	return *r, r.err
@@ -124,8 +174,7 @@ func (r *Result) unmergeHooks(root, path string) {
 		for event, groups := range hooks {
 			var keep []any
 			for _, g := range asSlice(groups) {
-				b, _ := json.Marshal(g)
-				if !strings.Contains(string(b), "boxer hook") {
+				if g = withoutBoxerHooks(g); g != nil {
 					keep = append(keep, g)
 				}
 			}
@@ -139,6 +188,41 @@ func (r *Result) unmergeHooks(root, path string) {
 			delete(m, "hooks")
 		}
 	})
+}
+
+// withoutBoxerHooks returns a hook group with boxer's own entries taken out, or nil when nothing
+// is left. Only boxer's entries: a group can hold the user's hooks beside boxer's under one
+// matcher, and dropping the whole group, as uninstall once did, deleted the user's hook too.
+func withoutBoxerHooks(g any) any {
+	isBoxer := func(v any) bool {
+		b, _ := json.Marshal(v)
+		return strings.Contains(string(b), "boxer hook")
+	}
+	m, ok := g.(map[string]any)
+	if !ok {
+		if isBoxer(g) {
+			return nil
+		}
+		return g
+	}
+	inner, has := m["hooks"].([]any)
+	if !has {
+		if isBoxer(m) {
+			return nil
+		}
+		return m
+	}
+	var rest []any
+	for _, h := range inner {
+		if !isBoxer(h) {
+			rest = append(rest, h)
+		}
+	}
+	if len(rest) == 0 {
+		return nil
+	}
+	m["hooks"] = rest
+	return m
 }
 
 // unsetIn removes m[section][key], then the section if it is left empty.
@@ -181,7 +265,20 @@ func (r *Result) editJSON(root, path string, edit func(map[string]any)) {
 	if string(before) == string(after) {
 		return
 	}
-	if _, onlySchema := m["$schema"]; len(m) == 0 || (onlySchema && len(m) == 1) {
+	if _, onlySchema := m["$schema"]; onlySchema && len(m) == 1 {
+		// Only the schema line is left. boxer may have created the file or the user may have, and
+		// nothing in it says which, so it is kept: one line left behind beats deleting a
+		// user's file. The note says it can go.
+		out := marshalJSON(m)
+		if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+			r.keep(err)
+			return
+		}
+		r.Written = append(r.Written, path)
+		r.Notes = append(r.Notes, path+" now holds only $schema; delete it if boxer created it.")
+		return
+	}
+	if len(m) == 0 {
 		if err := os.Remove(path); err != nil {
 			r.keep(err)
 			return
@@ -190,7 +287,7 @@ func (r *Result) editJSON(root, path string, edit func(map[string]any)) {
 		r.pruneDirs(root, filepath.Dir(path))
 		return
 	}
-	out, _ := json.MarshalIndent(m, "", "  ")
+	out := marshalJSON(m)
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		r.keep(err)
 		return

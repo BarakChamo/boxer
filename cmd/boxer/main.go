@@ -122,6 +122,7 @@ func main() {
 	// resolved one would call into itself, and the inner call waits for the sandbox the outer one
 	// is already holding. This has to happen before anything is spawned, which means here.
 	launchedPATH = os.Getenv("PATH")
+	hook.LaunchedPATH = launchedPATH
 	if p := shim.SanitizePath(launchedPATH); p != launchedPATH {
 		_ = os.Setenv("PATH", p)
 	}
@@ -214,6 +215,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 }
 
+// shimMayRunOnHost reports whether a shim's call may follow the repository's "do not sandbox"
+// setting. A shim does not know which harness ran it, so the setting must hold for every harness:
+// a `[harness.kimi] enforcement = "shim"` under a top-level `enforcement = "hook"` means Kimi's
+// hook lets commands through to the shim, and the shim running them on the host would be a hole.
+func shimMayRunOnHost(cfg config.Config) bool {
+	for name := range cfg.Harness {
+		h := cfg.ForHarness(name)
+		if h.Mode != "off" && (h.Enforcement == "shim" || h.Enforcement == "both") {
+			return false
+		}
+	}
+	return true
+}
+
 // identity parses the flags shared by scope-bound commands.
 func identity(name string, args []string) (*flag.FlagSet, *string, *scope.Identity) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -250,6 +265,14 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	if cmd == "down" && *scopeName != "" {
 		hostVM := vm.Host(hostBackend())
 		*scopeName = box.ResolveName(hostVM, *scopeName)
+		if owned, err := vm.OwnsName(hostVM, *scopeName); err != nil || !owned {
+			if err == nil {
+				err = vm.NotOwned(hostVM, *scopeName)
+			}
+			emit(stdout, errorRow(err), *asJSON)
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 		if err := hostVM.Delete(*scopeName); err != nil {
 			emit(stdout, errorRow(err), *asJSON)
 			fmt.Fprintln(stderr, err)
@@ -393,6 +416,20 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if vm.Inside() {
 			return hostRun(argv, stdin, stdout, stderr) // already in the guest; run directly
 		}
+		// A shim calls `boxer run` for every intercepted program, whatever the repository says.
+		// When the repository has sandboxing off, or only watching (audit), or enforced by hooks
+		// alone, the shim must not sandbox anything: it runs the program, which the shim has
+		// already taken itself off PATH to find.
+		if os.Getenv("BOXER_SHIM") == "1" && shimMayRunOnHost(e.Cfg) {
+			_ = os.Unsetenv("BOXER_SHIM") // the program it runs must not inherit it
+			switch {
+			case e.Cfg.Mode == "off" || e.Cfg.Enforcement == "hook":
+				return hostRun(argv, stdin, stdout, stderr)
+			case e.Cfg.Enforcement == "audit":
+				fmt.Fprintf(stderr, "boxer: audit: would run in the sandbox: %s\n", strings.Join(argv, " "))
+				return hostRun(argv, stdin, stdout, stderr)
+			}
+		}
 		tty := *forceTTY || (cli.IsTerminal(os.Stdin) && cli.IsTerminal(os.Stdout))
 		if *forceTTY {
 			// A caller that asked for a terminal explicitly is driving this shell, and it may write
@@ -412,7 +449,10 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 				return hostRun(argv, stdin, stdout, stderr)
 			}
 			fmt.Fprintln(stderr, err)
-			return code
+			// The error is the backend's, not the command's, so its status is not the command's
+			// either: podman's 125 for a refused exec would read as a command that exited 125.
+			// Refused or failed is 1, as the exit-code table says.
+			return 1
 		}
 		return withTestResults(e, chosen, *junitPaths, *failOnTests, started, code, stderr)
 	}
@@ -719,7 +759,9 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			// A fork child outlives its parent only by accident: nothing addresses it, and it
 			// costs what a sandbox costs.
 			reason = "fork of " + parent + ", which is gone"
-		} else if _, err := os.Stat(root); err != nil {
+		} else if _, err := os.Stat(root); os.IsNotExist(err) {
+			// Only absence. A worktree boxer cannot stat for another reason (permissions, an
+			// unmounted volume) still exists, and deleting its sandbox would be a guess.
 			reason = fmt.Sprintf("worktree %s is gone", root)
 		} else if last := box.LastUsed(m.Name); idle > 0 && !last.IsZero() && time.Since(last) > idle {
 			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", last.Format(time.RFC3339), cfg.IdleTimeout)
@@ -743,6 +785,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 					fmt.Fprintln(stderr, err)
 					code = 1
 				} else {
+					box.Stopped(m.Name)
 					row.Stopped = true
 					if !*asJSON {
 						fmt.Fprintf(stdout, "stopped %s (%s)\n", m.Name, row.Reason)

@@ -93,3 +93,56 @@ func TestGuestEnvPollsWhereWatchersMissHostEdits(t *testing.T) {
 		t.Fatalf("[env] must win: %v", got)
 	}
 }
+
+// A lock file deleted while a process waits on it must not give the scope two holders.
+func TestLockSurvivesItsFileBeingRemoved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sb-x")
+	unlock, err := lockFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan func(), 1)
+	go func() {
+		u, err := lockFile(path) // waits on the file the holder has locked
+		if err == nil {
+			got <- u
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	os.Remove(path) // the sweep, while the holder still holds it
+	unlock()
+	second := <-got // the waiter must end up holding the current path's lock
+	// A third locker must now wait for the second, not take a fresh file of its own.
+	third := make(chan struct{})
+	go func() {
+		u, err := lockFile(path)
+		if err == nil {
+			close(third)
+			u()
+		}
+	}()
+	select {
+	case <-third:
+		t.Fatal("two processes hold the scope lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	second()
+	<-third
+}
+
+// A long command keeps its scope looking used, so idle reclaim does not stop it mid-run.
+func TestKeepAliveRefreshesLastUsed(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	old := keepAliveEvery
+	keepAliveEvery = 20 * time.Millisecond
+	t.Cleanup(func() { keepAliveEvery = old })
+	e := &Env{}
+	e.Scope.Key = "sb-long"
+	stop := e.KeepAlive()
+	first := LastUsed("sb-long")
+	time.Sleep(150 * time.Millisecond)
+	if !LastUsed("sb-long").After(first) {
+		t.Fatal("a running command must keep refreshing last-used")
+	}
+	stop()
+}

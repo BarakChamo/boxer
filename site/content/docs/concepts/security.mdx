@@ -78,7 +78,10 @@ integration = "inside"
 boxer shell claude
 ```
 
-The agent is not on the host. It cannot run commands on the host.
+The agent has no shell on the host. It can still change files the host later runs: the worktree is
+mounted read-write, including a main checkout's `.git/hooks`, and so is every harness config
+directory below. A hook written into `~/.claude/settings.json` or `.git/hooks` runs on the host the
+next time you use that harness, or git, outside the sandbox.
 
 Every harness config directory that exists on the host (`~/.claude`,
 `~/.codex`, and so on) is mounted read-write into the guest. The harness's credentials are inside
@@ -128,19 +131,20 @@ agent.
 ## Secrets
 
 ```toml
-[env]
-NODE_ENV = "development"       # configuration. Baked into the pack.
-
-env_passthrough = ["CI"]       # read from the host at run time
+env_passthrough = ["CI"]          # read from the host at run time
 secrets         = ["NPM_TOKEN"]   # the same; never in a command line, a pack or a log
+
+[env]
+NODE_ENV = "development"          # configuration. Baked into the pack.
 ```
 
 `env` is saved into the environment pack, which persists on disk. Put anything you would not want
 in a snapshot in the other two lists. boxer resolves them on the host at run time and passes them
 to the guest process. It stores them in no VM metadata and no file it keeps.
 
-`env_passthrough` is an explicit allowlist, `["CI"]` by default. No other host variable reaches the
-guest.
+`env_passthrough` is an explicit allowlist, `["CI"]` by default. In inside mode the harness's own
+login variables (its API key or token) reach the guest too, by name like these two lists; no other
+host variable does.
 
 Both lists are forwarded **by name**:
 

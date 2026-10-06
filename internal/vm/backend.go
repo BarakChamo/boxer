@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Backend is what boxer needs from anything that can host a sandbox. It is deliberately small:
@@ -184,6 +186,41 @@ func Owned(b Backend) ([]Machine, error) {
 	}
 	return out, nil
 }
+
+// OwnsName reports whether boxer can prove it made the machine called name: the same test Owned
+// applies to a listing. Everything that deletes or stops by name asks it first, because a name
+// alone is not proof, and smolvm's delete cascades to the machine's branches.
+func OwnsName(b Backend, name string) (bool, error) {
+	ms, err := Owned(b)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range ms {
+		if m.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// NotOwned is the refusal for a name boxer cannot prove it made.
+func NotOwned(b Backend, name string) error {
+	return fmt.Errorf("%s has no machine boxer made called %q; boxer only stops or deletes its own (boxer ls lists them)", b.Name(), name)
+}
+
+// guestTimeout runs argv under the guest's own `timeout` when the image has one. A deadline kept
+// only on the host kills the docker or container CLI and leaves the command running in the
+// container, where nothing will ever stop it; `docker exec` does not end its process when the
+// client dies. KILL, because a timed-out task is past asking: the code is then 137.
+func guestTimeout(d time.Duration, argv []string) []string {
+	secs := int((d + time.Second - 1) / time.Second)
+	line := `command -v timeout >/dev/null 2>&1 && exec timeout -s KILL ` + strconv.Itoa(secs) + ` "$@"; exec "$@"`
+	return append([]string{"sh", "-c", line, "boxer-timeout"}, argv...)
+}
+
+// hostBackstop is how much longer than a timeout the host waits before killing the CLI itself,
+// for an image with no `timeout`.
+const hostBackstop = 3 * time.Second
 
 // Output runs argv in the guest and returns its combined output and exit status. Also a function
 // rather than a method, for the same reason: it is Exec with two buffers.

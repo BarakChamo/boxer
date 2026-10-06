@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/BarakChamo/boxer/internal/config"
 )
 
@@ -68,7 +70,15 @@ func TestUninstallUndoesInstall(t *testing.T) {
 			if _, err := Uninstall(h, root); err != nil {
 				t.Fatal(err)
 			}
-			if got := tree(t, root); !reflect.DeepEqual(got, before) {
+			got := tree(t, root)
+			// OpenCode's file may be the user's, so a schema-only opencode.json is kept.
+			if h == "opencode" {
+				if m := readJSONT(t, filepath.Join(root, "opencode.json")); len(m) != 1 || m["$schema"] == nil {
+					t.Errorf("opencode.json must be left holding only $schema: %v", m)
+				}
+				delete(got, "opencode.json")
+			}
+			if !reflect.DeepEqual(got, before) {
 				t.Errorf("files left behind or changed: %v", keys(got))
 			}
 			if got := dirs(t, root); !reflect.DeepEqual(got, beforeDirs) {
@@ -114,8 +124,8 @@ func TestUninstallKeepsTheUsersOwnConfiguration(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(root, "AGENTS.md")); string(b) != agents {
 		t.Errorf("AGENTS.md changed:\n%q", b)
 	}
-	if _, err := os.Stat(filepath.Join(root, "opencode.json")); !os.IsNotExist(err) {
-		t.Errorf("opencode.json was boxer's alone and should be gone")
+	if m := readJSONT(t, filepath.Join(root, "opencode.json")); len(m) != 1 || m["$schema"] == nil {
+		t.Errorf("opencode.json is kept with only $schema, since it may be the user's: %v", m)
 	}
 }
 
@@ -294,5 +304,190 @@ func TestUninstallLeavesWhatItCannotRead(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, "GEMINI.md"), 0o755)
 	if _, err := Uninstall("gemini-cli", root); err == nil {
 		t.Fatal("an unreadable GEMINI.md must be an error")
+	}
+}
+
+// The post-checkout block never changes git's exit status: a checkout that is not a new worktree
+// (flag 0) succeeds, and a failure in the user's own hook is still reported.
+func TestGitHookKeepsGitsExitStatus(t *testing.T) {
+	gitRun := func(dir string, args ...string) (string, error) {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)...)
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin") // no boxer on PATH, as on many hosts
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	root := t.TempDir()
+	gitRun(root, "init", "-q")
+	os.WriteFile(filepath.Join(root, "f"), []byte("a"), 0o644)
+	gitRun(root, "add", "f")
+	gitRun(root, "commit", "-qm", "i")
+	if _, err := Git(root); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root, "f"), []byte("changed"), 0o644)
+	if out, err := gitRun(root, "checkout", "--", "f"); err != nil {
+		t.Fatalf("git checkout -- f failed because of the hook: %v %s", err, out)
+	}
+	if out, err := gitRun(root, "checkout", "-q", "-b", "other"); err != nil {
+		t.Fatalf("a branch switch failed because of the hook: %v %s", err, out)
+	}
+
+	// The user's hook fails: the block must not turn that into success.
+	hook, _ := hookPath(root)
+	UninstallGit(root)
+	os.WriteFile(hook, []byte("#!/bin/sh\nfalse\n"), 0o755)
+	if _, err := Git(root); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", hook, "a", "b", "0")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("the user's failing hook must still fail")
+	}
+
+	// A hook in another language is left alone, with the line to add.
+	UninstallGit(root)
+	os.WriteFile(hook, []byte("#!/usr/bin/env python3\nprint('hi')\n"), 0o755)
+	if _, err := Git(root); err == nil || !strings.Contains(err.Error(), "python3") {
+		t.Fatalf("a python hook must be refused: %v", err)
+	}
+	if b, _ := os.ReadFile(hook); strings.Contains(string(b), "boxer") {
+		t.Fatal("the python hook was edited")
+	}
+}
+
+// A hook group can hold the user's hook beside boxer's under one matcher; uninstall takes out
+// boxer's entry and keeps the user's.
+func TestUninstallKeepsAUsersHookInASharedGroup(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Install("claude-code", config.Defaults(), "t", root); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, ".claude", "settings.json")
+	m := readJSONT(t, p)
+	pre := m["hooks"].(map[string]any)["PreToolUse"].([]any)[0].(map[string]any)
+	pre["hooks"] = append(pre["hooks"].([]any), map[string]any{"type": "command", "command": "./audit.sh"})
+	b, _ := json.Marshal(m)
+	os.WriteFile(p, b, 0o644)
+	if _, err := Uninstall("claude-code", root); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(p)
+	if !strings.Contains(string(got), "./audit.sh") || strings.Contains(string(got), "boxer hook") {
+		t.Fatalf("uninstall must keep the user's hook and only that:\n%s", got)
+	}
+}
+
+// A block whose end marker is the file's last byte (no trailing newline) is replaced, not a panic;
+// `{}` is a JSON object; and &, < and > are written as they are.
+func TestReplaceBlockAtEndOfFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(p, []byte("a = 1\n"+blockStart+"\nold\n"+blockEnd), 0o644)
+	r := &Result{}
+	if err := r.replaceBlock(p, blockStart, blockEnd, blockStart+"\nnew\n"+blockEnd+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "a = 1\n"+blockStart+"\nnew\n"+blockEnd+"\n" {
+		t.Fatalf("%q", b)
+	}
+	q := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(q, []byte("{}"), 0o644)
+	if err := r.mergeJSON(q, func(m map[string]any) { m["a"] = "x && <y>" }); err != nil {
+		t.Fatalf("{} is a JSON object: %v", err)
+	}
+	if b, _ := os.ReadFile(q); !strings.Contains(string(b), "x && <y>") {
+		t.Fatalf("&, < and > must be written as they are: %s", b)
+	}
+}
+
+// The executable paths are top-level keys, so they must land above the user's first table; and a
+// table boxer would add twice is refused with the lines to add, not written as invalid TOML.
+func TestConductorSettingsStayValidTOML(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, ".conductor", "settings.toml")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	os.WriteFile(p, []byte("theme = \"dark\"\n\n[ui]\nfont = 12\n"), 0o644)
+	if _, err := Conductor(root, "/opt/shims"); err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if _, err := toml.DecodeFile(p, &m); err != nil {
+		t.Fatalf("invalid TOML: %v", err)
+	}
+	if m["claude_code_executable_path"] != "/opt/shims/claude" || m["theme"] != "dark" {
+		t.Fatalf("top-level keys must stay top-level: %v", m)
+	}
+	if ui := m["ui"].(map[string]any); len(ui) != 1 {
+		t.Fatalf("nothing of boxer's may land in [ui]: %v", ui)
+	}
+	// Twice is the same file.
+	before, _ := os.ReadFile(p)
+	Conductor(root, "/opt/shims")
+	if after, _ := os.ReadFile(p); string(after) != string(before) {
+		t.Fatalf("a second install changed the file:\n%s\n---\n%s", before, after)
+	}
+	UninstallConductor(root)
+	if b, _ := os.ReadFile(p); strings.Contains(string(b), "boxer") || !strings.Contains(string(b), "[ui]") {
+		t.Fatalf("uninstall must leave the user's settings:\n%s", b)
+	}
+
+	os.WriteFile(p, []byte("[scripts]\nsetup = \"make\"\n"), 0o644)
+	if _, err := Conductor(root, "/opt/shims"); err == nil || !strings.Contains(err.Error(), "[scripts]") {
+		t.Fatalf("an existing [scripts] must be refused: %v", err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "[scripts]\nsetup = \"make\"\n" {
+		t.Fatalf("the refused file was changed: %s", b)
+	}
+}
+
+// A worktree of a bare repository has no main working tree, so nothing is written above it.
+func TestMainRepoOfABareRepository(t *testing.T) {
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "proj.git")
+	for _, args := range [][]string{{"init", "-q", "--bare", bare}, {"-C", bare, "worktree", "add", "-q", "--orphan", "-b", "w", filepath.Join(dir, "wt")}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Skipf("git %v: %v %s", args, err, out)
+		}
+	}
+	if m := mainRepo(filepath.Join(dir, "wt")); m != "" {
+		t.Fatalf("a bare repository has no main working tree, got %q", m)
+	}
+}
+
+// Uninstalling one harness leaves what another still uses, and uninstalling them all still leaves
+// the repository as it was.
+func TestUninstallKeepsFilesAnotherHarnessUses(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "README.md"), []byte("# app\n"), 0o644)
+	before := tree(t, root)
+	all := []string{"claude-code", "codex", "gemini-cli", "opencode", "grok", "pi", "kimi", "dsh"}
+	for _, h := range all {
+		if _, err := Install(h, config.Defaults(), "t", root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Uninstall("grok", root); err != nil {
+		t.Fatal(err)
+	}
+	if m := readJSONT(t, filepath.Join(root, ".mcp.json")); m["mcpServers"].(map[string]any)["boxer"] == nil {
+		t.Error("Claude Code's MCP server went with grok")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "boxer")); err != nil {
+		t.Error("the skill codex, kimi and dsh read went with grok")
+	}
+	if _, err := Uninstall("pi", root); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "AGENTS.md")); !strings.Contains(string(b), sectionMarker) {
+		t.Error("OpenCode's AGENTS.md section went with pi")
+	}
+	for _, h := range all {
+		if _, err := Uninstall(h, root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := tree(t, root)
+	delete(got, "opencode.json") // kept with only $schema, as it may be the user's
+	if !reflect.DeepEqual(got, before) {
+		t.Errorf("uninstalling every harness left: %v", keys(got))
 	}
 }

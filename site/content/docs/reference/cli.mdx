@@ -50,7 +50,7 @@ last. Every other command wants its flags before any positional argument or `--`
 
 ## Identity flags
 
-`up`, `run`, `down`, `status`, `doctor`, `brief`, `tasks`, `fork`, `fork ls`, `fork rm`,
+`up`, `run`, `down`, `status`, `restart`, `doctor`, `brief`, `tasks`, `fork`, `fork ls`, `fork rm`,
 `pack save`, `pack use` and `pack rm` accept these. They matter when
 [`isolation`](/docs/reference/configuration#isolation) is `session` or `subagent`, and `--harness`
 selects the [`[harness.<name>]`](/docs/reference/configuration#harness-overrides) override layer.
@@ -411,13 +411,14 @@ boxer install git
 boxer install conductor
 ```
 
-Writes this repository's hooks, MCP entry, instruction and skill for a harness. Run it inside the
-repository. See [harnesses](/docs/setup).
+Writes the files a harness reads so its commands reach the sandbox: hooks or a plugin, and, where
+the harness takes them, an MCP entry, an instruction file and the skill. Each harness's
+[setup page](/docs/setup) lists exactly what it writes. Run it inside the repository.
 
 | Target | Writes |
 | --- | --- |
 | `claude-code`, `codex`, `gemini-cli`, `grok`, `kimi`, `dsh`, `opencode`, `pi` | That harness's project files |
-| `copilot` | Nothing at project level. Use `--user` |
+| `copilot` | Refused at project level: Copilot reads no project file. Use `--user` |
 | `all` | Every harness above except `copilot` |
 | `git` | A `post-checkout` hook running `boxer up --detach` in each new worktree. Not part of `all` |
 | `conductor` | `.conductor/settings.toml` with harness shims and a setup script that warms the sandbox |
@@ -442,11 +443,16 @@ boxer uninstall conductor
 
 Removes what the same `boxer install` wrote, and only that. Files boxer created go. In files it
 merged into (`.claude/settings.json`, `.mcp.json`, `AGENTS.md`, `opencode.json`), only boxer's
-entries go and the rest of the file is kept. Directories left empty are removed. Running it twice
-is harmless.
+entries go and the rest of the file is kept, including your own hooks in a group boxer's hook
+shares. Directories left empty are removed. Running it twice is harmless.
 
-Two things are left for you, and it says so: the `tools.exclude` entry in Gemini CLI's settings,
-which may be yours too, and the hooks you appended to `~/.kimi-code/config.toml` by hand.
+Some files serve several harnesses: `.mcp.json`'s `boxer` server (Claude Code, Grok), the skill in
+`.agents/skills/boxer` (Codex, Grok, Kimi, DSH) and the `AGENTS.md` section (OpenCode, pi). Each
+is kept while another harness that uses it is still installed, and removed with the last of them.
+
+Left for you, and named in the output: the `tools.exclude` entry in Gemini CLI's settings, which
+may be yours too; the hooks you appended to `~/.kimi-code/config.toml` by hand; and an
+`opencode.json` left holding only `$schema`, which boxer cannot tell from one you wrote.
 
 | Flag | Default | |
 | --- | --- | --- |

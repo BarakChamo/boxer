@@ -53,12 +53,13 @@ func TestBuildBootsTheSavedArchiveOnSmolvm(t *testing.T) {
 	if _, err := e.Ensure(true, false); err != nil {
 		t.Fatal(err)
 	}
-	tag := e.buildTag()
+	base := e.buildTag()
+	tag := base + "-" + strings.TrimPrefix(e.Scope.Key, "sb-")
 	b, _ := os.ReadFile(dockerLog)
 	if !strings.Contains(string(b), "build -t "+tag+" -f "+filepath.Join(dir, "Dockerfile")+" "+dir) {
 		t.Fatalf("the Dockerfile must be built with the worktree as context:\n%s", b)
 	}
-	archive := filepath.Join(filepath.Dir(LastUsedDir()), "images", tag+"-0123456789abcdef.tar")
+	archive := filepath.Join(filepath.Dir(LastUsedDir()), "images", base+"-0123456789abcdef.tar")
 	v, _ := os.ReadFile(vmlog)
 	if !strings.Contains(string(v), archive) {
 		t.Fatalf("smolvm must boot the saved archive %s:\n%s", archive, v)
@@ -177,5 +178,61 @@ func TestAllowRangesBecomeCIDRRules(t *testing.T) {
 	}
 	if strings.Contains(s, "--allow-host 10.0.0.0/8") || strings.Contains(s, "--allow-host 203.0.113.7") {
 		t.Errorf("an address must not be passed as a hostname:\n%s", s)
+	}
+}
+
+// A create that fails for any reason but the pack itself keeps the pack: it is shared by every
+// worktree, and deleting it for a bad mount or a resource limit made all of them rebuild.
+func TestAnUnrelatedCreateFailureKeepsThePack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	image, _ := e.Image()
+	side := PackPath(image)
+	if p := e.packed(image); p != side {
+		t.Fatalf("pack: %q", p)
+	}
+	vmtest.FailVerb(t, "machine create", "Error: invalid volume /nope: no such file or directory")
+	if _, err := e.Ensure(true, false); err == nil {
+		t.Fatal("the create must fail")
+	}
+	if _, err := os.Stat(side); err != nil {
+		t.Fatalf("an unrelated failure deleted the shared pack: %v", err)
+	}
+}
+
+// A save that fails leaves the pack already saved under that name exactly as it was.
+func TestAFailedSaveKeepsTheEarlierPack(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, err := Resolve(dir, "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	side, err := e.SavePack("keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(side, []byte("the earlier snapshot"), 0o644)
+	vmtest.FailVerb(t, "pack create", "Error: no space left on device")
+	if _, err := e.SavePack("keep"); err == nil {
+		t.Fatal("the save must fail")
+	}
+	if b, _ := os.ReadFile(side); string(b) != "the earlier snapshot" {
+		t.Fatalf("a failed save changed the earlier pack: %q", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(side), "*saving*")); len(left) != 0 {
+		t.Fatalf("a failed save left its temporary behind: %v", left)
 	}
 }

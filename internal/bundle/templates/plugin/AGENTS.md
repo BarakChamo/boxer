@@ -7,7 +7,7 @@ sandbox sees; a sandbox prepared for forking works on a copy instead, and the br
 it does.
 
 How this checkout is configured — where the worktree is mounted, which programs are intercepted,
-which always run on the host, and whether the shell path is rewritten or refused — is resolved at
+which run on the host, and whether the shell path is rewritten or refused — is resolved at
 run time, not written here. Ask the binary:
 
 - `boxer brief` — the current brief in prose; `boxer brief --json` for the same facts as data.

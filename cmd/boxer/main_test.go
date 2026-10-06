@@ -136,10 +136,25 @@ func mustGetwd(t *testing.T) string {
 // A dashboard has machine names from `ls`, not worktrees: `down --scope` must work from a
 // directory that is not a repository at all.
 func TestDownByScopeNameOutsideAnyRepo(t *testing.T) {
-	_, log := vmtest.Install(t)
+	client, log := vmtest.Install(t)
 	dir := t.TempDir() // no git repository here
 	t.Chdir(dir)
+	if err := client.Create(vm.CreateSpec{Name: "sb-deadbeef", Labels: map[string]string{"boxer.scope": "sb-deadbeef"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A machine boxer did not make is refused by name, and kept.
+	if err := client.Create(vm.CreateSpec{Name: "mydev"}); err != nil {
+		t.Fatal(err)
+	}
 	var out, errOut bytes.Buffer
+	if code := run([]string{"down", "--scope", "mydev"}, nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "only stops or deletes its own") {
+		t.Fatalf("a foreign machine must be refused: %d %s", code, errOut.String())
+	}
+	if _, ok, _ := client.Status("mydev"); !ok {
+		t.Fatal("a foreign machine was deleted")
+	}
+	out.Reset()
+	errOut.Reset()
 	if code := run([]string{"down", "--scope", "sb-deadbeef", "--json"}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}

@@ -55,7 +55,12 @@ func (e *Env) buildImage() (string, error) {
 		return "", e.fail(&Error{Reason: "build names a Dockerfile that is not there: " + dockerfile, Cause: "CONFIG_INVALID",
 			Scope: e.Scope, Fix: "fix `build` in boxer.toml; it is relative to the worktree"})
 	}
-	tag := e.buildTag()
+	// The tag is per scope: two worktrees building at once each tag their own result, where one
+	// shared tag could be re-pointed by the other between this build and its use. Layers are still
+	// shared through the builder's cache, and the smolvm archive is named by content, so nothing
+	// is built or stored twice.
+	base := e.buildTag()
+	tag := e.scopeTag()
 	bin := BuildBin
 	switch e.Cfg.Backend {
 	case "docker", "podman", "container":
@@ -87,14 +92,14 @@ func (e *Env) buildImage() (string, error) {
 		id = id[:16]
 	}
 	dir := filepath.Join(filepath.Dir(LastUsedDir()), "images")
-	archive := filepath.Join(dir, tag+"-"+id+".tar")
+	archive := filepath.Join(dir, base+"-"+id+".tar")
 	if _, err := os.Stat(archive); err == nil {
 		return archive, nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	tmp := archive + ".part"
+	tmp := fmt.Sprintf("%s.%d.part", archive, os.Getpid()) // two creates saving at once each get their own
 	if err := e.hostRun(bin, "save", "-o", tmp, tag); err != nil {
 		_ = os.Remove(tmp)
 		return "", e.fail(&Error{Reason: "saving the built image: " + err.Error(), Cause: "BUILD_FAILED", Scope: e.Scope, Fix: "boxer doctor"})
@@ -102,7 +107,7 @@ func (e *Env) buildImage() (string, error) {
 	if err := os.Rename(tmp, archive); err != nil {
 		return "", err
 	}
-	pruneArchives(dir, tag, 2)
+	pruneArchives(dir, base, 2)
 	return archive, nil
 }
 
@@ -138,4 +143,32 @@ func rel(root, p string) string {
 		return r
 	}
 	return p
+}
+
+// scopeTag is the tag this worktree's build is given: the shared base, then the scope.
+func (e *Env) scopeTag() string {
+	if k := strings.TrimPrefix(e.Scope.Key, "sb-"); k != "" {
+		return e.buildTag() + "-" + k
+	}
+	return e.buildTag()
+}
+
+// forgetBuildTag removes this scope's image tag when its sandbox goes. Tags are per worktree, so
+// without this every worktree that ever built left one behind; the layers stay in the builder's
+// cache for the next build, and smolvm's archives are pruned on their own.
+func (e *Env) forgetBuildTag() {
+	if e.Cfg.Build == "" {
+		return
+	}
+	bin := BuildBin
+	switch e.Cfg.Backend {
+	case "docker", "podman", "container":
+		bin = e.Cfg.Backend
+	}
+	tag := e.scopeTag()
+	verb := []string{"image", "rm", tag}
+	if bin == "container" {
+		verb = []string{"image", "delete", tag}
+	}
+	_ = exec.Command(bin, verb...).Run() // best effort: a tag already gone is fine
 }

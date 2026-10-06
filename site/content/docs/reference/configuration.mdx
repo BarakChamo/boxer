@@ -121,9 +121,12 @@ mode = "tool"
 `string`, default `"both"`. One of `hook`, `shim`, `both`, `audit`. Env `BOXER_ENFORCEMENT`.
 
 Which mechanisms keep commands in the sandbox. With `shim` or `both`, a hook on a harness that
-cannot rewrite lets the bare command reach the [shim](/docs/setup/integration-levels#path-shims). With
-`hook`, the hook denies it. `audit`
-makes hooks print `boxer: audit: would <action>` on stderr and allow everything.
+cannot rewrite (Kimi, DSH) lets the bare command reach the [shim](/docs/setup/integration-levels#path-shims),
+but only when boxer's shims are on the harness's `PATH` and the command names the program bare. Without
+shims, or for a program named by path (`/opt/homebrew/bin/npm`), the hook denies it with the
+`boxer run` line to use. With `hook`, the hook always denies it. `audit` makes hooks print
+`boxer: audit: would <action>` on stderr and allow everything. Shims follow the same setting: under
+`mode = "off"`, `enforcement = "hook"` or `"audit"`, a shim runs its program on the host.
 
 ```toml
 enforcement = "hook"
@@ -889,6 +892,7 @@ Where events go. Setting the variable to anything but `none` also sets `enabled`
 
 ```toml
 [telemetry]
+enabled = true
 sink = "stderr"
 ```
 
@@ -968,7 +972,9 @@ configure a subprocess. Lists and tables cannot. A variable overrides every file
 | `BOXER_TELEMETRY_SINK` | `telemetry.sink`, and `telemetry.enabled` unless the value is `none` |
 | `BOXER_WARM_ON_SESSION_START` | `warm_on_session_start` (a boolean) |
 
-A value that does not parse as its type is ignored. Variables with no key are listed in the
+A value that does not parse as its type is an error that names the variable, as a bad value in
+`boxer.toml` is. `BOXER_URLS` holding a port map, which boxer sets inside the guest, is not read as
+this setting. Variables with no key are listed in the
 [CLI reference](/docs/reference/cli#environment-variables).
 
 ## devcontainer.json

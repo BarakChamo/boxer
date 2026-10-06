@@ -49,6 +49,13 @@ func TestUninstallCommand(t *testing.T) {
 	if code, out := call(t, nil, "uninstall", "git"); code != 0 || !strings.Contains(out, "removed boxer from") {
 		t.Fatalf("uninstall git: %d %s", code, out)
 	}
+	// opencode.json is kept with only $schema, since boxer cannot tell whether it made it.
+	if b, err := os.ReadFile(filepath.Join(dir, "opencode.json")); err == nil {
+		if !strings.Contains(string(b), "$schema") || strings.Contains(string(b), "boxer") {
+			t.Fatalf("opencode.json must be left with only its $schema: %s", b)
+		}
+		os.Remove(filepath.Join(dir, "opencode.json"))
+	}
 	if after := snapshot(t, dir); after != before {
 		t.Fatalf("the repository changed:\nbefore %s\nafter  %s", before, after)
 	}
@@ -134,5 +141,39 @@ func TestTurbopackWarning(t *testing.T) {
 	}
 	if w := turbopackWarning(t.TempDir(), "smolvm", "darwin"); w != "" {
 		t.Fatalf("not a Next.js project: %q", w)
+	}
+}
+
+// A shim under mode = "off", enforcement = "audit" or "hook" runs the program on the host: the
+// repository asked for nothing to be sandboxed by a shim.
+func TestShimsHonourModeOffAndAudit(t *testing.T) {
+	for _, tc := range []struct{ toml, wantErr string }{
+		{"mode = \"off\"\n", ""},
+		{"enforcement = \"hook\"\n", ""},
+		{"enforcement = \"audit\"\n", "boxer: audit: would run in the sandbox: echo from-host"},
+	} {
+		_, log := vmtest.Install(t)
+		vmtest.RepoIn(t, vmtest.NoWorktreeCheck+tc.toml)
+		t.Setenv("BOXER_SHIM", "1")
+		code, out := call(t, nil, "run", "--", "echo", "from-host")
+		if code != 0 || !strings.Contains(out, "from-host") || !strings.Contains(out, tc.wantErr) {
+			t.Fatalf("%s: %d %s", tc.toml, code, out)
+		}
+		if b, _ := os.ReadFile(log); strings.Contains(string(b), "machine create") {
+			t.Fatalf("%s: a shim created a sandbox:\n%s", tc.toml, b)
+		}
+	}
+}
+
+// A harness override that relies on shims keeps them sandboxing, whatever the top level says.
+func TestShimsKeepSandboxingForAHarnessThatReliesOnThem(t *testing.T) {
+	_, log := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"enforcement = \"hook\"\n[harness.kimi]\nenforcement = \"shim\"\n")
+	t.Setenv("BOXER_SHIM", "1")
+	if code, out := call(t, nil, "run", "--", "echo", "x"); code != 0 {
+		t.Fatalf("%d %s", code, out)
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "machine exec") {
+		t.Fatalf("the shim must still sandbox:\n%s", b)
 	}
 }

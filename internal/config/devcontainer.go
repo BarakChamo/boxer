@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/BarakChamo/boxer/internal/sh"
 )
 
 // A devcontainer.json is where a repository that cares about a reproducible environment already
@@ -51,6 +54,7 @@ type devcontainer struct {
 	Features         map[string]any `json:"features"`
 	Build            any            `json:"build"`
 	DockerFile       string         `json:"dockerFile"`
+	Context          string         `json:"context"`
 	DockerComposeFil any            `json:"dockerComposeFile"`
 	// Read only to be refused: each one widens or reshapes the boundary boxer draws, and honouring
 	// it quietly would hand a devcontainer a way around the sandbox.
@@ -114,9 +118,12 @@ func (c *Config) mergeDevcontainer(path, workspace string) error {
 		}
 		set("build", c.Build != "", func() {
 			c.Build = filepath.ToSlash(filepath.Join(dir, df))
-			if ctx != "" {
-				c.BuildContext = filepath.ToSlash(filepath.Join(dir, ctx))
+			// The specification's default context is the folder holding devcontainer.json, not
+			// the Dockerfile's own folder, which is boxer's default for a boxer.toml build.
+			if ctx == "" {
+				ctx = "."
 			}
+			c.BuildContext = filepath.ToSlash(filepath.Join(dir, ctx))
 		})
 	}
 	// onCreateCommand runs once when the container is built and is cacheable, which is exactly
@@ -209,6 +216,7 @@ func (d devcontainer) dockerfile() (file, context string) {
 	}
 	if file == "" {
 		file = d.DockerFile
+		context = d.Context // the older spelling: top-level dockerFile and context
 	}
 	return file, context
 }
@@ -276,6 +284,16 @@ func (d devcontainer) unsupported() []string {
 
 // commandList flattens the three shapes a devcontainer lifecycle command takes: a string, an argv
 // array, or an object of named commands the specification runs in parallel.
+// quoteWord quotes a word for the shell only when it needs it, so ["npm","ci"] reads `npm ci`.
+func quoteWord(w string) string {
+	if w != "" && plainWord.MatchString(w) {
+		return w
+	}
+	return sh.Quote(w)
+}
+
+var plainWord = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
 func commandList(v any) []string {
 	switch t := v.(type) {
 	case string:
@@ -284,9 +302,12 @@ func commandList(v any) []string {
 		}
 		return []string{t}
 	case []any:
+		// An array is an argv, run without a shell: ["bash","-c","npm ci && npm test"] is three
+		// words. Joined bare it became `bash -c npm ci && npm test`, which runs `bash -c npm` and
+		// then `npm test` outside it. Each word is quoted, so the line runs what the array says.
 		parts := make([]string, 0, len(t))
 		for _, p := range t {
-			parts = append(parts, fmt.Sprint(p))
+			parts = append(parts, quoteWord(fmt.Sprint(p)))
 		}
 		if len(parts) == 0 {
 			return nil
@@ -321,7 +342,8 @@ func bindMounts(in []any) []string {
 			if fmt.Sprint(t["type"]) != "bind" {
 				continue
 			}
-			src, dst := fmt.Sprint(t["source"]), fmt.Sprint(t["target"])
+			src, _ := t["source"].(string) // fmt.Sprint(nil) is "<nil>", which is not empty
+			dst, _ := t["target"].(string)
 			if src != "" && dst != "" {
 				out = append(out, src+":"+dst)
 			}
@@ -625,14 +647,71 @@ func substitute(s string, vars, guestEnv map[string]string) (string, []string) {
 
 // stripJSONComments removes // and /* */ comments and trailing commas. devcontainer.json is JSONC
 // in practice — the specification says so and every real file uses it — and Go's decoder is not.
-var (
-	lineComment  = regexp.MustCompile(`(?m)(^|[^:"])//.*$`)
-	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	trailingComa = regexp.MustCompile(`,(\s*[}\]])`)
-)
+var ()
 
+// stripJSONComments removes // and /* */ comments and trailing commas, which devcontainer.json
+// allows and encoding/json does not, without touching anything inside a string. Regular
+// expressions did, and quietly rewrote a value: "ls src/**/*.go" lost its /**/, and a "," before
+// a "]" inside a string was dropped.
 func stripJSONComments(b []byte) []byte {
-	b = blockComment.ReplaceAll(b, nil)
-	b = lineComment.ReplaceAll(b, []byte("$1"))
-	return trailingComa.ReplaceAll(b, []byte("$1"))
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c == '"':
+			j := i + 1
+			for j < len(b) && b[j] != '"' {
+				if b[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(b) {
+				return append(out, b[i:]...) // unterminated: let the decoder say so
+			}
+			out = append(out, b[i:j+1]...)
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '/':
+			for i < len(b) && b[i] != '\n' {
+				i++
+			}
+			if i < len(b) {
+				out = append(out, '\n')
+			}
+		case c == '/' && i+1 < len(b) && b[i+1] == '*':
+			end := bytes.Index(b[i+2:], []byte("*/"))
+			if end < 0 {
+				return out
+			}
+			i += 2 + end + 1
+		case c == ',':
+			// A trailing comma: the next thing that is not space or a comment closes the container.
+			k := i + 1
+			for k < len(b) {
+				if b[k] == ' ' || b[k] == '\t' || b[k] == '\n' || b[k] == '\r' {
+					k++
+				} else if k+1 < len(b) && b[k] == '/' && b[k+1] == '/' {
+					for k < len(b) && b[k] != '\n' {
+						k++
+					}
+				} else if k+1 < len(b) && b[k] == '/' && b[k+1] == '*' {
+					end := bytes.Index(b[k+2:], []byte("*/"))
+					if end < 0 {
+						k = len(b)
+					} else {
+						k += 2 + end + 2
+					}
+				} else {
+					break
+				}
+			}
+			if k < len(b) && (b[k] == '}' || b[k] == ']') {
+				continue
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }

@@ -6,6 +6,70 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Fixes from a full review of 1.4.0 (six reviewers, each finding verified and covered by a test).
+
+### Security
+- A line that sets a `BOXER_*` variable is refused by the hook. `BOXER_INSIDE=1 boxer run -c 'npm i'`
+  ran on the host, and `export BOXER_MODE=off` would have switched off a persistent shell.
+- The command reader also catches `$(...)` inside `$(( ))`, options after `sh -c` (`bash -c -- 'x'`),
+  shells reading their commands from stdin (`bash <<< 'x'`, `echo x | sh`), program names that are
+  still dynamic (`$x i`, globs, braces), and the wrappers `env -S`, `watch`, `setsid`, `su -c`,
+  `script -c`, `flock` and `find -exec`. Each case is checked against a real bash.
+- Kimi and DSH, which can only block, let a sandboxed command through on the assumption that PATH
+  shims would catch it. They now do so only when shims are on the harness's `PATH` and the program
+  is named bare; otherwise the hook refuses with the `boxer run` line.
+- Inside mode passed the harness's API keys and tokens as `-e KEY=value`, visible to any local user
+  in the process list. They are now passed by name, and the repository's `[env]`, `secrets` and
+  `env_passthrough` reach the harness too.
+- `boxer down --scope`, `boxer fork rm` and `pkg/boxer` `Stop` and `Delete` refuse a machine boxer
+  cannot prove it made, as `boxer rm` does. smolvm's delete cascades to a machine's branches.
+
+### Fixed
+- The `post-checkout` hook from `boxer install git` made `git checkout -- file` exit 1. It now
+  keeps the hook's own status, refuses to edit a hook in another language, and warns when the
+  hook exits before boxer's block.
+- `boxer uninstall` keeps the user's own hooks that share a group with boxer's, keeps files another
+  installed harness still uses (`.mcp.json`'s server, the shared skill, the `AGENTS.md` section), and
+  leaves an `opencode.json` that only holds `$schema` rather than deleting what may be the user's.
+- `boxer install`: a block at the very end of a file no longer panics; `{}` is accepted as JSON;
+  `&`, `<` and `>` are written as they are; Conductor's settings stay valid TOML, with the
+  executable paths above the user's tables; Codex in a worktree of a bare repository no longer
+  writes outside it.
+- A sandbox create that fails for any reason but a broken pack keeps the shared pack.
+- A scope lock whose file the sweep deleted could have two holders. The lock now checks it holds
+  the file at the path.
+- A long `boxer run` or harness session keeps its last-used time fresh, so idle reclaim no longer
+  stops it mid-run. A second harness no longer stops a running sandbox to cache itself.
+- Builds are tagged per worktree, so two worktrees building at once cannot boot each other's image.
+- `boxer pack save` writes the new pack beside the old one and moves it into place only when it is
+  whole.
+- smolvm's own failures during a command (`vm not found`, a dropped agent connection) are reported
+  as errors, not as the command's exit code. `boxer run` exits 1 when the backend fails, never with
+  the backend's own status. smolvm `Delete` of a machine already gone is success.
+- Apple `container`: a guest's own `Error: ...` output is no longer taken for the runtime failing.
+- docker: a container removed while `boxer ls` or `gc` lists them no longer fails the listing.
+- docker and Apple `container`: a `[tasks]` timeout now kills the command in the guest (exit 137)
+  instead of leaving it running there.
+- Configuration:
+  - a devcontainer `build` gives way to a boxer.toml `image` or `smolfile`;
+  - a devcontainer command array is quoted word by word;
+  - comments are stripped without touching strings;
+  - a worktree's own devcontainer wins over the repository's;
+  - the build context defaults to the devcontainer's folder, and the legacy `context` key is read;
+  - `[harness.<name>]` tables merge across layers;
+  - a `BOXER_*` value that does not parse is an error;
+  - doctor names the source of nested overrides;
+  - a misspelled table (`[netwrok]`) is an error;
+  - `cpus`, the durations, `prep.target`, `cache.managers` and `network.ports` are validated;
+  - malformed addresses and IPv6 zones in `allow_hosts` are refused.
+- PATH shims follow `mode = "off"` and `enforcement = "hook"` or `"audit"`, and run their program
+  on the host.
+- gc only treats a worktree as gone when it is absent, not when it cannot be read.
+- The agent brief said git, gh and ssh always run on the host. A line that also runs an intercepted
+  program runs whole in the sandbox, and the brief now says so.
+- Docs: inside mode's real boundary (the worktree and harness config are writable from the guest),
+  what triggers automatic reclaim, the telemetry example, and several smaller corrections.
+
 ## [1.4.0] - 2026-10-06
 
 ### Security

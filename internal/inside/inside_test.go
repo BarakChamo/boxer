@@ -84,15 +84,22 @@ func TestGuestEnv(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/Users/x/codex-home")
 	t.Setenv("OPENAI_API_KEY", "k")
 	t.Setenv("OPENAI_BASE_URL", "")
-	env, err := guestEnv(Harnesses["codex"], []string{"EXTRA=1"})
+	env, secrets, err := guestEnv(Harnesses["codex"], []string{"EXTRA=1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(env, "\n")
-	for _, want := range []string{"HOME=/Users/x", "CODEX_HOME=/Users/x/codex-home", "OPENAI_API_KEY=k", "OPENAI_BASE_URL=", "EXTRA=1", `CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`} {
+	for _, want := range []string{"HOME=/Users/x", "CODEX_HOME=/Users/x/codex-home", "EXTRA=1", `CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in\n%s", want, joined)
 		}
+	}
+	// The harness's keys go by name, never by value: a value in env is a value in the host's argv.
+	if strings.Contains(joined, "OPENAI_API_KEY") {
+		t.Fatalf("an API key must not be passed as KEY=value:\n%s", joined)
+	}
+	if s := strings.Join(secrets, " "); !strings.Contains(s, "OPENAI_API_KEY=OPENAI_API_KEY") || !strings.Contains(s, "OPENAI_BASE_URL=OPENAI_BASE_URL") {
+		t.Fatalf("the harness's keys are passed by name: %v", secrets)
 	}
 	if strings.Contains(joined, "ANTHROPIC") {
 		t.Fatal("other harnesses' variables must not leak")
@@ -102,7 +109,7 @@ func TestGuestEnv(t *testing.T) {
 	}
 	// An empty HOME would reach the guest and break every mounted config path, so it is refused.
 	t.Setenv("HOME", "")
-	if _, err := guestEnv(Harnesses["codex"], nil); err == nil {
+	if _, _, err := guestEnv(Harnesses["codex"], nil); err == nil {
 		t.Fatal("an unresolvable home directory must be an error, not HOME=")
 	}
 }
@@ -237,5 +244,62 @@ func TestRunTellsTheHarnessWhereItsServersAre(t *testing.T) {
 	b, _ := os.ReadFile(log)
 	if !regexp.MustCompile(`-e BOXER_PORTS=3000=\d+ .*claude --version`).Match(b) {
 		t.Fatalf("the harness launch must carry BOXER_PORTS:\n%s", b)
+	}
+}
+
+// The harness's API key reaches the guest by name only, so its value is never in the command line
+// boxer runs on the host; and the repository's [env] and secrets reach the harness's session.
+func TestHarnessKeysNeverReachTheCommandLine(t *testing.T) {
+	_, log := vmtest.Install(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+	t.Setenv("NPM_TOKEN", "npm-secret-value")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\nsecrets = [\"NPM_TOKEN\"]\n[env]\nNODE_ENV = \"development\"\n")
+	e, err := box.Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	if _, err := Run(e, "claude", []string{"--version"}, false, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	s := string(b)
+	if strings.Contains(s, "sk-ant-secret-value") || strings.Contains(s, "npm-secret-value") {
+		t.Fatalf("a secret value reached the backend's argv:\n%s", s)
+	}
+	last := s[strings.LastIndex(s, "machine exec"):]
+	for _, want := range []string{"--secret-env ANTHROPIC_API_KEY=ANTHROPIC_API_KEY", "--secret-env NPM_TOKEN=NPM_TOKEN", "NODE_ENV=development"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("the harness launch is missing %q:\n%s", want, last)
+		}
+	}
+}
+
+// A second harness launched in a sandbox already in use does not stop it to cache itself:
+// the first harness's session, or a long run, would be cut off.
+func TestASecondHarnessDoesNotStopARunningSandbox(t *testing.T) {
+	_, log := vmtest.Install(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\n")
+	run := func(h string) {
+		e, err := box.Resolve(dir, h, scope.Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.Stderr = io.Discard
+		if _, err := Run(e, h, []string{"--version"}, false, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("claude")
+	before, _ := os.ReadFile(log)
+	run("codex")
+	b, _ := os.ReadFile(log)
+	if after := string(b[len(before):]); strings.Contains(after, "machine stop") {
+		t.Fatalf("the second harness stopped the running sandbox:\n%s", after)
 	}
 }

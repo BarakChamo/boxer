@@ -74,6 +74,10 @@ func setBranchable(key string, on bool) {
 
 // stopVM stops the sandbox and forgets that it was branchable: the memfd and the control socket
 // go with the process, so a marker that outlived a stop would promise a fork that cannot happen.
+// Stopped records that a sandbox was stopped from outside an Env (gc's idle stop): the boot it was
+// branchable in is over, so a fork must not be offered against the next one.
+func Stopped(key string) { setBranchable(key, false) }
+
 func (e *Env) stopVM() error {
 	e.seen = nil
 	setBranchable(e.Scope.Key, false)
@@ -102,6 +106,7 @@ func (e *Env) deleteVM() error {
 	vm.ForgetOwned(e.VM, e.Scope.Key)
 	if err == nil {
 		ForgetScope(e.Scope.Key)
+		e.forgetBuildTag()
 	}
 	return err
 }

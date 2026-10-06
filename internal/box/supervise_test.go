@@ -103,6 +103,7 @@ func TestRestartServicesFallsBackWhenAServiceWillNotStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(os.Getenv("FAKE_STATE")+".stuck", nil, 0o644)
+	setBranchable(e.Scope.Key, true)
 	before, _ := os.ReadFile(log)
 	if err := e.RestartServices(); err != nil {
 		t.Fatal(err)
@@ -114,5 +115,8 @@ func TestRestartServicesFallsBackWhenAServiceWillNotStop(t *testing.T) {
 	}
 	if n := launches(after); n != 1 {
 		t.Fatalf("and relaunched once, launched %d times:\n%s", n, after)
+	}
+	if Branchable(e.Scope.Key) {
+		t.Fatal("the restart ended the branchable boot, so the marker must go")
 	}
 }

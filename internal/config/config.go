@@ -371,7 +371,9 @@ func Load(worktreeRoot, repoRoot string) (Config, error) {
 	if workspace == "" {
 		workspace = repoRoot
 	}
-	for _, root := range []string{repoRoot, worktreeRoot} {
+	// The worktree's own file first: a branch that changes its devcontainer must get that one,
+	// as it would its own boxer.toml, not the main checkout's.
+	for _, root := range []string{worktreeRoot, repoRoot} {
 		if root == "" {
 			continue
 		}
@@ -382,12 +384,23 @@ func Load(worktreeRoot, repoRoot string) (Config, error) {
 			break
 		}
 	}
+	dcBuild := cfg.Sources["build"]
 	for _, p := range paths {
 		if err := cfg.merge(p); err != nil {
 			return cfg, err
 		}
 	}
-	cfg.applyEnv()
+	// A build the devcontainer set gives way to an image or a Smolfile a boxer.toml names: the
+	// devcontainer is the lowest layer, and `build` would otherwise win over `image` in Image().
+	if dcBuild != "" && cfg.Sources["build"] == dcBuild &&
+		(cfg.Sources["image"] != "" && cfg.Sources["image"] != dcBuild || cfg.Smolfile != "") {
+		cfg.Build, cfg.BuildContext = "", ""
+		delete(cfg.Sources, "build")
+		delete(cfg.Sources, "build_context")
+	}
+	if err := cfg.applyEnv(); err != nil {
+		return cfg, err
+	}
 	return cfg, cfg.Validate()
 }
 
@@ -399,7 +412,9 @@ func LoadFiles(paths ...string) (Config, error) {
 			return cfg, err
 		}
 	}
-	cfg.applyEnv()
+	if err := cfg.applyEnv(); err != nil {
+		return cfg, err
+	}
 	return cfg, cfg.Validate()
 }
 
@@ -414,6 +429,20 @@ func userFile() string {
 	}
 	return filepath.Join(dir, "boxer", "boxer.toml")
 }
+
+// knownTables are the top-level keys that are tables ([network], [env], [harness.x]): the only
+// names a misspelled table can be a typo of.
+var knownTables = func() map[string]bool {
+	m := map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if tag := f.Tag.Get("toml"); tag != "" && tag != "-" && (f.Type.Kind() == reflect.Struct || f.Type.Kind() == reflect.Map) {
+			m[strings.Split(tag, ",")[0]] = true
+		}
+	}
+	return m
+}()
 
 // knownKeys are the top-level keys this binary understands, from Config's own tags.
 var knownKeys = func() map[string]bool {
@@ -435,9 +464,30 @@ func (c *Config) merge(path string) error {
 	if err != nil {
 		return err
 	}
+	// The decoder makes a fresh struct for each [harness.<name>] it reads, so a later layer's
+	// table replaced the earlier one whole: a repository's `mode` erased the user's `enforcement`
+	// for the same harness. Kept here and merged back below, field by field, as [env] merges.
+	earlier := map[string]Override{}
+	for k, v := range c.Harness {
+		earlier[k] = v
+	}
 	md, err := toml.Decode(string(data), c)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	for name, now := range c.Harness {
+		if was, ok := earlier[name]; ok {
+			if now.Mode == "" {
+				now.Mode = was.Mode
+			}
+			if now.Enforcement == "" {
+				now.Enforcement = was.Enforcement
+			}
+			if now.Isolation == "" {
+				now.Isolation = was.Isolation
+			}
+			c.Harness[name] = now
+		}
 	}
 	// An unknown top-level *table* is how a newer boxer adds a feature, so it is a warning: a
 	// repository that declares one must still be usable by whatever binary is installed. Anything
@@ -447,6 +497,11 @@ func (c *Config) merge(path string) error {
 	warned := map[string]bool{}
 	for _, k := range md.Undecoded() {
 		if top := k[0]; !knownKeys[top] && md.Type(top) == "Hash" {
+			// A newer boxer's table is a warning, but a typo of one this boxer knows is not: a
+			// misspelled [netwrok] left mode at its default, and an override was silently lost.
+			if near := nearestKnown(top); near != "" {
+				return fmt.Errorf("%s: [%s] is not a table boxer knows; did you mean [%s]?", path, top, near)
+			}
 			if !warned[top] {
 				warned[top] = true
 				c.Warnings = append(c.Warnings, fmt.Sprintf("%s: [%s] is not a table this boxer knows; ignored", path, top))
@@ -472,6 +527,36 @@ func (c *Config) merge(path string) error {
 	return nil
 }
 
+// nearestKnown returns a known table name within two edits of name, or "".
+func nearestKnown(name string) string {
+	for k := range knownTables {
+		if k != name && editDistance(k, name) <= 2 && len(name) >= 4 {
+			return k
+		}
+	}
+	return ""
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
 // deprecatedKeys still load, with a warning that says what to use instead.
 var deprecatedKeys = map[string]string{
 	"require_linked_worktree": `use require_worktree = "require"`,
@@ -484,8 +569,15 @@ var deprecatedKeys = map[string]string{
 var envKeys = map[string]func(c *Config, v string) error{
 	"BOXER_BACKEND": func(c *Config, v string) error { c.Backend = v; return nil },
 	"BOXER_URLS": func(c *Config, v string) error {
+		// Inside the guest boxer sets BOXER_URLS to the sandbox's names ("3000=https://..."), for
+		// the agent to read. That is information, not this setting, so it is left alone.
+		if strings.Contains(v, "=") {
+			return errNotASetting
+		}
 		b, err := strconv.ParseBool(v)
-		c.URLs.Enabled = b
+		if err == nil {
+			c.URLs.Enabled = b
+		}
 		return err
 	},
 	"BOXER_ISOLATION":              func(c *Config, v string) error { c.Isolation = v; return nil },
@@ -501,7 +593,9 @@ var envKeys = map[string]func(c *Config, v string) error{
 	"BOXER_MEMORY":                 func(c *Config, v string) error { c.Memory = v; return nil },
 	"BOXER_CPUS": func(c *Config, v string) error {
 		n, err := strconv.Atoi(v)
-		c.CPUs = n
+		if err == nil {
+			c.CPUs = n
+		}
 		return err
 	},
 	"BOXER_NETWORK_MODE":    func(c *Config, v string) error { c.Network.Mode = v; return nil },
@@ -509,21 +603,55 @@ var envKeys = map[string]func(c *Config, v string) error{
 	"BOXER_TELEMETRY_SINK":  func(c *Config, v string) error { c.Telemetry.Sink = v; c.Telemetry.Enabled = v != "none"; return nil },
 	"BOXER_WARM_ON_SESSION_START": func(c *Config, v string) error {
 		b, err := strconv.ParseBool(v)
-		c.WarmOnSessionStart = b
+		if err == nil {
+			c.WarmOnSessionStart = b
+		}
 		return err
 	},
 }
 
-func (c *Config) applyEnv() {
-	for name, set := range envKeys {
-		if v, ok := os.LookupEnv(name); ok {
-			if err := set(c, v); err == nil {
-				// Name the variable, not just "env": doctor's job is to explain a value well
-				// enough that the reader knows what to change.
-				c.Sources[strings.ToLower(strings.TrimPrefix(name, "BOXER_"))] = name
-			}
+// errNotASetting marks an environment value that is something else boxer put there, not an
+// override; it is skipped without an error.
+var errNotASetting = fmt.Errorf("not a setting")
+
+// envSource is the Sources key an override is recorded under: the top-level key doctor looks up,
+// so BOXER_NETWORK_MODE is credited to "network", not to a "network_mode" nothing reads.
+var envSource = map[string]string{
+	"BOXER_NETWORK_MODE": "network", "BOXER_WORKTREE_MANAGE": "worktree", "BOXER_TELEMETRY_SINK": "telemetry",
+}
+
+// applyEnv applies the BOXER_* overrides. A value that does not parse is an error naming the
+// variable: it used to be swallowed after it had already been half applied, so BOXER_CPUS=four
+// set cpus to 0 and BOXER_URLS=yes turned URLs off, both silently.
+func (c *Config) applyEnv() error {
+	for _, name := range sortedEnvKeys() {
+		v, ok := os.LookupEnv(name)
+		if !ok {
+			continue
 		}
+		if err := envKeys[name](c, v); err == errNotASetting {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("%s=%q: %v", name, v, err)
+		}
+		// Name the variable, not just "env": doctor's job is to explain a value well enough
+		// that the reader knows what to change.
+		key := envSource[name]
+		if key == "" {
+			key = strings.ToLower(strings.TrimPrefix(name, "BOXER_"))
+		}
+		c.Sources[key] = name
 	}
+	return nil
+}
+
+func sortedEnvKeys() []string {
+	out := make([]string, 0, len(envKeys))
+	for k := range envKeys {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // ForHarness returns a copy with the [harness.<name>] override applied.
@@ -657,6 +785,32 @@ func (c Config) Validate() error {
 		}
 		seen[name] = true
 	}
+	if c.CPUs < 1 {
+		return fmt.Errorf("cpus = %d; it must be at least 1", c.CPUs)
+	}
+	for key, d := range map[string]string{"idle_timeout": c.IdleTimeout, "reclaim_every": c.ReclaimEvery, "ready_timeout": c.ReadyTimeout} {
+		if d == "" || key == "idle_timeout" && d == "never" {
+			continue
+		}
+		// A duration that did not parse was not an error until the moment it was used: a bad
+		// reclaim_every switched the sweep off, a bad ready_timeout fell back to a minute.
+		if _, err := time.ParseDuration(d); err != nil {
+			return fmt.Errorf("%s = %q: want a Go duration such as \"2h\" or \"90s\"", key, d)
+		}
+	}
+	if t := c.Prep.Target; t != "" && t != "auto" && t != "none" && strings.Count(t, "/") != 2 {
+		return fmt.Errorf("prep.target = %q; allowed: auto | none | os/cpu/libc, such as linux/arm64/musl", t)
+	}
+	for _, m := range c.Cache.Managers {
+		if !slices.Contains(cacheManagers, m) {
+			return fmt.Errorf("cache.managers contains %q; allowed: %s", m, strings.Join(cacheManagers, " | "))
+		}
+	}
+	for _, p := range c.Network.Ports {
+		if !portSpec.MatchString(p) {
+			return fmt.Errorf("network.ports entry %q: want \"auto:3000\", \"8080:3000\" or \"127.0.0.1:8080:3000\"", p)
+		}
+	}
 	if c.Build != "" && c.Smolfile != "" {
 		return fmt.Errorf("build and smolfile both describe the image; keep one")
 	}
@@ -667,6 +821,13 @@ func (c Config) Validate() error {
 }
 
 var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// cacheManagers are the names cache.managers takes; box.managerOf maps lockfiles onto them.
+var cacheManagers = []string{"auto", "npm", "pnpm", "yarn", "bun", "uv", "poetry", "cargo", "go"}
+
+// portSpec is a forward: auto:GUEST, or [ADDR:]HOST:GUEST with optional one-to-one ranges and a
+// protocol, as docker's -p takes it; ADDR may be IPv4 or a bracketed IPv6 address.
+var portSpec = regexp.MustCompile(`^(auto:\d+|(\[[0-9A-Fa-f:.]+\]:|(\d{1,3}\.){3}\d{1,3}:)?\d+(-\d+)?:\d+(-\d+)?|\d+(-\d+)?)(/(tcp|udp|sctp))?$`)
 
 // Intercepted is the full list of programs that go to the sandbox: intercept plus intercept_also.
 func (c Config) Intercepted() []string {

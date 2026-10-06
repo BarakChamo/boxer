@@ -52,6 +52,26 @@ var escapes = []string{
 	"git status && npm test",
 	"cd sub\nnpm test",
 	`sh -c "sh -c 'npm i'"`,
+	// Found by the 1.4 review.
+	"echo $(( $(npm i) ))",
+	`echo "$(( $(npm i) ))"`,
+	"bash -c -- 'npm i'",
+	"bash -c -e 'npm i'",
+	"x=npm; $x i",
+	"{npm,i}",
+	"bash <<< 'npm i'",
+	"echo 'npm i' | sh",
+	"env -S 'npm i'",
+	"watch 'npm test'",
+	"setsid npm i",
+	"su -c 'npm i'",
+	`find . -maxdepth 0 -exec npm i \;`,
+	// Found by the review of the 1.4 fixes: options with arguments before -c.
+	"bash -euo pipefail -c 'npm i'",
+	"bash -o pipefail -c 'npm i'",
+	"bash -O extglob -c 'npm i'",
+	"bash --rcfile /dev/null -c 'npm i'",
+	"bash -c -- 'npm i'",
 }
 
 // And these stay on the host: nothing intercepted runs, whatever the line mentions.
@@ -72,6 +92,9 @@ var stays = []string{
 	"env",
 	"FOO=1 BAR=2",
 	`printf '%s\n' "$(git rev-parse HEAD)"`,
+	`[[ "$CI" == true ]] && echo hi`,
+	"[[ -n x ]] && ls",
+	"bash --version",
 }
 
 func TestEscapesAreSandboxed(t *testing.T) {
@@ -117,7 +140,7 @@ func TestDecideAgreesWithARealShell(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(bin, "sudo"), []byte("#!/bin/sh\nwhile [ \"${1#-}\" != \"$1\" ]; do [ \"$1\" = -u ] && shift; shift; done\nexec \"$@\"\n"), 0o755)
 	// Real tools, so wrappers resolve their program through PATH as they would for an agent.
-	for _, p := range []string{"sh", "bash", "env", "nohup", "nice", "timeout", "xargs", "echo", "true", "sleep", "cat", "grep", "ls", "tail", "diff", "printf", "basename", "dirname"} {
+	for _, p := range []string{"sh", "bash", "env", "find", "nohup", "nice", "timeout", "xargs", "echo", "true", "sleep", "cat", "grep", "ls", "tail", "diff", "printf", "basename", "dirname"} {
 		if real, err := exec.LookPath(p); err == nil {
 			os.Symlink(real, filepath.Join(bin, p))
 		}
@@ -239,7 +262,7 @@ var edges = map[string]bool{
 // A login shell (`bash -lc`) reads /etc/profile first, and on macOS that runs path_helper, which
 // rebuilds PATH without the oracle's stubs: there it runs no npm the oracle can see, though for an
 // agent it runs npm.
-var mayRun = map[string]bool{"case $x in a) npm test;; esac": true, "f() { npm test; }": true, `bash -lc "npm run build"`: true}
+var mayRun = map[string]bool{"watch 'npm test'": true, "setsid npm i": true, "su -c 'npm i'": true, "case $x in a) npm test;; esac": true, "f() { npm test; }": true, `bash -lc "npm run build"`: true}
 
 func TestReaderEdgeCases(t *testing.T) {
 	for c, want := range edges {
@@ -249,5 +272,107 @@ func TestReaderEdgeCases(t *testing.T) {
 	}
 	if isDigits("") || !isDigits("12") || isDigits("1a") {
 		t.Error("isDigits")
+	}
+}
+
+// A line that sets a BOXER_ variable is refused outright, whatever it runs: it is how a command
+// would switch boxer off for itself, or run on the host by claiming to be inside the guest.
+func TestBoxerVariablesAreRefused(t *testing.T) {
+	for _, c := range []string{
+		"BOXER_INSIDE=1 boxer run -c 'npm i'",
+		"export BOXER_MODE=off",
+		"env BOXER_ON_SANDBOX_UNAVAILABLE=passthrough boxer run -c 'npm i'",
+		"ls; BOXER_MODE=off npm test",
+		"declare -x BOXER_ON_SANDBOX_UNAVAILABLE=passthrough",
+		"echo $(BOXER_INSIDE=1 boxer run -c x)",
+		`bash -c "export BOXER_INSIDE=1"`,
+	} {
+		if d := Decide(with(c, nil)); d.Action != Block || !strings.Contains(d.Reason, "BOXER_") {
+			t.Errorf("%q: %+v", c, d)
+		}
+	}
+	for _, c := range []string{"echo $BOXER_MODE", "grep BOXER_ README.md", "grep -rn BOXER_MODE= .",
+		`echo "BOXER_INSIDE=1"`, `git commit -m "doc: BOXER_MODE=off"`, "BOXER_OUTPUT=json boxer ls",
+		"BOXER_BACKEND=docker make smoke"} {
+		if d := Decide(with(c, nil)); d.Action == Block {
+			t.Errorf("%q only names one, or sets one that is not containment: %+v", c, d)
+		}
+	}
+}
+
+func TestNamedByPath(t *testing.T) {
+	in := []string{"npm", "node"}
+	for c, want := range map[string]bool{
+		"/opt/homebrew/bin/npm i":         true,
+		"./node_modules/.bin/node x":      true,
+		"cd x && /usr/bin/node a.js":      true,
+		"npm i":                           false,
+		"cat /etc/npmrc":                  false,
+		"cd packages/node && npm test":    false, // a path elsewhere in the line is not the program
+		"sh -c '/opt/homebrew/bin/npm i'": true,
+		`echo "unterminated`:              true, // unreadable: a block-only harness refuses it
+	} {
+		if got := NamedByPath(c, in); got != want {
+			t.Errorf("%q: %v", c, got)
+		}
+	}
+	if !NamedByPath("/bin/ls", []string{"*"}) || NamedByPath("ls", []string{"*"}) {
+		t.Error("intercept everything: any path counts")
+	}
+}
+
+// The wrapper and shell branches the review added, checked against what each tool does: these
+// need tools the oracle's PATH does not carry, so they are read here, not run.
+func TestWrapperBranches(t *testing.T) {
+	for c, want := range map[string]bool{
+		"flock /tmp/l npm i":             true, // flock FILE CMD
+		"flock -w 5 /tmp/l npm i":        true,
+		"flock /tmp/l -c 'npm i'":        true,
+		"flock /tmp/l":                   false,
+		"script -q -c 'npm i' /dev/null": true,
+		"su":                             false,
+		"find . -name x":                 false, // no -exec: find runs nothing
+		`find . -exec $x \;`:             true,  // unreadable program under -exec
+		"env -S'npm i'":                  true,  // -S joined to its argument
+		"env -i ls":                      false,
+		"watch":                          false,
+		"watch -n 1 -- npm test":         true,
+		"bash -s":                        true, // reads stdin
+		"bash -- script.sh":              false,
+		"bash +x script.sh":              false,
+		"bash -c":                        false,
+		"sh -x":                          true, // options, no script: stdin
+		"[ -f x ] && npm test":           true,
+		"[[ -f x ]] && ls":               false,
+		"echo $(( 1 + $(npm -v) ))":      true,
+		`echo "$((1+2))"`:                false,
+		"echo $(( 'x ))":                 true, // unterminated quote inside arithmetic
+		`echo "$(( 'x ))"`:               true,
+	} {
+		if got := Decide(with(c, nil)).Action != Allow; got != want {
+			t.Errorf("%q: sandboxed = %v, want %v", c, got, want)
+		}
+	}
+}
+
+// The branches of the shell-option reader and the containment check, read rather than run.
+func TestShellOptionBranches(t *testing.T) {
+	for c, want := range map[string]bool{
+		"bash -c":                      false,
+		"bash --login":                 true, // no -c and no script: stdin
+		"bash --help":                  false,
+		"bash -- ./build.sh":           false,
+		"bash -c -- ":                  false,
+		"sh -o":                        true,
+		`eval 'export BOXER_MODE=off'`: true, // refused, which is not Allow
+		"$HOME/.cargo/bin/cargo build": true,
+		"echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo BOXER_MODE=off)))))))": true, // too deep to read: sandboxed
+	} {
+		if got := Decide(with(c, nil)).Action != Allow; got != want {
+			t.Errorf("%q: not allowed = %v, want %v", c, got, want)
+		}
+	}
+	if setsBoxerEnv(`echo "unterminated`, 0) {
+		t.Error("an unreadable line sets nothing it can show")
 	}
 }

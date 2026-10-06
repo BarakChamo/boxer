@@ -586,7 +586,7 @@ func (e *Env) create() error {
 		Ports:      ports,
 		KeepID:     e.keepID,
 	}
-	if err = e.VM.Create(spec); err != nil && from != "" && !vm.IsAlreadyExists(err) && !vm.IsLocked(err) {
+	if err = e.VM.Create(spec); err != nil && from != "" && badPack(err) {
 		// A pack can be truncated: an interrupted `pack create` leaves a file smaller than its
 		// own footer, and every later create from it fails with the same unhelpful I/O error
 		// until someone deletes it by hand. Delete it and pull the image instead.
@@ -622,6 +622,16 @@ func (e *Env) create() error {
 			Fix: "boxer doctor"})
 	}
 	return nil
+}
+
+// badPack reports a create that failed because the pack file itself is unusable: smolvm says
+// "read checkpoint footer: I/O error: sidecar file too small to contain footer" for a truncated
+// one and "invalid magic: expected SMOLPACK" for one that is not a pack. Only those. Any other
+// failure (a missing mount source, a bad volume, a resource limit) is not the pack's, and
+// deleting the shared pack for it made every worktree pay for image_setup again.
+func badPack(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "checkpoint footer") || strings.Contains(s, "expected SMOLPACK")
 }
 
 // resolvable drops allowlist hosts that do not resolve, and says which. smolvm resolves every
@@ -1280,7 +1290,7 @@ func (e *Env) StopServices() error {
 	// docker-default only accepts signals from plain docker-default, so even root is refused.
 	// Stopping the sandbox ends every process in it and keeps its files, so it is the same
 	// restart by other means.
-	if err := e.VM.Stop(e.Scope.Key); err != nil {
+	if err := e.stopVM(); err != nil {
 		return fmt.Errorf("stopping services: a service would not stop, and neither would the sandbox: %w", err)
 	}
 	if err := e.VM.Start(e.Scope.Key); err != nil {
@@ -1709,7 +1719,7 @@ func (e *Env) Run(argv []string, o RunOpts) (int, error) {
 		}
 		return 1, err
 	}
-	touchLastUsed(e.Scope.Key)
+	defer e.KeepAlive()()
 	start := time.Now()
 	// The run record wants the tree's git state, and `git status --porcelain` costs 10-25ms on a
 	// real repository. Asking for it after the command has finished adds that to every single
@@ -1811,18 +1821,30 @@ func lockScope(key string) (func(), error) {
 
 // lockFile takes an exclusive flock on path, creating it.
 func lockFile(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return func() {
+	for {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		// The sweep deletes unheld lock files, and one waiting here holds the file it opened, not
+		// the path. If the path was deleted or replaced while this waited, the lock is on a file
+		// nobody else will ever open: a second process locks the new file and both hold "the"
+		// lock. So the lock counts only if the path still names the file that was locked.
+		held, _ := f.Stat()
+		now, err := os.Stat(path)
+		if err == nil && os.SameFile(held, now) {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
-	}, nil
+	}
 }
 
 // LastUsedDir holds one zero-byte file per scope whose mtime is the last `run`. smolvm exposes
@@ -1834,6 +1856,30 @@ func LastUsedDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "boxer", "last-used")
 }
+
+// KeepAlive marks the scope used now and every few minutes until the returned stop is called.
+// Idle reclaim reads the last-used time, which was written only when a command started, so a
+// `boxer run` or a harness session longer than idle_timeout was stopped from under itself.
+func (e *Env) KeepAlive() (stop func()) {
+	touchLastUsed(e.Scope.Key)
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(keepAliveEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				touchLastUsed(e.Scope.Key)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done); touchLastUsed(e.Scope.Key) }
+}
+
+// keepAliveEvery is far below the smallest idle_timeout anyone sets, and costs one file touch.
+var keepAliveEvery = 2 * time.Minute
 
 func touchLastUsed(key string) {
 	dir := LastUsedDir()
@@ -1988,7 +2034,7 @@ func InstructionsFor(cfg config.Config, runTool string) string {
 		b.WriteString("Sandboxing is currently off; commands run on the host. ")
 	}
 	b.WriteString(strings.Join(cfg.Passthrough, ", "))
-	b.WriteString(" always run on the host.\n")
+	b.WriteString(" run on the host on their own; a line that also runs one of the programs above runs whole in the sandbox.\n")
 	// Named tasks are the deterministic path, so the brief has to name them: an agent that never
 	// reads the skill still learns them here, and a task is the one command whose spelling the
 	// repository guarantees.

@@ -17,7 +17,9 @@ intercepts what it runs. A command can get past them in three ways:
 - it runs through a login shell that rebuilt `PATH`
 - its program is not on `intercept`
 
-Inside mode has none of these gaps.
+Inside mode has none of these gaps: every command the agent runs is in the guest. What the guest can
+still reach on the host is the worktree and the harness config directories it mounts read-write.
+See [Security](/docs/concepts/security#if-the-threat-model-is-adversarial).
 
 | Harness | `boxer shell` | `boxer acp` |
 | --- | --- | --- |
@@ -95,8 +97,9 @@ with the harness installed. Other backends install it once per sandbox.
 The install uses `npm`, and for some harnesses `apt-get`. The default inside image has both. With
 your own `image`, make sure it has Node and npm, or add them in `image_setup`.
 
-`secrets` and `env_passthrough` do not reach the harness process in inside mode. The harness gets
-its own login variables, listed below.
+The harness gets the repository's `[env]`, `secrets` and `env_passthrough`, as `boxer run` does,
+and its own login variables, such as `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Secrets and
+login variables are passed by name, so their values are never in a command line on the host.
 
 If the install is interrupted, run `boxer up --recreate`.
 
@@ -129,7 +132,7 @@ take a binary path. See [Orchestrators](/docs/orchestrators).
 | | Outside | Inside |
 | --- | --- | --- |
 | What runs on the host | the harness | `boxer` only |
-| Can a command miss the sandbox | yes, for what `intercept` does not name | no |
+| Can a command miss the sandbox | yes, for what `intercept` does not name | no, though it can write files the host runs later |
 | Credentials in the guest | none | the harness's |
 | Memory | the work | the work and the harness |
 | Harnesses | nine, at the levels in [this table](/docs/setup/integration-levels) | nine, through one mechanism |

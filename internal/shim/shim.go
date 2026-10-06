@@ -16,7 +16,7 @@ d=$(cd "$(dirname "$0")" && pwd)
 new=; IFS=:; for p in $PATH; do [ "$p" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS
 PATH=$new
 export PATH
-exec boxer run -- %[1]s "$@"
+BOXER_SHIM=1 exec boxer run -- %[1]s "$@"
 `
 
 // Marker names a directory as boxer's own shims. boxer drops any PATH entry containing it before

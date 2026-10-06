@@ -6,6 +6,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
+	"github.com/BarakChamo/boxer/internal/shim"
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
 	"path/filepath"
@@ -107,10 +108,27 @@ func TestBlockOnlyHarness(t *testing.T) {
 	vmtest.Install(t)
 	// DSH's shell tool is named `bash`, lowercase (verified 2026-09-18 against 0.1.5-rc.2).
 	in := map[string]any{"hook_event_name": "PreToolUse", "tool_name": "bash", "tool_input": map[string]any{"command": "npm test"}}
-	in["cwd"] = vmtest.Repo(t, vmtest.NoWorktreeCheck) // enforcement=both: shims cover it, so allow
+	in["cwd"] = vmtest.Repo(t, vmtest.NoWorktreeCheck) // enforcement=both
+	// No shims on PATH: letting the command through would run it on the host.
+	old := LaunchedPATH
+	t.Cleanup(func() { LaunchedPATH = old })
+	LaunchedPATH = t.TempDir()
+	if out, _, _ := call(t, "dsh", in); hso(out)["permissionDecision"] != "deny" {
+		t.Fatalf("dsh without shims must deny: %v", out)
+	}
+	// Shims on PATH cover a bare command, so it is let through to them.
+	shims := t.TempDir()
+	os.WriteFile(filepath.Join(shims, shim.Marker), nil, 0o644)
+	LaunchedPATH = shims
 	if out, _, _ := call(t, "dsh", in); out != nil {
 		t.Fatalf("dsh with shims must allow: %v", out)
 	}
+	// But not a program named by path, which no shim sees.
+	in["tool_input"] = map[string]any{"command": "/opt/homebrew/bin/npm i"}
+	if out, _, _ := call(t, "dsh", in); hso(out)["permissionDecision"] != "deny" {
+		t.Fatalf("an absolute path must be denied even with shims: %v", out)
+	}
+	in["tool_input"] = map[string]any{"command": "npm test"}
 	in["cwd"] = vmtest.Repo(t, vmtest.NoWorktreeCheck+"enforcement = \"hook\"\n")
 	out, _, _ := call(t, "dsh", in)
 	r, _ := hso(out)["permissionDecisionReason"].(string)

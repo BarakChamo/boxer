@@ -74,7 +74,7 @@ Once boxer is installed into your agent, this happens on its own:
    `EnterWorktree`, `git worktree add` from the agent's shell, or an orchestrator. boxer picks the sandbox from the directory each command runs in. The first command in the new
    worktree creates its sandbox, with the same `setup` and `start`. Two worktrees never share a
    sandbox.
-4. **A worktree is deleted.** boxer removes its sandbox. Any boxer command starts this cleanup in the background, at most every 6 hours (`auto_reclaim`). `boxer gc` runs it now.
+4. **A worktree is deleted.** boxer removes its sandbox. Any command that uses a sandbox starts this cleanup in the background, at most every 6 hours (`auto_reclaim`). `boxer gc` runs it now.
 
 `git`, `gh` and `ssh` always run on your machine, with your credentials. Everything in the
 `intercept` list (`npm`, `node`, `python`, `go`, `make`, `cargo` and more) runs in the sandbox.

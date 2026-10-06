@@ -12,7 +12,7 @@ brief names.
 
 Read the brief before your first command: the MCP resource `boxer://brief`, or
 `boxer_run` with `boxer brief`. It states where the worktree is mounted, which programs are
-intercepted, and which always run on the host. `boxer tasks` lists the command lines this
+intercepted, and which run on the host. `boxer tasks` lists the command lines this
 repository declares; run one with `boxer run --task <name>` rather than composing your own.
 
 Any line beginning `boxer:` in a result is an instruction, not a transient error: its `fix:` line

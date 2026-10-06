@@ -101,7 +101,8 @@ Non-fatal findings from resolution, such as running in the main checkout or degr
 func (b *Box) Ensure(allowCreate, recreate bool) (created bool, err error)
 ```
 
-Makes the machine exist and run, runs `setup` and `start`, and waits for `ready`. It creates a machine only
+Makes the machine exist and run. When it starts one, it runs `setup` and `start` and waits for
+`ready`; a machine already running is returned as it is. It creates a machine only
 when `allowCreate` is set. Otherwise a missing sandbox fails with cause `NO_SANDBOX`. `recreate` deletes an
 existing machine first. `created` reports whether a machine was created.
 

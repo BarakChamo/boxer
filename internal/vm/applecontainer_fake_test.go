@@ -33,7 +33,7 @@ exec)
   case "$last" in
   exit7) exit 7 ;;
   hang) sleep 30 ;;
-  refused) echo "Error: container not found: sb-gone" >&2; exit 1 ;;
+  refused) echo "Error: get failed: container sb-gone not found" >&2; exit 1 ;;
   *) echo "ran $last" ;;
   esac ;;
 *) echo "unexpected $1" >&2; exit 64 ;;
