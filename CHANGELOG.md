@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-06
+
 Fixes from a full review of 1.4.0 (six reviewers, each finding verified and covered by a test).
 
 ### Security
