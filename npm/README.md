@@ -4,7 +4,7 @@ The npm launcher for boxer. It installs the `boxer` command by downloading the r
 your platform.
 
 ```sh
-npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.3.0/boxer-cli-1.3.0.tgz
+npm i -g https://github.com/BarakChamo/boxer/releases/download/v1.4.0/boxer-cli-1.4.0.tgz
 boxer version
 ```
 
@@ -14,7 +14,7 @@ instead. The other install routes are `install.sh` and `go install`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
-go install github.com/BarakChamo/boxer/cmd/boxer@v1.3.0
+go install github.com/BarakChamo/boxer/cmd/boxer@v1.4.0
 ```
 
 ## What the package does
