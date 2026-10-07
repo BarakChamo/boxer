@@ -193,13 +193,14 @@ func TestDecideAgreesWithARealShell(t *testing.T) {
 	os.WriteFile(filepath.Join(work, "pkgs"), []byte("a\n"), 0o644)
 	os.WriteFile(filepath.Join(work, "script.sh"), []byte("echo hi\n"), 0o644)
 
-	checked := 0
+	checked, skipped := 0, 0
 	lines := append(append([]string{}, escapes...), stays...)
 	for c := range edges {
 		lines = append(lines, c)
 	}
 	for _, c := range lines {
 		if _, err := exec.LookPath("timeout"); err != nil && strings.Contains(c, "timeout") {
+			skipped++
 			continue // no timeout on this host; the table tests still cover the line
 		}
 		os.Remove(log)
@@ -229,7 +230,7 @@ func TestDecideAgreesWithARealShell(t *testing.T) {
 		}
 		checked++
 	}
-	if checked < len(lines)-4 {
+	if checked < len(lines)-skipped-4 {
 		t.Fatalf("only %d lines checked", checked)
 	}
 }
