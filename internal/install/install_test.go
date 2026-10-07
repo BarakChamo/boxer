@@ -406,3 +406,69 @@ func TestInstallKeepsTheUsersOwnHooks(t *testing.T) {
 		}
 	}
 }
+
+// A block whose end marker was deleted by hand is refused, not taken to run to the end of the file:
+// everything after the start marker would have gone.
+func TestABlockWithoutItsEndMarkerIsLeftAlone(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	body := "# >>> boxer hooks\nold = 1\n\n[user]\nmine = true\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &Result{}
+	if err := r.replaceBlock(p, "# >>> boxer hooks", "# <<< boxer hooks", "# >>> boxer hooks\nnew = 1\n# <<< boxer hooks\n"); err == nil {
+		t.Fatal("install must refuse")
+	}
+	r.removeBlock(p, "# >>> boxer hooks", "# <<< boxer hooks")
+	if b, _ := os.ReadFile(p); string(b) != body {
+		t.Fatalf("the file was changed:\n%s", b)
+	}
+}
+
+// With no home directory, a user-level install is refused rather than written relative to the
+// current directory, where it edited the repository's own settings.
+func TestUserInstallNeedsAHomeDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if _, err := User("claude-code", config.Defaults(), "test"); err == nil {
+		t.Fatal("install --user with no home must be refused")
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative/dir")
+	if _, err := UninstallUser("claude-code"); err == nil {
+		t.Fatal("a relative CLAUDE_CONFIG_DIR must be refused")
+	}
+	if _, err := os.Stat(".claude"); !os.IsNotExist(err) {
+		t.Fatal("nothing may be written in the current directory")
+	}
+}
+
+// An install over an older one replaces boxer's group, keeping the user's hook beside it: the
+// matcher changed from "Bash" to "Bash|Monitor", and a second group ran the hook twice per command.
+func TestInstallReplacesAnOlderBoxerHook(t *testing.T) {
+	root := t.TempDir()
+	settings := filepath.Join(root, ".claude", "settings.json")
+	_ = os.MkdirAll(filepath.Dir(settings), 0o755)
+	old := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"boxer hook claude-code"},{"type":"command","command":"./my-check.sh"}]}]}}`
+	if err := os.WriteFile(settings, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := Install("claude-code", config.Defaults(), "test", root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, _ := os.ReadFile(settings)
+	var m struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+		} `json:"hooks"`
+	}
+	_ = json.Unmarshal(b, &m)
+	if n := strings.Count(string(b), "boxer hook claude-code"); n != len(m.Hooks) {
+		t.Fatalf("one boxer hook per event, found %d across %d events:\n%s", n, len(m.Hooks), b)
+	}
+	if !strings.Contains(string(b), "./my-check.sh") || !strings.Contains(string(b), `"Bash|Monitor"`) {
+		t.Fatalf("the user's hook stays and the new matcher is in:\n%s", b)
+	}
+}

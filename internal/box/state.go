@@ -32,6 +32,8 @@ func stateRoot() string { return filepath.Dir(LastUsedDir()) }
 func ForgetScope(key string) {
 	root := stateRoot()
 	_ = os.Remove(filepath.Join(root, "last-used", key))
+	_ = os.Remove(filepath.Join(root, "provisioned", key))
+	_ = os.Remove(filepath.Join(root, "backend", key))
 	_ = os.Remove(RunRecordPath(key))
 	_ = os.Remove(branchableMarker(key))
 	unpublishURLs(key)
@@ -61,7 +63,7 @@ func SweepState(live map[string]bool, now time.Time) int {
 		}
 		return now.Sub(last) > staleAfter
 	}
-	for _, dir := range []string{"last-used", "runs", "branchable", "setup", "prep", "locks"} {
+	for _, dir := range []string{"last-used", "runs", "branchable", "setup", "prep", "locks", "provisioned", "backend"} {
 		entries, err := os.ReadDir(filepath.Join(root, dir))
 		if err != nil {
 			continue
@@ -90,6 +92,17 @@ func SweepState(live map[string]bool, now time.Time) int {
 	// A pack being written lives in a hidden directory until it is whole; one whose writer was
 	// killed is left there. A day is far longer than any pack takes.
 	dirs, _ := filepath.Glob(filepath.Join(PackDir(), ".packing-*"))
+	named, _ := filepath.Glob(filepath.Join(NamedPackDir(), ".packing-*"))
+	dirs = append(dirs, named...)
+	// Image archives a build saved for smolvm, unused for a week: each is a whole image, and an
+	// edited Dockerfile leaves the old one behind under another name. A sandbox already created
+	// from one keeps running; smolvm unpacked it at create.
+	archives, _ := filepath.Glob(filepath.Join(root, "images", "*.tar*"))
+	for _, a := range archives {
+		if info, err := os.Stat(a); err == nil && now.Sub(info.ModTime()) > staleAfter && os.Remove(a) == nil {
+			removed++
+		}
+	}
 	for _, d := range dirs {
 		if info, err := os.Stat(d); err == nil && now.Sub(info.ModTime()) > 24*time.Hour && os.RemoveAll(d) == nil {
 			removed++
@@ -137,4 +150,34 @@ func HostBackend(cwd string) string {
 		return ""
 	}
 	return e.Cfg.Backend
+}
+
+// provisioned reports whether the scope's sandbox finished setup since it was last provisioned.
+func provisioned(key string) bool {
+	_, err := os.Stat(filepath.Join(stateRoot(), "provisioned", key))
+	return err == nil
+}
+
+func setProvisioned(key string, done bool) {
+	p := filepath.Join(stateRoot(), "provisioned", key)
+	if !done {
+		_ = os.Remove(p)
+		return
+	}
+	if os.MkdirAll(filepath.Dir(p), 0o755) == nil {
+		_ = os.WriteFile(p, nil, 0o644)
+	}
+}
+
+// createdOn is the backend that created the scope's sandbox, or "" when boxer did not record one.
+func createdOn(key string) string {
+	b, _ := os.ReadFile(filepath.Join(stateRoot(), "backend", key))
+	return strings.TrimSpace(string(b))
+}
+
+func setCreatedOn(key, backend string) {
+	p := filepath.Join(stateRoot(), "backend", key)
+	if os.MkdirAll(filepath.Dir(p), 0o755) == nil {
+		_ = os.WriteFile(p, []byte(backend+"\n"), 0o644)
+	}
 }

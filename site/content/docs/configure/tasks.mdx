@@ -44,7 +44,7 @@ timeout     = "10m"
 | `cmd` | the command line, as in the string form |
 | `description` | what the task is for. `boxer tasks` prints it and the brief gives it to the agent, which uses it to choose between tasks. |
 | `junit` | where this task's JUnit XML lands. `boxer run --task test` summarises it. |
-| `timeout` | a Go duration that bounds the command. A hung task fails instead of holding the session. |
+| `timeout` | a Go duration that bounds the command. A hung task fails instead of holding the session. At the deadline the command and everything it started are killed in the guest, and it exits 137. |
 | `env` | variables for this task only, on top of `[env]`. For example, `env = { NODE_ENV = "test" }`. |
 
 A misspelled key inside a task table is an error, like every other key in `boxer.toml`.

@@ -235,14 +235,14 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 	for _, e := range o.Env {
 		args = append(args, "-e", e)
 	}
-	if len(o.SecretEnv) > 0 {
-		f, err := secretFile(o.SecretEnv)
-		if err != nil {
-			return 127, err
-		}
-		defer func() { _ = os.Remove(f) }()
-		args = append(args, "--env-file", f)
+	secretArgs, secretEnv, f, err := secretFlags(o.SecretEnv)
+	if err != nil {
+		return 127, err
 	}
+	if f != "" {
+		defer func() { _ = os.Remove(f) }()
+	}
+	args = append(args, secretArgs...)
 	args = append(args, o.Name)
 	// Not with a terminal: `timeout` runs the command in a process group of its own, out of the
 	// terminal's foreground, and an interactive program stops on its first read.
@@ -259,6 +259,9 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.Bin, args...)
+	if len(secretEnv) > 0 {
+		cmd.Env = append(os.Environ(), secretEnv...)
+	}
 	// A timeout kills the CLI, but a process it left holding stdout would keep Wait blocked until
 	// that process exited; WaitDelay bounds the wait so the timeout actually returns.
 	cmd.WaitDelay = 2 * time.Second
@@ -278,6 +281,9 @@ func (a Apple) Exec(o ExecOpts, argv ...string) (int, error) {
 			_ = cmd.Process.Signal(s)
 		case err := <-done:
 			var ee *exec.ExitError
+			if asExitError(err, &ee) && ee.ExitCode() < 0 {
+				return 1, killedCLI(cmd.Path, ee)
+			}
 			if asExitError(err, &ee) {
 				if rerr := runtimeFailure(a, ee.ExitCode(), head, map[int][]string{1: appleOwnErrors}, classifyApple); rerr != nil {
 					return ee.ExitCode(), rerr

@@ -74,6 +74,12 @@ var dshEvents = map[string]string{
 	"SubagentStop":     "subagent_stop",
 }
 
+func init() {
+	for name := range Dialects {
+		config.RegisterHarness(name)
+	}
+}
+
 // Dialects is every harness the hook binary speaks.
 var Dialects = map[string]Dialect{
 	// Monitor runs a command "in the same shell environment as Bash", streaming its output: a

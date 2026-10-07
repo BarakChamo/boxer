@@ -94,6 +94,8 @@ func (e *Env) buildImage() (string, error) {
 	dir := filepath.Join(filepath.Dir(LastUsedDir()), "images")
 	archive := filepath.Join(dir, base+"-"+id+".tar")
 	if _, err := os.Stat(archive); err == nil {
+		now := time.Now()
+		_ = os.Chtimes(archive, now, now) // its mtime is its last use, which the sweep reads
 		return archive, nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {

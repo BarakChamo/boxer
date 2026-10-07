@@ -36,7 +36,11 @@ func Uninstall(harness, root string) (Result, error) {
 	case "codex":
 		r.unmergeHooks(root, filepath.Join(root, ".codex", "hooks.json"))
 		if main := mainRepo(root); main != "" {
+			before := len(r.Written)
 			r.unmergeHooks(main, filepath.Join(main, ".codex", "hooks.json"))
+			if len(r.Written) > before {
+				r.Notes = append(r.Notes, "Codex reads hooks from the main checkout for every worktree, so this removed boxer from all of them: "+main)
+			}
 		}
 		r.shared(root, harness, sharedSkill, func() { r.removeTree(root, filepath.Join(root, ".agents", "skills", "boxer")) })
 	case "gemini-cli":
@@ -120,6 +124,9 @@ func installedHere(root, h string) bool {
 
 // UninstallUser removes what User wrote for harness.
 func UninstallUser(harness string) (Result, error) {
+	if err := userDirFor(harness); err != nil {
+		return Result{}, err
+	}
 	r := &Result{}
 	switch harness {
 	case "claude-code":
@@ -363,12 +370,14 @@ func (r *Result) removeBlock(path, start, end string) {
 		return
 	}
 	j := strings.Index(s[i:], end)
-	stop := len(s)
-	if j >= 0 {
-		stop = i + j + len(end)
-		if stop < len(s) && s[stop] == '\n' {
-			stop++
-		}
+	if j < 0 {
+		// Without the end marker the block would run to the end of the file, over the user's lines.
+		r.keep(fmt.Errorf("%s has boxer's start marker but not its end marker (%q); remove boxer's block by hand", path, strings.TrimSpace(end)))
+		return
+	}
+	stop := i + j + len(end)
+	if stop < len(s) && s[stop] == '\n' {
+		stop++
 	}
 	from := i
 	if strings.HasSuffix(s[:i], "\n\n") {

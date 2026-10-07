@@ -447,7 +447,9 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 		var err error
 		row := downJSON{Scope: h.m.Name}
 		if verb == "stop" {
-			err = h.client.Stop(h.m.Name)
+			if err = h.client.Stop(h.m.Name); err == nil {
+				box.Stopped(h.m.Name) // its next boot is not branchable
+			}
 		} else if err = h.client.Delete(h.m.Name); err == nil {
 			vm.ForgetOwned(h.client, h.m.Name)
 			box.ForgetScope(h.m.Name)
@@ -463,6 +465,8 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "boxer: %s %s: %v\n", verb, h.m.Name, err)
+			row.Error = err.Error()
+			rows = append(rows, row)
 			code = 1
 			continue
 		}

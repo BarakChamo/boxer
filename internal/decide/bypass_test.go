@@ -72,6 +72,41 @@ var escapes = []string{
 	"bash -O extglob -c 'npm i'",
 	"bash --rcfile /dev/null -c 'npm i'",
 	"bash -c -- 'npm i'",
+	// Found by the review of 1.4.2.
+	`trap "npm i" EXIT`,
+	"trap -- 'npm i' EXIT",
+	"function f { npm i; }; f",
+	`echo $'\'' ; npm i # '`,
+	"x='a[$(npm i >&2)]'; echo $((x))",
+	"let 'a[$(npm i)]=1'",
+	"read 'a[`npm i`]' <<< x",
+	"timeout --signal KILL 5 npm i",
+	"timeout -k 1 5 npm i",
+	"nice -10 npm i",
+	"nice -n10 npm i",
+}
+
+// Escapes read rather than run: they need tools the oracle's PATH does not carry (GNU env, sudo,
+// taskset, chrt, busybox), bash 4 (coproc), or an interactive shell's aliases.
+var readEscapes = []string{
+	"coproc x { npm i; }",
+	"alias n=npm\nn i",
+	"shopt -s expand_aliases; alias n=npm; n i",
+	"env -P /opt/homebrew/bin npm i",
+	"env --chdir / npm i",
+	"env --chdir=/ npm i",
+	"sudo --user root npm i",
+	"sudo -Eu root npm i",
+	"taskset -c 0 npm i",
+	"chrt -f 10 npm i",
+	"busybox sh -c 'npm i'",
+	"stdbuf -oL npm test",
+	"sudo --frobnicate x npm i", // an option boxer does not know may take a value
+	"env --frobnicate=x npm i",
+	"sudo -Ez npm i",
+	"echo 'a[$(npm i'",
+	"echo $'npm i",
+	"echo $(echo \\) ; npm i)",
 }
 
 // And these stay on the host: nothing intercepted runs, whatever the line mentions.
@@ -95,10 +130,19 @@ var stays = []string{
 	`[[ "$CI" == true ]] && echo hi`,
 	"[[ -n x ]] && ls",
 	"bash --version",
+	"trap 'rm -f x' EXIT",
+	"trap",
+	"time git status",
+	"nice -n 5 git gc",
+	"env -i HOME=/x git log",
+	"sudo -E git push",
+	"timeout --foreground 5 git fetch",
+	"xargs -0 grep -l x < files",
+	"echo 'a[1]'",
 }
 
 func TestEscapesAreSandboxed(t *testing.T) {
-	for _, c := range escapes {
+	for _, c := range append(append([]string{}, escapes...), readEscapes...) {
 		if d := Decide(with(c, nil)); d.Action != Rewrite {
 			t.Errorf("%q runs npm on the host: %+v", c, d)
 		}
@@ -286,6 +330,23 @@ func TestBoxerVariablesAreRefused(t *testing.T) {
 		"declare -x BOXER_ON_SANDBOX_UNAVAILABLE=passthrough",
 		"echo $(BOXER_INSIDE=1 boxer run -c x)",
 		`bash -c "export BOXER_INSIDE=1"`,
+		// Found by the review of 1.4.2.
+		"BOXER_MODE+=off; export BOXER_MODE",
+		"export BOXER_MODE+=off",
+		"printf -v BOXER_MODE off; export BOXER_MODE",
+		"read BOXER_MODE <<< off; export BOXER_MODE",
+		"command export BOXER_MODE=off",
+		"builtin export BOXER_MODE=off",
+		"! BOXER_INSIDE=1 boxer run -c 'npm i'",
+		"if BOXER_INSIDE=1 boxer run -c x; then :; fi",
+		"{ BOXER_INSIDE=1 boxer run -c x; }",
+		"sudo BOXER_INSIDE=1 boxer run -c x",
+		"nohup env BOXER_INSIDE=1 boxer run -c x",
+		"trap 'export BOXER_MODE=off' EXIT",
+		"watch 'BOXER_INSIDE=1 boxer run -c x'",
+		"declare -n r=BOXER_MODE; r=off",
+		"BOXER_MODE[0]=off",
+		"env -S 'BOXER_MODE=off ls'",
 	} {
 		if d := Decide(with(c, nil)); d.Action != Block || !strings.Contains(d.Reason, "BOXER_") {
 			t.Errorf("%q: %+v", c, d)
@@ -311,6 +372,16 @@ func TestNamedByPath(t *testing.T) {
 		"cd packages/node && npm test":    false, // a path elsewhere in the line is not the program
 		"sh -c '/opt/homebrew/bin/npm i'": true,
 		`echo "unterminated`:              true, // unreadable: a block-only harness refuses it
+		// The line chooses where a bare name is found, so a shim on PATH never sees it.
+		"PATH=/opt/homebrew/bin npm i":                true,
+		"env PATH=/opt/homebrew/bin npm i":            true,
+		"export PATH=/x:$PATH; npm i":                 true,
+		"PATH=/usr/bin; hash -p /real/npm npm; npm i": true,
+		"command -p npm i":                            true,
+		"env -P /opt/homebrew/bin npm i":              true,
+		"echo $PATH":                                  false,
+		"echo $(PATH=/x npm i)":                       true,
+		"sh -c 'PATH=/x npm i'":                       true,
 	} {
 		if got := NamedByPath(c, in); got != want {
 			t.Errorf("%q: %v", c, got)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,33 +188,57 @@ func TestPodmanIsTheSameDriverWithADifferentBinary(t *testing.T) {
 // A secret's value must never reach the argument vector. That is the whole reason this path
 // exists, so it is asserted directly: the file carries the value, the value is named only by
 // environment variable elsewhere, and nothing but this user can read the file.
-func TestASecretGoesThroughAFileRatherThanTheArgumentVector(t *testing.T) {
-	t.Setenv("BOXER_TEST_TOKEN", "hunter2")
-	path, err := vm.SecretFileForTest([]string{"TOK=BOXER_TEST_TOKEN", "ABSENT=BOXER_TEST_UNSET"})
+func TestASecretGoesByNameRatherThanInTheArgumentVector(t *testing.T) {
+	t.Setenv("BOXER_TEST_TOKEN", "hunter2\nline two")
+	t.Setenv("BOXER_TEST_HOSTLIKE", "tcp://x")
+	args, env, path, err := vm.SecretFlagsForTest([]string{"TOK=BOXER_TEST_TOKEN", "ABSENT=BOXER_TEST_UNSET", "DOCKER_X=BOXER_TEST_HOSTLIKE"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(path)
-
+	if strings.Contains(strings.Join(args, " "), "hunter2") || !slices.Contains(args, "TOK") {
+		t.Fatalf("the value must stay out of argv, the name in it: %v", args)
+	}
+	// Several lines arrive whole: an --env-file cut them at the first newline.
+	if !slices.Contains(env, "TOK=hunter2\nline two") {
+		t.Errorf("value not forwarded whole: %q", env)
+	}
+	// A name the host does not set is omitted, not forwarded as empty: the two mean different
+	// things to the program that reads them.
+	if strings.Contains(strings.Join(append(args, env...), " "), "ABSENT") {
+		t.Errorf("an unset secret was forwarded anyway: %v %v", args, env)
+	}
+	// A name the CLI would read as its own setting goes through a file only this user can read.
 	st, err := os.Stat(path)
-	if err != nil {
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("a file holding a secret: %v %v", err, st)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "DOCKER_X=tcp://x\n" || slices.Contains(env, "DOCKER_X=tcp://x") {
+		t.Errorf("file %q env %v", b, env)
+	}
+	t.Setenv("BOXER_TEST_HOSTLIKE", "a\nb")
+	if _, _, _, err := vm.SecretFlagsForTest([]string{"DOCKER_X=BOXER_TEST_HOSTLIKE"}); err == nil || strings.Contains(err.Error(), "a\nb") {
+		t.Errorf("refused by name only: %v", err)
+	}
+}
+
+// A secret of several lines reaches the guest whole on a real daemon.
+func TestAMultiLineSecretReachesTheGuest(t *testing.T) {
+	d := daemon(t, "docker")
+	name := "boxer-test-secret"
+	_ = d.Delete(name)
+	t.Cleanup(func() { _ = d.Delete(name) })
+	if err := d.Create(vm.CreateSpec{Name: name, Image: testImage, CPUs: 1, MemoryMiB: 256}); err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm() != 0o600 {
-		t.Errorf("a file holding a secret is %v, want 0600", st.Mode().Perm())
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
+	if err := d.Start(name); err != nil {
 		t.Fatal(err)
 	}
-	got := string(b)
-	if !strings.Contains(got, "TOK=hunter2\n") {
-		t.Errorf("value not forwarded: %q", got)
-	}
-	// A name the host does not set must be omitted, not forwarded as empty — an empty value and
-	// an unset variable mean different things to the program that reads them.
-	if strings.Contains(got, "ABSENT") {
-		t.Errorf("an unset secret was forwarded anyway: %q", got)
+	t.Setenv("BOXER_TEST_PEM", "-----BEGIN KEY-----\nabc def\n-----END KEY-----")
+	var out bytes.Buffer
+	code, err := d.Exec(vm.ExecOpts{Name: name, SecretEnv: []string{"PEM=BOXER_TEST_PEM"}, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", `printf %s "$PEM"`)
+	if err != nil || code != 0 || out.String() != "-----BEGIN KEY-----\nabc def\n-----END KEY-----" {
+		t.Fatalf("%d %v %q", code, err, out.String())
 	}
 }
 
@@ -241,6 +266,9 @@ func TestDockerWordingMapsOntoTheConditionItMeans(t *testing.T) {
 		{`Conflict. The container name "/sb-x" is already in use`, vm.ErrAlreadyExists},
 		{"Error response from daemon: Container sb-x is not running", vm.ErrNotRunning},
 		{"disk on fire", nil},
+		// A pull before the create reports cached layers; the failure after it is not a race.
+		{"Unable to find image 'x' locally\n9a1b: Already exists\nError response from daemon: invalid mount config", nil},
+		{"9a1b: Already exists\nError: creating container storage: the container name \"sb-x\" is already in use", vm.ErrAlreadyExists},
 	} {
 		if got := vm.ClassifyDockerForTest(tc.said); !errors.Is(got, tc.want) {
 			t.Errorf("%q\n  is   %v\n  want %v", tc.said, got, tc.want)
@@ -277,19 +305,24 @@ func TestATimeoutEndsTheWholeCommandOnBusybox(t *testing.T) {
 	if err := d.Start(name); err != nil {
 		t.Fatal(err)
 	}
+	// A child whose process name has spaces, as npm gives itself; its own children must go too.
 	var out bytes.Buffer
+	if code, _ := d.Exec(vm.ExecOpts{Name: name, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", `printf '#!/bin/sh\nsleep 304\n' > "/tmp/npm run lint" && chmod +x "/tmp/npm run lint"`); code != 0 {
+		t.Fatal(out.String())
+	}
+	out.Reset()
 	start := time.Now()
 	code, err := d.Exec(vm.ExecOpts{Name: name, Timeout: 2 * time.Second, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out},
-		"sh", "-c", "sleep 300 & sh -c 'sleep 302 & sleep 303' & sleep 301")
+		"sh", "-c", "sleep 300 & sh -c 'sleep 302 & sleep 303' & '/tmp/npm run lint' & sleep 301")
 	if err != nil || code != 137 || time.Since(start) > 10*time.Second {
 		t.Fatalf("a timed-out command exits 137 at its deadline: code %d err %v after %s: %s", code, err, time.Since(start), out.String())
 	}
 	out.Reset()
-	if code, _ := d.Exec(vm.ExecOpts{Name: name, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", "sleep 1; ps -o args | grep '^sleep 30'"); code != 1 || out.Len() != 0 {
+	if code, _ := d.Exec(vm.ExecOpts{Name: name, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", "sleep 2; ps -o args | grep '[s]leep 30\\|[n]pm run'"); code != 1 || out.Len() != 0 {
 		t.Fatalf("nothing it started may be left running: %s", out.String())
 	}
 	out.Reset()
-	if code, _ := d.Exec(vm.ExecOpts{Name: name, Timeout: 30 * time.Second, Stdin: strings.NewReader("hi\n"), Stdout: &out, Stderr: &out}, "sh", "-c", "cat; exit 7"); code != 7 || out.String() != "hi\n" {
+	if code, _ := d.Exec(vm.ExecOpts{Name: name, Timeout: 30 * time.Second, Stdin: strings.NewReader("hi\n"), Stdout: &out, Stderr: &out}, "sh", "-c", "cat; grep -q '^SigIgn:.*0000$' /proc/self/status || echo ignores-interrupt; exit 7"); code != 7 || out.String() != "hi\n" {
 		t.Fatalf("under a deadline, stdin and the exit code pass through: %d %q", code, out.String())
 	}
 }

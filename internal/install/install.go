@@ -189,6 +189,9 @@ func Install(harness string, cfg config.Config, version, root string) (Result, e
 // homes from: Paperclip copies `~/.claude/settings.json` (not `plugins/`) and `~/.codex/config.toml`
 // (not `hooks.json`). Codex user-level hooks also need no project trust.
 func User(harness string, cfg config.Config, version string) (Result, error) {
+	if err := userDirFor(harness); err != nil {
+		return Result{}, err
+	}
 	tmp, err := os.MkdirTemp("", "boxer-install-")
 	if err != nil {
 		return Result{}, err
@@ -258,28 +261,36 @@ func parts(tmp, harness string) (ns, hooksFile string, hooks map[string]any, ski
 	return
 }
 
-func claudeHome() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return d
+func claudeHome() string  { return userDir("CLAUDE_CONFIG_DIR", ".claude") }
+func copilotHome() string { return userDir("COPILOT_HOME", ".copilot") }
+func codexHome() string   { return userDir("CODEX_HOME", ".codex") }
+
+// userDir is a harness's user-level directory: the variable when set, else under the home
+// directory. "" when that is not an absolute path: with HOME unset the join was relative, and
+// `install --user` edited the repository's own .claude/settings.json instead.
+func userDir(env, sub string) string {
+	d := os.Getenv(env)
+	if d == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		d = filepath.Join(home, sub)
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
+	if !filepath.IsAbs(d) {
+		return ""
+	}
+	return d
 }
 
-func copilotHome() string {
-	if d := os.Getenv("COPILOT_HOME"); d != "" {
-		return d
+// userDirFor refuses a user-level install whose directory cannot be found.
+func userDirFor(harness string) error {
+	dir, env := map[string]func() string{"claude-code": claudeHome, "codex": codexHome, "copilot": copilotHome}[harness],
+		map[string]string{"claude-code": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "copilot": "COPILOT_HOME"}[harness]
+	if dir != nil && dir() == "" {
+		return fmt.Errorf("cannot find %s's user directory: set HOME, or %s, to an absolute path", harness, env)
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".copilot")
-}
-
-func codexHome() string {
-	if d := os.Getenv("CODEX_HOME"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".codex")
+	return nil
 }
 
 const (
@@ -339,7 +350,8 @@ func (r *Result) replaceBlock(path, blockStart, blockEnd, block string) error {
 			}
 			s = s[:i] + block + s[end:]
 		} else {
-			s = s[:i] + block
+			// Everything after the start marker would go, and what follows it is someone's.
+			return fmt.Errorf("%s has boxer's start marker but not its end marker (%q); restore the end marker or remove boxer's block by hand", path, strings.TrimSpace(blockEnd))
 		}
 	} else {
 		if len(s) > 0 && !strings.HasSuffix(s, "\n") {
@@ -415,40 +427,27 @@ func (r *Result) mergeHooksFile(path string, hooks map[string]any) {
 	}
 }
 
-// mergeHooks adds boxer's hook groups to m["hooks"], event by event, skipping a group when one
-// with the same matcher already invokes boxer, so a second install changes nothing. The matcher is
-// part of the comparison because one event can carry more than one boxer group (Copilot hooks both
-// `bash` and `powershell` on preToolUse).
+// mergeHooks puts boxer's hook groups in m["hooks"], event by event, in place of whatever boxer
+// installed there before: its entries are taken out of every group, the user's are kept, and this
+// release's groups are added. A second install changes nothing, and an upgrade whose matcher
+// changed ("Bash" to "Bash|Monitor") replaces the old group instead of adding a second one that
+// ran the hook twice for every Bash command.
 func mergeHooks(m map[string]any, ours any) {
 	existing, _ := m["hooks"].(map[string]any)
 	if existing == nil {
 		existing = map[string]any{}
 	}
 	for event, groups := range ours.(map[string]any) {
-		cur, _ := existing[event].([]any)
-		for _, g := range groups.([]any) {
-			matcher, _ := g.(map[string]any)["matcher"].(string)
-			if !hasBoxer(cur, matcher) {
+		var cur []any
+		for _, g := range asSlice(existing[event]) {
+			if g = withoutBoxerHooks(g); g != nil {
 				cur = append(cur, g)
 			}
 		}
+		cur = append(cur, groups.([]any)...)
 		existing[event] = cur
 	}
 	m["hooks"] = existing
-}
-
-func hasBoxer(groups []any, matcher string) bool {
-	for _, g := range groups {
-		gm, _ := g.(map[string]any)
-		if m, _ := gm["matcher"].(string); m != matcher {
-			continue
-		}
-		b, _ := json.Marshal(g)
-		if strings.Contains(string(b), "boxer hook") {
-			return true
-		}
-	}
-	return false
 }
 
 func setIn(m map[string]any, section, key string, v any) {

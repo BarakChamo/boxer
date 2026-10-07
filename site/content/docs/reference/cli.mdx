@@ -214,12 +214,14 @@ boxer gc [--all] [--dry-run] [--json]
 ```
 
 Deletes sandboxes whose worktree is gone, fork children whose parent is gone, the named
-[`volumes`](/docs/reference/configuration#volumes) of worktrees gone for 7 days, and environment
-packs past [`idle_timeout`](/docs/reference/configuration#idle_timeout) or beyond
+[`volumes`](/docs/reference/configuration#volumes) of worktrees gone for 7 days, and packs past
+[`idle_timeout`](/docs/reference/configuration#idle_timeout) or beyond
 [`packs_keep_last`](/docs/reference/configuration#packs_keep_last). A running sandbox unused for
-`idle_timeout` is stopped, or deleted with
-[`idle_action = "delete"`](/docs/reference/configuration#idle_action). It never deletes a
-[named pack](#boxer-pack).
+its own repository's `idle_timeout` is stopped, or deleted with
+[`idle_action = "delete"`](/docs/reference/configuration#idle_action). It skips a sandbox a command
+is provisioning, a parent whose fork child is in use, and a pack a create is using. It never
+deletes a [named pack](#boxer-pack). It looks only at the configured backend; a sandbox left on
+another one after `backend` changed is named the next time this worktree's sandbox is created.
 
 | Flag | Default | |
 | --- | --- | --- |

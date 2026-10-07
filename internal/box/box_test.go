@@ -116,6 +116,11 @@ func TestSetupFailureDeletesVM(t *testing.T) {
 	if _, exists, _ := e2.Exists(); !exists {
 		t.Fatal("a failed worktree setup must leave the VM alone")
 	}
+	// And the next command sets it up again: a running sandbox whose setup failed is not ready.
+	_, err = e2.Ensure(true, false)
+	if be, ok := err.(*Error); !ok || be.Cause != "SETUP_FAILED" {
+		t.Fatalf("a running sandbox whose setup failed must run setup again, got %v", err)
+	}
 }
 
 func TestRequireWorktree(t *testing.T) {
@@ -246,7 +251,7 @@ func TestHarnessPackSkipsInstallOnNextVM(t *testing.T) {
 	}
 	e.PackHarness()
 	image, _ := e.Image()
-	side := PackPath(harnessKey(image, "claude"))
+	side := PackPath(harnessKey(image, "claude", nil))
 	if _, err := os.Stat(side); err != nil {
 		t.Fatalf("harness pack not written: %v", err)
 	}
@@ -465,7 +470,7 @@ func TestPackHarnessReportsFailureAndRestarts(t *testing.T) {
 		t.Fatalf("the VM must be running again after a failed pack: %+v", m)
 	}
 	image, _ := e.Image()
-	if _, err := os.Stat(PackPath(harnessKey(image, "claude"))); err == nil {
+	if _, err := os.Stat(PackPath(harnessKey(image, "claude", nil))); err == nil {
 		t.Fatal("a failed pack must leave no pack behind")
 	}
 	b, _ := os.ReadFile(log)
@@ -1397,3 +1402,80 @@ func TestUnsetSecretIsNamedOnce(t *testing.T) {
 // launches counts the start services launched, from the fake's log: one line per launch, however
 // the command itself is quoted inside the supervisor.
 func launches(log string) int { return strings.Count(log, "mkdir -p "+serviceDir+" && sh -c") }
+
+// A harness pack is taken after image_setup ran, so another repository's sandbox may boot from it
+// only when its image_setup is the same: otherwise it would inherit these packages and skip its own.
+func TestHarnessPackIsNotSharedAcrossImageSetups(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	vmtest.Install(t)
+	a := vmtest.Repo(t, "require_worktree = \"off\"\nintegration = \"inside\"\nimage_setup = [\"echo a-tools\"]\n")
+	ea, _ := Resolve(a, "claude", scope.Identity{})
+	ea.Stderr = &bytes.Buffer{}
+	if _, err := ea.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	ea.PackHarness()
+	image, _ := ea.Image()
+	if ea.harnessPack(image) == "" {
+		t.Fatal("repository a must have a harness pack")
+	}
+	b := vmtest.Repo(t, "require_worktree = \"off\"\nintegration = \"inside\"\nimage_setup = [\"echo b-tools\"]\n")
+	eb, _ := Resolve(b, "claude", scope.Identity{})
+	if got := eb.harnessPack(image); got != "" {
+		t.Fatalf("repository b, with other image_setup, would boot a's harness pack %s", got)
+	}
+}
+
+// A worktree of a bare repository reads no configuration from the directory the bare repository
+// sits in: the parent of proj.git is not the repository's, and its boxer.toml is someone else's.
+func TestBareRepositoryWorktreeReadsNothingBesideIt(t *testing.T) {
+	vmtest.Install(t)
+	parent := t.TempDir()
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	seed := filepath.Join(parent, "seed")
+	_ = os.MkdirAll(seed, 0o755)
+	git(seed, "init", "-q")
+	_ = os.WriteFile(filepath.Join(seed, "f"), []byte("x"), 0o644)
+	git(seed, "add", "f")
+	git(seed, "commit", "-qm", "i")
+	git(parent, "clone", "-q", "--bare", seed, "proj.git")
+	git(filepath.Join(parent, "proj.git"), "worktree", "add", "-q", filepath.Join(parent, "wt"))
+	if err := os.WriteFile(filepath.Join(parent, "boxer.toml"), []byte("image = \"not-this-repos\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := Resolve(filepath.Join(parent, "wt"), "", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Cfg.Image == "not-this-repos" {
+		t.Fatal("read the boxer.toml beside the bare repository")
+	}
+}
+
+// A worktree whose backend changed still has its sandbox on the old one, running where nothing on
+// the new backend sees it: the create says so and how to remove it.
+func TestASandboxLeftOnAnotherBackendIsNamed(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	e, _ := Resolve(dir, "", scope.Identity{})
+	setCreatedOn(e.Scope.Key, "podman")
+	var errb bytes.Buffer
+	e.Stderr = &errb
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errb.String(), "BOXER_BACKEND=podman boxer down") {
+		t.Fatalf("no warning:\n%s", errb.String())
+	}
+	if createdOn(e.Scope.Key) != e.VM.Name() {
+		t.Fatal("the record names the new backend")
+	}
+}

@@ -192,6 +192,8 @@ case "$verb" in
     [ -n "$add" ] && echo "$add" > "$dir/$name.volume"
     : ;;
   "machine exec")
+    # KillExecOnce: the CLI itself dies by a signal, as when it is interrupted or killed.
+    [ -f "$FAKE_STATE.killexec" ] && { rm -f "$FAKE_STATE.killexec"; kill -KILL $$; }
     name=""; secrets=""; shift 2
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -258,6 +260,14 @@ case "$verb" in
     echo "${FAKE_VERSION:-smolvm 0.0.0-fake}" ;;
 esac
 `
+
+// KillExecOnce makes the next `machine exec` end by SIGKILL before it reports anything.
+func KillExecOnce(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(os.Getenv("FAKE_STATE")+".killexec", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // FailExecOnce makes the next exec whose argv contains text fail with smolvm's "connection closed".
 func FailExecOnce(t *testing.T, text string) {

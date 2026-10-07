@@ -236,3 +236,34 @@ func TestAFailedSaveKeepsTheEarlierPack(t *testing.T) {
 		t.Fatalf("a failed save left its temporary behind: %v", left)
 	}
 }
+
+// --rebuild drops the environment pack of a built image. On smolvm the pack is keyed by the
+// archive, which a fresh process has not built yet, so the drop missed it and the rebuild booted
+// the stale pack.
+func TestRebuildDropsTheEnvironmentPackOfABuiltImage(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	vmtest.Install(t)
+	fakeDocker(t, "0123456789abcdef0123")
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"build = \"Dockerfile\"\nimage_setup = [\"echo tools\"]\n")
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := Resolve(dir, "", scope.Identity{})
+	e.Stderr = io.Discard
+	if _, err := e.Ensure(true, false); err != nil {
+		t.Fatal(err)
+	}
+	img, _ := e.Image()
+	pack := PackPath(EnvKey(img, e.Cfg))
+	if !packReady(pack) {
+		t.Fatalf("image_setup must have been packed at %s", pack)
+	}
+	fresh, _ := Resolve(dir, "", scope.Identity{})
+	if got, err := fresh.DropEnvPack(); err != nil || got != pack {
+		t.Fatalf("drop: %q %v, want %q", got, err, pack)
+	}
+	if packReady(pack) {
+		t.Fatal("the pack is still there")
+	}
+}

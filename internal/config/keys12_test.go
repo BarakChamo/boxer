@@ -33,12 +33,22 @@ func TestNewKeysDefaultAndValidate(t *testing.T) {
 		"build = \"Dockerfile\"\nsmolfile = \"Smolfile\"",
 		`user = "node; rm -rf /"`,
 		`user = "a b"`,
+		`intercept_also = ["npm i"]`,
+		"intercept_also = [\"x\\nrm\"]",
+		`passthrough = ["git;rm"]`,
+		"[network]\nports = [\"70000:3000\"]",
+		`mount_at = "workspace"`,
+		"[env]\n\"A-B\" = \"1\"",
+		`secrets = ["TOKEN=x"]`,
+		`packs_keep_last = -1`,
+		`reclaim_every = "0s"`,
 	} {
 		if _, err := load(t, bad); err == nil {
 			t.Errorf("%s must be refused", bad)
 		}
 	}
-	for _, good := range []string{`volumes = ["pg-data_1:/var/lib/postgresql/data"]`, `user = "first.last"`, `user = "1000:1000"`, `user = "node:staff"`} {
+	for _, good := range []string{`volumes = ["pg-data_1:/var/lib/postgresql/data"]`, `user = "first.last"`, `user = "1000:1000"`, `user = "node:staff"`,
+		`intercept_also = ["g++", "python3.12"]`, "[network]\nports = [\"127.0.0.1:8080:3000\", \"65535:3000/udp\"]"} {
 		if _, err := load(t, good); err != nil {
 			t.Fatal(err)
 		}
@@ -127,5 +137,20 @@ func TestHarnessTablesMergeAcrossLayers(t *testing.T) {
 	}
 	if h := c.Harness["claude"]; h.Mode != "tool" || h.Enforcement != "hook" {
 		t.Fatalf("got %+v", h)
+	}
+}
+
+// [harness.claude-code] configures `boxer shell claude` too, and a misspelt table is refused.
+func TestHarnessTablesByEitherName(t *testing.T) {
+	RegisterHarnessAlias("claude", "claude-code") // what package inside registers
+	c, err := load(t, "[harness.claude-code]\nmode = \"tool\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.ForHarness("claude"); got.Mode != "tool" || c.Sources["mode"] == "harness.claude-code" {
+		t.Fatalf("mode %q, and the caller's sources must be left alone: %q", got.Mode, c.Sources["mode"])
+	}
+	if _, err := load(t, "[harness.cladue-code]\nmode = \"tool\"\n"); err == nil {
+		t.Fatal("a misspelt harness table must be refused")
 	}
 }

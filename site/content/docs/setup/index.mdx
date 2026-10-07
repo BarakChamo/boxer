@@ -26,7 +26,8 @@ follow its [orchestrator page](/docs/orchestrators).
 ## What every setup has in common
 
 1. **Commit what `boxer install` writes.** A worktree is cut from a branch. If the integration is
-   not on the branch, the agent in that worktree runs on your machine.
+   not on the branch, the agent in that worktree runs on your machine. Codex is the exception: it
+   reads hooks from the main checkout, so every worktree of it is covered either way.
 2. **Run `boxer doctor`.** It lists the integrations it finds and warns about any that will not
    hold.
 3. **Expect the first session to wait.** It boots the sandbox and runs `setup` before the agent

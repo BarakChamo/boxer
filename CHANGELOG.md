@@ -6,10 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Fixes from a third full review (hook paths, destructive paths, concurrency, the CLI contract and
-guest-script portability), each finding reproduced or covered by a test.
+Fixes from a third and a fourth full review, each finding reproduced or covered by a test.
 
 ### Security
+- The command reader follows `trap` lines, function bodies, `coproc`, `$'...'` quoting, `$(...)`
+  inside array indexes (which arithmetic runs, even from a quoted string), `taskset`, `chrt` and
+  `busybox`, and long and combined wrapper options (`sudo --user root`, `sudo -Eu root`,
+  `env --chdir`, `timeout --signal KILL`). A wrapper option it does not know, or an `alias`, makes
+  the line unreadable, so it is sandboxed.
+- Setting a containment variable is refused in more forms: `+=`, `printf -v`, `read`, an index,
+  a nameref, and after `!`, `if`, `{`, `sudo`, `command`, `builtin`, `trap` and `watch`.
+- Kimi and DSH no longer let a line through to the shims when it changes where a name is looked
+  up: `PATH=... npm`, `export PATH=...`, `hash -p`, `command -p`, `env -P`.
+- Secrets on docker, podman and Apple container are passed by name through the CLI's environment.
+  A secret of several lines arrives whole; through the env-file it was cut short, and the runtime's
+  error quoted the rest.
+- A devcontainer's `"NAME": "${localEnv:NAME}"` becomes a secret instead of being baked into the
+  environment pack.
+- A harness cache made in one repository is not used by another with a different `image_setup`.
+- `intercept`, `intercept_also` and `passthrough` names, `[env]`, `secrets` and `env_passthrough`
+  names, `mount_at`, ports and counts are validated; a program name reaches the shims' scripts.
 - Claude Code's `Monitor` tool runs shell commands and is now routed through the hook like `Bash`.
   Kimi's `Shell` tool is refused in the same way as its other shell tool.
 - `require_worktree` and an unresolved scope refuse a command even under
@@ -20,6 +36,30 @@ guest-script portability), each finding reproduced or covered by a test.
 - `user` in `boxer.toml` must be a user name or `uid[:gid]`; it reaches the guest's shell unquoted.
 
 ### Fixed
+- A sandbox whose setup failed or was interrupted is set up again by the next command, instead of
+  being taken as ready because it is running.
+- gc judges each sandbox by its own repository's `idle_timeout` and `idle_action`; the sweep a
+  command started used that command's, so one repository could delete every other's sandboxes. A
+  parent whose fork child is in use is kept, and a recreated sandbox can be reclaimed again.
+- `down --scope` and `fork rm` forget the sandbox's state like every other delete, and `stop`
+  clears the branchable mark.
+- `run --scope <fork child>` no longer runs `prep` and `setup` into the parent's worktree again.
+- `--rebuild` with `build` on smolvm drops the cached environment; old image archives are swept.
+- A guest deadline runs the command in the foreground, so SIGINT reaches it, and finds children
+  whose process name has spaces. The start marker includes the kernel's boot id.
+- `boxer run --tty` ends when the guest does; it waited for the next keystroke after the guest had
+  exited.
+- A runtime CLI ended by a signal is a backend failure, not a command that exited -1.
+- docker's pull output is no longer read as a lost race, and only smolvm's last line is taken for
+  its own error.
+- `boxer_run` output is bounded to its first and last 64 KB. `pkg/boxer` accepts nil streams.
+- Installing over an older boxer replaces its hook group rather than adding a second one; an edit
+  whose end marker is gone is refused rather than truncating the file; a user-level install with no
+  home directory is refused. No state is ever kept relative to the current directory.
+- `[harness.claude]` and `[harness.claude-code]` configure the same harness, and an unknown
+  harness name is an error. A worktree of a bare repository reads no configuration beside it. A
+  devcontainer.json with a byte-order mark loads.
+- A sandbox left on another backend after `backend` changed is named when the new one is created.
 - Services were never launched again after a sandbox was stopped and started on docker, podman
   and Apple container (idle reclaim, `boxer stop` then `boxer up`): the start marker survived in
   the container's `/tmp`. It now records the boot it belongs to.

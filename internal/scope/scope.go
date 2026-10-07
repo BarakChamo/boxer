@@ -23,6 +23,16 @@ type Git struct {
 	Linked    bool
 }
 
+// RepoRoot is the main working tree that holds the repository's own boxer.toml: the parent of a
+// `.git` common directory. A bare repository has no working tree, and the parent of `proj.git`
+// is whatever directory it sits in, whose files are not the repository's; it returns "".
+func (g Git) RepoRoot() string {
+	if g.CommonDir == "" || filepath.Base(g.CommonDir) != ".git" {
+		return ""
+	}
+	return filepath.Dir(g.CommonDir)
+}
+
 // Detect asks git about cwd. A non-repository is not an error; Toplevel is simply empty.
 func Detect(cwd string) (Git, error) {
 	if g, ok := detectFast(cwd); ok {

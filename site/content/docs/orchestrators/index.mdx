@@ -36,7 +36,8 @@ This adds a `post-checkout` hook that runs `boxer up --detach` in every new work
 sandbox is booting before the agent starts. Without it, the first command waits for a cold boot.
 T3 Code times out on that and needs it. For the others it only saves time. `boxer install all` does not do this, so run it separately.
 
-**3. Put `boxer` on the orchestrator's `PATH`.** Hooks and shims call `boxer`. See below.
+**3. Put `boxer` on the orchestrator's `PATH`.** Hooks and shims call `boxer`, and boxer calls
+your backend's program (`smolvm`, `docker`), so both must be where the orchestrator looks. See below.
 
 ## Put boxer on the orchestrator's PATH
 
@@ -67,7 +68,8 @@ repository with `image_setup` caches the result, so the next worktree skips it.
 
 Orchestrators delete worktrees without telling boxer. boxer's background sweep (`auto_reclaim`,
 every 6 hours by default) removes their sandboxes. To do it now, `boxer rm --gone -A` removes only sandboxes whose worktree is gone, on every
-backend. `boxer gc` also removes idle sandboxes and unused caches.
+backend. `boxer gc` also stops idle sandboxes (or deletes them, with
+[`idle_action = "delete"`](/docs/reference/configuration#idle_action)) and removes unused caches.
 
 ```sh
 boxer rm --gone -A

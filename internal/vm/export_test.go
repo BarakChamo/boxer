@@ -3,7 +3,7 @@ package vm
 // Exported for tests in the vm_test package: both are unexported implementation details whose
 // behaviour is worth asserting directly, because getting either wrong is silent.
 var (
-	SecretFileForTest     = secretFile
+	SecretFlagsForTest    = secretFlags
 	ClassifyDockerForTest = classifyDocker
 )
 var ClassifyAppleForTest = classifyApple
@@ -16,3 +16,4 @@ var WithSELinuxLabelForTest = withSELinuxLabel
 
 // LoopbackPortForTest exposes how a publish spec is bound on the container backends.
 var LoopbackPortForTest = loopbackPort
+var SmolvmFailureForTest = smolvmFailure

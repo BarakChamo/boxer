@@ -20,9 +20,9 @@ var containment = map[string]bool{
 }
 
 // setsBoxerEnv reports a line that assigns a containment variable: as a prefix (`BOXER_X=1 cmd`),
-// or as an argument to export, env, declare, typeset, readonly or local, at any depth the reader
-// reaches. Only an assignment counts: `grep -rn BOXER_MODE= .` and `echo "BOXER_INSIDE=1"` name
-// one without setting it.
+// as an argument to export, env, declare, typeset, readonly or local, through `printf -v` or
+// `read`, or as a bare name those export, at any depth the reader reaches. Only setting counts:
+// `grep -rn BOXER_MODE= .` and `echo "BOXER_INSIDE=1"` name one without setting it.
 func setsBoxerEnv(cmd string, depth int) bool {
 	if depth > maxDepth {
 		return false
@@ -36,33 +36,102 @@ func setsBoxerEnv(cmd string, depth int) bool {
 			return true
 		}
 	}
-	dangerous := func(w string) bool {
-		name, _, found := strings.Cut(w, "=")
-		return found && containment[name]
-	}
 	for _, words := range cmds {
-		k := 0
-		for k < len(words) && isAssignment(words[k]) {
-			if dangerous(words[k]) {
+		if setsInWords(words, depth) {
+			return true
+		}
+	}
+	return false
+}
+
+// varName is the variable a word names or assigns: `BOXER_MODE+=x`, `BOXER_MODE[0]=x` and
+// `BOXER_MODE` are all BOXER_MODE.
+func varName(w string) string {
+	name, _, _ := strings.Cut(w, "=")
+	name = strings.TrimSuffix(name, "+")
+	if k := strings.IndexByte(name, '['); k > 0 {
+		name = name[:k]
+	}
+	return name
+}
+
+func setsInWords(words []string, depth int) bool {
+	k := 0
+	for k < len(words) {
+		w := words[k]
+		switch {
+		case strings.Contains(w, "=") && isAssignment(varName(w)+"=x"):
+			if containment[varName(w)] {
 				return true
 			}
 			k++
-		}
-		if k >= len(words) {
+			continue
+		case keywords[w]:
+			k++
 			continue
 		}
-		switch path.Base(words[k]) {
-		case "export", "env", "declare", "typeset", "readonly", "local":
-			for _, a := range words[k+1:] {
-				if dangerous(a) {
+		if _, ok := wrappers[path.Base(w)]; ok && path.Base(w) != "env" {
+			j, ok := skipWrapper(path.Base(w), words[k+1:])
+			if !ok {
+				j = 0
+			}
+			for _, a := range words[k+1 : k+1+min(j, len(words)-k-1)] {
+				if isAssignment(a) && containment[varName(a)] { // sudo VAR=value cmd
 					return true
 				}
 			}
-		case "sh", "bash", "zsh", "dash", "ksh", "ash", "eval":
-			for _, a := range words[k+1:] {
-				if !strings.HasPrefix(a, "-") && setsBoxerEnv(a, depth+1) {
-					return true
-				}
+			k += 1 + j
+			continue
+		}
+		break
+	}
+	if k >= len(words) {
+		return false
+	}
+	args := words[k+1:]
+	switch path.Base(words[k]) {
+	case "export", "declare", "typeset", "readonly", "local":
+		for _, a := range args {
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			// A bare name exports whatever this line set it to; a nameref (`declare -n r=BOXER_MODE`)
+			// makes another name set it.
+			_, val, _ := strings.Cut(a, "=")
+			if containment[varName(a)] || containment[val] {
+				return true
+			}
+		}
+	case "env":
+		for _, a := range args {
+			if isAssignment(a) && containment[varName(a)] {
+				return true
+			}
+		}
+		for j, a := range args {
+			if (a == "-S" || a == "--split-string") && j+1 < len(args) && setsBoxerEnv(args[j+1], depth+1) {
+				return true
+			}
+		}
+		if j, ok := skipWrapper("env", args); ok && j < len(args) {
+			return setsInWords(args[j:], depth)
+		}
+	case "printf":
+		for j, a := range args {
+			if a == "-v" && j+1 < len(args) && containment[varName(args[j+1])] {
+				return true
+			}
+		}
+	case "read", "mapfile", "readarray":
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") && containment[varName(a)] {
+				return true
+			}
+		}
+	case "sh", "bash", "zsh", "dash", "ksh", "ash", "eval", "trap", "watch", "su", "script":
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") && setsBoxerEnv(a, depth+1) {
+				return true
 			}
 		}
 	}
@@ -160,13 +229,44 @@ func needsSandbox(cmd string, intercept, passthrough []string) bool {
 // counts, so a block-only harness refuses it rather than trust a shim.
 func NamedByPath(cmd string, intercept []string) bool {
 	progs, ok := programs(cmd, 0)
-	if !ok {
+	if !ok || choosesPath(cmd) {
 		return true
 	}
 	all := len(intercept) == 1 && intercept[0] == "*"
 	for _, raw := range progs {
 		if strings.Contains(raw, "/") && (all || slices.Contains(intercept, path.Base(raw))) {
 			return true
+		}
+	}
+	return false
+}
+
+// choosesPath reports a line that changes where a bare name is looked up, which a PATH shim then
+// never sees: `PATH=/opt/homebrew/bin npm i`, `export PATH=...`, `env -P dir npm`, `command -p npm`,
+// `hash -p /real/npm npm`. Called only on a line programs could read, so every part of it lexes
+// and the nesting is bounded.
+func choosesPath(cmd string) bool {
+	cmds, subs, _ := lex(cmd)
+	for _, sub := range subs {
+		if choosesPath(sub) {
+			return true
+		}
+	}
+	for _, words := range cmds {
+		for j, w := range words {
+			if varName(w) == "PATH" && strings.Contains(w, "=") {
+				return true
+			}
+			if j+1 < len(words) && words[j+1] == "-p" && (w == "command" || w == "hash") || w == "env" && j+1 < len(words) && words[j+1] == "-P" {
+				return true
+			}
+			if shells[path.Base(w)] || w == "eval" {
+				for _, a := range words[j+1:] {
+					if !strings.HasPrefix(a, "-") && choosesPath(a) {
+						return true
+					}
+				}
+			}
 		}
 	}
 	return false

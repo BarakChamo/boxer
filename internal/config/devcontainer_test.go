@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -403,5 +404,34 @@ func TestDevcontainerReviewFindings(t *testing.T) {
 	writeDC(t, wt, `{"image":"worktree-image"}`)
 	if c, _ := Load(wt, repo); c.Image != "worktree-image" {
 		t.Fatalf("the worktree's devcontainer must win: %q", c.Image)
+	}
+}
+
+// A byte-order mark, which Windows editors write and VS Code accepts, is not a broken file.
+func TestDevcontainerWithAByteOrderMark(t *testing.T) {
+	dir := t.TempDir()
+	writeDC(t, dir, "\xef\xbb\xbf{\"image\": \"python:3.12\"}")
+	c, err := Load(dir, dir)
+	if err != nil || c.Image != "python:3.12" {
+		t.Fatalf("%v %q", err, c.Image)
+	}
+}
+
+// A devcontainer passes a host secret as "NAME": "${localEnv:NAME}". As env it was baked into the
+// environment pack and passed on the command line; it becomes a secret, read by name at run time.
+func TestDevcontainerHostSecretsBecomeSecrets(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	dir := t.TempDir()
+	writeDC(t, dir, `{"image": "alpine", "containerEnv": {"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}", "MODE": "dev"},
+		"remoteEnv": {"AUTH": "Bearer ${localEnv:GITHUB_TOKEN}"}}`)
+	c, err := Load(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Env["GITHUB_TOKEN"]; ok || !slices.Contains(c.Secrets, "GITHUB_TOKEN") || c.Env["MODE"] != "dev" {
+		t.Fatalf("env %v secrets %v", c.Env, c.Secrets)
+	}
+	if !strings.Contains(strings.Join(c.Warnings, "\n"), "remoteEnv.AUTH") {
+		t.Fatalf("a host value it cannot move is named: %v", c.Warnings)
 	}
 }

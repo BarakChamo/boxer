@@ -94,7 +94,7 @@ These run on the host. A hostile agent can use any of them to reach your machine
 | Path | Why it is on the host |
 | --- | --- |
 | `passthrough` programs | `git`, `gh`, `ssh`, `boxer` and `smolvm` run unsandboxed by default. They need your credentials and your real repository. `gh` alone reaches anything your GitHub token reaches. |
-| Commands `intercept` does not name | In `rewrite` mode boxer rewrites the commands it recognises. Anything else runs on the host. PATH shims and `tool` mode catch some of these commands, but not all. `enforcement = "both"`, the default, turns on both. See [integration levels](/docs/setup/integration-levels). |
+| Commands `intercept` does not name | In `rewrite` mode boxer rewrites the commands it recognises. Anything else runs on the host. PATH shims and `tool` mode catch some of these commands, but not all. `enforcement = "both"`, the default, uses the shims as well as the hook, but `boxer install` writes none: run `boxer shim install` and put its directory on the harness's `PATH`. See [integration levels](/docs/setup/integration-levels). |
 | `[prep]` commands, hooks and MCP servers | These run on the host. See [Repository configuration is executable input](#repository-configuration-is-executable-input). |
 | The skill on its own | A skill or plugin installed without `boxer install` only asks the agent to use boxer. See [skills and plugins](/docs/setup/skills-and-plugins). |
 | `mode = "off"` and `enforcement = "audit"` | Neither sandboxes anything. `audit` prints what boxer would have rewritten or blocked, and runs the command on the host. |
@@ -185,8 +185,11 @@ Both lists are forwarded **by name**:
 - On smolvm, boxer passes `--secret-env NPM_TOKEN=NPM_TOKEN`, and smolvm reads the value from its
   own environment. The value never appears in an argument vector, which `ps` shows to every process
   on the host.
-- The container backends have no such flag. The values go through an `--env-file` that only your
-  user can read. boxer deletes it as soon as the command returns.
+- The container backends get the same by another route: boxer passes `-e NPM_TOKEN` with no value,
+  and docker, podman or Apple's `container` read the value from their own environment, where boxer
+  put it. A value of several lines, such as a PEM key, arrives whole. A secret whose name the CLI
+  reads as one of its own settings (`DOCKER_HOST`) goes through a file only your user can read
+  instead, deleted as soon as the command returns.
 
 Both lists reach `setup` and `image_setup` as well as ordinary commands, so an install that needs a
 registry token has it. They never reach the pack.

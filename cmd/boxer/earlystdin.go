@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"io"
-	"sync"
+	"os"
 )
 
-// earlyReader reads its source from the moment it is created and hands the bytes on when somebody
+// readEarly reads its source from the moment it is called and hands the bytes on when somebody
 // asks for them.
 //
 // A sandbox takes seconds to attach: the VM has to be resolved, started, and its environment made
@@ -19,48 +18,22 @@ import (
 // PROMPT_COMMAND that installs the prompt it parses command results out of, one second after it
 // spawns the shell, and then waits forever for output that is delimited by a prompt that was never
 // installed.
-type earlyReader struct {
-	mu   sync.Mutex
-	cond *sync.Cond
-	buf  bytes.Buffer
-	err  error
-	done bool
-}
-
-// readEarly starts consuming src at once. The returned reader replays everything captured so far,
-// then continues with whatever arrives.
+//
+// The bytes go through an OS pipe rather than a Go buffer. os/exec copies a stdin that is not a
+// file in a goroutine of its own and waits for that copy before Wait returns, and the copy was
+// blocked reading a stdin that had not closed: a guest that exited left `boxer run --tty` waiting
+// for the next keystroke, and on docker that keystroke turned exit 0 into a backend error. A pipe
+// is a file, so the CLI reads it directly and Wait waits for nothing but the CLI.
+// ponytail: a pipe holds 64 KB before the copy waits; typed input before the guest attaches is
+// far less, and input from a pipe is not lost by waiting.
 func readEarly(src io.Reader) io.Reader {
-	e := &earlyReader{}
-	e.cond = sync.NewCond(&e.mu)
+	r, w, err := os.Pipe()
+	if err != nil {
+		return src
+	}
 	go func() {
-		chunk := make([]byte, 4096)
-		for {
-			n, err := src.Read(chunk)
-			e.mu.Lock()
-			if n > 0 {
-				e.buf.Write(chunk[:n])
-			}
-			if err != nil {
-				e.err, e.done = err, true
-			}
-			e.cond.Broadcast()
-			e.mu.Unlock()
-			if err != nil {
-				return
-			}
-		}
+		_, _ = io.Copy(w, src)
+		_ = w.Close()
 	}()
-	return e
-}
-
-func (e *earlyReader) Read(p []byte) (int, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for e.buf.Len() == 0 && !e.done {
-		e.cond.Wait()
-	}
-	if e.buf.Len() > 0 {
-		return e.buf.Read(p)
-	}
-	return 0, e.err
+	return r
 }

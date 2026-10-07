@@ -3,6 +3,7 @@ package box
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -597,5 +598,16 @@ func TestAwaitRouteWaitsOutTheProxysReload(t *testing.T) {
 	awaitRoute("http://nothing.localhost:1/", 5*time.Second)
 	if time.Since(start) > time.Second {
 		t.Fatal("waited for a proxy that is not there")
+	}
+}
+
+// A route file left half-written by a killed process is never read as a route.
+func TestTemporaryRouteFilesAreNotRoutes(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_ = os.MkdirAll(urlsDir(), 0o755)
+	b, _ := json.Marshal(urlRoute{Scope: "sb-111111111111", Name: "x.app", Host: "1"})
+	_ = os.WriteFile(filepath.Join(urlsDir(), "x.app.tmp-123"), b, 0o644)
+	if rs := readRoutes(); len(rs) != 0 {
+		t.Fatalf("a temporary file was read as a route: %v", rs)
 	}
 }

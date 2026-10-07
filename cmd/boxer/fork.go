@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/vm"
@@ -158,7 +157,9 @@ func forkRm(args []string, stdout, stderr io.Writer) int {
 			code = 1
 			continue
 		}
-		_ = os.Remove(box.RunRecordPath(n))
+		// Everything a deleted sandbox leaves, as for every other delete.
+		vm.ForgetOwned(client, n)
+		box.ForgetScope(n)
 		fmt.Fprintf(stdout, "boxer: %s removed\n", n)
 	}
 	if len(names) == 0 {

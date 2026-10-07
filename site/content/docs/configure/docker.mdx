@@ -82,7 +82,10 @@ The [configuration reference](/docs/reference/configuration#devcontainerjson) ha
 ## Run Postgres, Redis and other services
 
 boxer runs one sandbox per worktree, not a Compose stack. Run your services inside that sandbox.
-Every worktree then gets its own database on the same port, with no clashes.
+Every worktree then gets its own database on the same port, with no clashes. Clients have to run
+there too: `psql` or `pg_dump` typed on your machine reach your machine's own port 5432, not the
+sandbox's, unless you add them to [`intercept_also`](/docs/reference/configuration#intercept_also)
+or run them with `boxer run`.
 
 ```toml title="boxer.toml"
 image = "mirror.gcr.io/library/node:24-alpine"
@@ -108,8 +111,8 @@ REDIS_URL = "redis://127.0.0.1:6379"
 - `image_setup` installs the services once. On smolvm, the result is cached, so the next worktree
   boots in about 2 seconds instead of reinstalling.
 - `volumes` keeps the database's files on your machine, one directory per worktree. They survive
-  `boxer rm`, `--recreate` and idle reclaim, and are deleted when the worktree is, or by
-  `boxer rm --volumes`.
+  `boxer rm`, `--recreate` and idle reclaim. They are deleted a week after the worktree is gone, or
+  by `boxer rm --volumes`.
 - On a Debian image (`apt-get install postgresql`), `initdb` and `postgres` are not on `PATH`. Use
   their full path, `/usr/lib/postgresql/<version>/bin/`.
 - `start` runs them every time the sandbox starts. The Postgres line creates the database the first

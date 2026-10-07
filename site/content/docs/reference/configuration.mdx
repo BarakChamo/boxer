@@ -28,8 +28,8 @@ from.
 boxer merges these in order, each overriding the one before.
 
 1. Built-in defaults, as listed on this page.
-2. `.devcontainer/devcontainer.json`, else `.devcontainer.json`, from the repository root, else the
-   worktree root. See [the mapping](#devcontainerjson).
+2. `.devcontainer/devcontainer.json`, else `.devcontainer.json`, from the worktree root, else the
+   repository root, so a branch that changes its devcontainer gets its own. See [the mapping](#devcontainerjson).
 3. `$XDG_CONFIG_HOME/boxer/boxer.toml`, else `~/.config/boxer/boxer.toml`.
 4. `boxer.toml` at the repository root (the main checkout).
 5. `boxer.toml` at the worktree root, when it differs from the repository root.
@@ -152,7 +152,8 @@ on_sandbox_unavailable = "passthrough"
 Programs whose commands run in the sandbox. The sandbox's `PATH` is the image's own, without `node_modules/.bin`, so run project tools as
 `npx vite` or `npm run dev` rather than adding bare `vite` or `tsc` here. A program matches by
 name, after skipping leading `VAR=value` assignments and any path, so
-`bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths.
+`bin/rails` and `./node_modules/.bin/next` match `rails` and `next`. List names, not paths: letters,
+digits, `.`, `_`, `+` and `-`, the same rule for `intercept_also` and `passthrough`.
 
 boxer reads the whole line the way a shell would, and wraps it whole when any program in it
 matches. That includes:
@@ -161,13 +162,17 @@ matches. That includes:
 - commands inside `$(...)`, backticks and `<(...)`, even in double quotes
 - the line given to `sh -c`, `bash -lc` and the others, and to `eval`
 - the program behind `env`, `sudo`, `nohup`, `nice`, `time`, `timeout`, `xargs`, `command`,
-  `exec` and similar wrappers
-- the commands inside `if`, `while`, `until`, `for`, `case` and `{ ... }`
+  `exec`, `taskset`, `chrt`, `busybox` and similar wrappers
+- the commands inside `if`, `while`, `until`, `for`, `case`, `{ ... }` and a function body, and the
+  line a `trap` will run
+- a `$(...)` in an array index, quoted or not, which arithmetic runs
 
-Text in quotes is text: `git commit -m "fix npm test"` stays on the host. A line boxer cannot read,
-such as one with an unclosed quote, goes to the sandbox. A script run by path (`bash build.sh`,
+Text in quotes is text: `git commit -m "fix npm test"` stays on the host. A line boxer cannot read
+goes to the sandbox: an unclosed quote, a wrapper option boxer does not know (it may take a value
+boxer would misread as the program), and an `alias`, whose new name boxer cannot follow. A script run by path (`bash build.sh`,
 `./build.sh`) is one program, its own name, and boxer does not read inside it: add the script's
-name, or intercept the tools it calls through PATH shims (`enforcement = "both"`, the default).
+name, or intercept the tools it calls through PATH shims (`enforcement = "both"`, the default, once
+`boxer shim install` has written them and they are on the harness's `PATH`).
 `["*"]` intercepts every program not in `passthrough`. It writes no PATH shims, since there is no
 program to name, so enforcement rests on the hook. Not settable from the environment.
 
@@ -322,7 +327,7 @@ memory = "8G"
 
 `string`, default `"/workspace"`. Env `BOXER_MOUNT_AT`.
 
-Where the worktree is mounted in the guest. `boxer run` from a subdirectory runs in the matching
+Where the worktree is mounted in the guest, an absolute path. `boxer run` from a subdirectory runs in the matching
 subdirectory. With `integration = "inside"` the worktree is mounted at its host path instead.
 
 ```toml
@@ -348,8 +353,10 @@ Named directories that outlive the sandbox, as `name:/guest/path`. Each is a dir
 `~/.local/state/boxer/volumes/<scope>/<name>`, bind-mounted read-write on every backend. It survives
 `boxer down`, `boxer rm`, `--recreate`, `--rebuild` and idle reclaim, so a database keeps its data.
 It is deleted by `boxer rm --volumes`, or by `boxer gc` once its worktree has been gone for 7 days.
-The week covers a repository that was moved or a drive that was unplugged: the first sweep that
-finds the worktree missing only marks the volumes, and a worktree that comes back clears the mark.
+The week covers a drive that was unplugged, or a repository moved and moved back: the first sweep
+that finds the worktree missing only marks the volumes, and a worktree that comes back clears the
+mark. Volumes belong to the worktree's path, so a repository moved for good starts with empty ones
+at its new path, and a new worktree created at an old one's path gets the old one's volumes.
 An orchestrator that deletes a worktree when you archive a task takes its volumes with it a week
 later. Copy out what you want to keep first. A name is letters, digits, `-` and `_`.
 Volumes are not part of the environment pack.
@@ -458,7 +465,8 @@ image_setup = ["apt-get update && apt-get install -y build-essential"]
 Commands that prepare this worktree, run in the guest as `user`, once per worktree and again when
 the list changes or on `boxer up --rebuild`. A pack never skips them, because the worktree is
 mounted from the host. They must write into the worktree: a recreated sandbox does not run them
-again, so anything installed elsewhere is lost. A failure is `SETUP_FAILED`.
+again, so anything installed elsewhere is lost. A failure is `SETUP_FAILED`, and the next command
+in that sandbox runs `setup` again rather than taking a running sandbox as ready.
 
 ```toml
 setup = ["npm ci"]
@@ -519,7 +527,8 @@ restart = "never"
 `table` of strings, default `{}`.
 
 Set in the guest for every command. Part of the environment pack's key and saved in the pack, so
-keep secrets out of it.
+keep secrets out of it. Names are letters, digits and `_`, not starting with a digit, as are the
+names in `secrets` and `env_passthrough`.
 
 ```toml
 [env]
@@ -628,8 +637,8 @@ allow_presets = ["npm", "github"]
 `[]string`, default `[]`.
 
 Port forwards as `host:guest`, bound to `127.0.0.1`. `auto:<guest>` takes a free host port, so
-worktrees do not collide. `boxer status` shows which host port it got. When no port is free, the
-command fails with `NO_FREE_PORT`.
+worktrees do not collide, and never takes a port a stopped sandbox holds. `boxer status` shows which
+host port it got. When no port is free, the command fails with `NO_FREE_PORT`. A port is 1 to 65535.
 
 ```toml
 [network]
@@ -813,8 +822,10 @@ reclaim_every = "1h"
 `string` (Go duration or `"never"`), default `"2h"`.
 
 A sandbox or environment pack unused this long is reclaimable. What happens to a sandbox is
-[`idle_action`](#idle_action). `never` turns the idle rule off. `gc` reads it from the current
-directory's configuration.
+[`idle_action`](#idle_action). `never` turns the idle rule off. `gc` judges each sandbox by its own
+repository's `idle_timeout` and `idle_action`, wherever it runs, so one repository's settings never
+reclaim another's sandboxes. The current directory's value ages packs. A sandbox with a
+[fork](/docs/reference/cli#boxer-fork) child in use is not idle.
 
 ```toml
 idle_timeout = "24h"
@@ -848,8 +859,9 @@ min_free_gb = 20
 
 `int`, default `5`.
 
-Keep at most this many environment packs, whatever their age. `0` keeps every pack the idle rule
-allows.
+Keep at most this many unused packs, whatever their age: environment, image and harness packs
+together, newest first. A pack a sandbox was created from is not counted and not removed. `0` keeps
+every pack the idle rule allows.
 
 ```toml
 packs_keep_last = 2
@@ -863,7 +875,9 @@ packs_keep_last = 2
 
 Overrides for one harness, applied after every file and variable. Only `mode`, `enforcement` and
 `isolation` are accepted, each checked against the same values as the top-level key. `<name>` is the harness name `boxer install` takes, and the call selects
-it with `--harness` or `BOXER_HARNESS`.
+it with `--harness` or `BOXER_HARNESS`. Inside mode's program names work too: `[harness.claude]`
+and `[harness.claude-code]` configure the same harness. A name boxer does not know is an error, so
+a misspelt table cannot quietly do nothing.
 
 ```toml
 [harness.kimi]
@@ -1013,6 +1027,12 @@ Variables are resolved on the host in every string: `${localWorkspaceFolder}` an
 `${localEnv:NAME:default}`, also spelled `${env:NAME}`. `${containerEnv:NAME}` resolves inside
 `remoteEnv` when `containerEnv` defines the name. Another `${containerEnv:NAME}` or
 `${devcontainerId}` gets a warning, and an `env` value or mount that uses it is dropped.
+
+An entry that passes a host variable under its own name, `"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"`,
+becomes one of [`secrets`](#secrets) rather than `env`: env is stored in the environment pack and
+passed by value, and a secret is read from the host when each command runs. Any other entry that
+takes a host value is kept in `env`, with a warning naming it. A byte-order mark at the start of the
+file is ignored.
 
 These are refused with a warning and have no effect.
 

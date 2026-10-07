@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -420,7 +421,7 @@ func LoadFiles(paths ...string) (Config, error) {
 
 func userFile() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
+	if !filepath.IsAbs(dir) { // the XDG specification ignores a relative path
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return ""
@@ -656,24 +657,70 @@ func sortedEnvKeys() []string {
 
 // ForHarness returns a copy with the [harness.<name>] override applied.
 func (c Config) ForHarness(name string) Config {
-	o, ok := c.Harness[name]
+	key, ok := name, false
+	if _, ok = c.Harness[name]; !ok {
+		// `boxer shell claude` names the program; the table may use the integration's name, and
+		// the reverse. Either spelling configures the same harness.
+		for k := range c.Harness {
+			if canonicalHarness(k) == canonicalHarness(name) {
+				key, ok = k, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return c
 	}
+	o := c.Harness[key]
 	out := c
+	out.Sources = maps.Clone(c.Sources) // the caller's map is shared; doctor read the wrong source
+	if out.Sources == nil {
+		out.Sources = map[string]string{}
+	}
 	if o.Mode != "" {
 		out.Mode = o.Mode
-		out.Sources["mode"] = "harness." + name
+		out.Sources["mode"] = "harness." + key
 	}
 	if o.Enforcement != "" {
 		out.Enforcement = o.Enforcement
-		out.Sources["enforcement"] = "harness." + name
+		out.Sources["enforcement"] = "harness." + key
 	}
 	if o.Isolation != "" {
 		out.Isolation = o.Isolation
-		out.Sources["isolation"] = "harness." + name
+		out.Sources["isolation"] = "harness." + key
 	}
 	return out
+}
+
+// HarnessNames are the names a [harness.<name>] table may use. The core names no harness: the
+// packages that hold the harness tables (the hook's dialects, inside mode's programs) register
+// theirs, and an empty list checks nothing.
+var HarnessNames []string
+
+// harnessAliases maps a second name for a harness to the first: inside mode names the program,
+// the integration has its own name, and a table under either configures both.
+var harnessAliases = map[string]string{}
+
+// RegisterHarness adds names a [harness.<name>] table may use.
+func RegisterHarness(names ...string) {
+	for _, n := range names {
+		if !slices.Contains(HarnessNames, n) {
+			HarnessNames = append(HarnessNames, n)
+		}
+	}
+}
+
+// RegisterHarnessAlias makes alias configure the same harness as name, and a known name.
+func RegisterHarnessAlias(alias, name string) {
+	harnessAliases[alias] = name
+	RegisterHarness(alias, name)
+}
+
+func canonicalHarness(n string) string {
+	if c, ok := harnessAliases[n]; ok {
+		return c
+	}
+	return n
 }
 
 // PrepConfig is the host-side preparation step.
@@ -748,6 +795,11 @@ func (c Config) Validate() error {
 		}
 	}
 	for name, o := range c.Harness {
+		// A misspelt table was ignored, so `[harness.cladue-code] mode = "tool"` weakened nothing
+		// it said it would strengthen, and said nothing about it.
+		if len(HarnessNames) > 0 && !slices.Contains(HarnessNames, name) {
+			return fmt.Errorf("[harness.%s]: not a harness boxer knows; known: %s", name, strings.Join(HarnessNames, " | "))
+		}
 		for _, ch := range checks {
 			val := map[string]string{"mode": o.Mode, "enforcement": o.Enforcement, "isolation": o.Isolation}[ch.key]
 			if val != "" && !slices.Contains(ch.allowed, val) {
@@ -821,8 +873,51 @@ func (c Config) Validate() error {
 	if c.User != "" && !userName.MatchString(c.User) {
 		return fmt.Errorf("user = %q; want a user name or uid, optionally with :group", c.User)
 	}
+	// Program names become PATH shim files and words in their scripts: a space or a newline in
+	// one ran the wrong command, or a second line, on the host.
+	for key, list := range map[string][]string{"intercept": c.Intercept, "intercept_also": c.InterceptAlso, "passthrough": c.Passthrough} {
+		for _, n := range list {
+			if (n != "*" || key != "intercept") && !programName.MatchString(n) {
+				return fmt.Errorf("%s contains %q; want a program name: letters, digits, '.', '_', '+' and '-'", key, n)
+			}
+		}
+	}
+	for _, p := range c.Network.Ports {
+		for _, n := range portNumber.FindAllString(strings.SplitN(p, "/", 2)[0], -1) {
+			if v, _ := strconv.Atoi(n); v > 65535 && !strings.Contains(p, n+".") && !strings.Contains(p, "."+n) {
+				return fmt.Errorf("network.ports entry %q: %s is not a port (1-65535)", p, n)
+			}
+		}
+	}
+	if !strings.HasPrefix(c.MountAt, "/") {
+		return fmt.Errorf("mount_at = %q; want an absolute guest path such as /workspace", c.MountAt)
+	}
+	for k := range c.Env {
+		if !envName.MatchString(k) {
+			return fmt.Errorf("[env] name %q; want letters, digits and '_', not starting with a digit", k)
+		}
+	}
+	for key, list := range map[string][]string{"secrets": c.Secrets, "env_passthrough": c.EnvPassthrough} {
+		for _, n := range list {
+			if !envName.MatchString(n) {
+				return fmt.Errorf("%s contains %q; want an environment variable name", key, n)
+			}
+		}
+	}
+	if c.MinFreeGB < 0 || c.PacksKeepLast < 0 {
+		return fmt.Errorf("min_free_gb and packs_keep_last cannot be negative")
+	}
+	if d, err := time.ParseDuration(c.ReclaimEvery); c.ReclaimEvery != "" && err == nil && d <= 0 {
+		return fmt.Errorf("reclaim_every = %q; want a positive duration such as \"6h\"", c.ReclaimEvery)
+	}
 	return nil
 }
+
+var (
+	programName = regexp.MustCompile(`^[A-Za-z0-9._+][A-Za-z0-9._+-]*$`)
+	envName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	portNumber  = regexp.MustCompile(`\d+`)
+)
 
 var userName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$`)
 

@@ -51,7 +51,7 @@ func (e *Env) Prep() error {
 		return vm.Unsupported(e.VM, "run host-side `prep`",
 			"this backend does not mount the worktree, so prep's output would not reach the guest; move the commands to `setup`")
 	}
-	marker := prepMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg)
+	marker := prepMarkerPath(e.Scope.Root, e.worktreeKey(), e.Cfg)
 	if _, err := os.Stat(marker); err == nil {
 		return nil
 	}

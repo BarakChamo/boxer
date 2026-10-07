@@ -1,6 +1,7 @@
 package inside
 
 import (
+	"github.com/BarakChamo/boxer/internal/config"
 	"io"
 	"os"
 	"os/exec"
@@ -301,5 +302,14 @@ func TestASecondHarnessDoesNotStopARunningSandbox(t *testing.T) {
 	b, _ := os.ReadFile(log)
 	if after := string(b[len(before):]); strings.Contains(after, "machine stop") {
 		t.Fatalf("the second harness stopped the running sandbox:\n%s", after)
+	}
+}
+
+// Every harness inside mode runs may be configured by name.
+func TestEveryInsideHarnessIsAKnownHarnessName(t *testing.T) {
+	for _, n := range Names() {
+		if !slices.Contains(config.HarnessNames, n) {
+			t.Errorf("[harness.%s] would be refused", n)
+		}
 	}
 }

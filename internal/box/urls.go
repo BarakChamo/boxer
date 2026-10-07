@@ -77,12 +77,16 @@ func readRoutes() []urlRoute {
 	}
 	var out []urlRoute
 	for _, ent := range entries {
+		if strings.Contains(ent.Name(), ".tmp-") {
+			continue // being written, or left by a killed write; never a route
+		}
 		b, err := os.ReadFile(filepath.Join(urlsDir(), ent.Name()))
 		if err != nil {
 			continue
 		}
 		var r urlRoute
 		if json.Unmarshal(b, &r) == nil && r.Name != "" {
+			r.made = time.Now() // unknown age counts as new, which only delays pruning
 			if info, err := ent.Info(); err == nil {
 				r.made = info.ModTime()
 			}

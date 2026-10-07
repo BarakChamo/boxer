@@ -297,14 +297,14 @@ func (d Docker) Exec(o ExecOpts, argv ...string) (int, error) {
 	// A secret's value must not reach the argument vector, where `ps` would show it to every
 	// process on the host. There is no `--secret-env` here, so the values go through a file only
 	// this process can read, which is deleted as soon as the command returns.
-	if len(o.SecretEnv) > 0 {
-		f, err := secretFile(o.SecretEnv)
-		if err != nil {
-			return 127, err
-		}
-		defer func() { _ = os.Remove(f) }()
-		args = append(args, "--env-file", f)
+	secretArgs, secretEnv, f, err := secretFlags(o.SecretEnv)
+	if err != nil {
+		return 127, err
 	}
+	if f != "" {
+		defer func() { _ = os.Remove(f) }()
+	}
+	args = append(args, secretArgs...)
 	args = append(args, o.Name)
 	// Not with a terminal: `timeout` runs the command in a process group of its own, out of the
 	// terminal's foreground, and an interactive program stops on its first read.
@@ -321,6 +321,9 @@ func (d Docker) Exec(o ExecOpts, argv ...string) (int, error) {
 	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, d.Bin, args...)
+	if len(secretEnv) > 0 {
+		cmd.Env = append(os.Environ(), secretEnv...)
+	}
 	// A timeout kills the CLI, but a process it left holding stdout would keep Wait blocked until
 	// that process exited; WaitDelay bounds the wait so the timeout actually returns.
 	cmd.WaitDelay = 2 * time.Second
@@ -340,6 +343,9 @@ func (d Docker) Exec(o ExecOpts, argv ...string) (int, error) {
 			_ = cmd.Process.Signal(s)
 		case err := <-done:
 			var ee *exec.ExitError
+			if asExitError(err, &ee) && ee.ExitCode() < 0 {
+				return 1, killedCLI(cmd.Path, ee)
+			}
 			if asExitError(err, &ee) {
 				if rerr := runtimeFailure(d, ee.ExitCode(), head, map[int][]string{
 					1:   {"Error response from daemon:"},
@@ -362,34 +368,65 @@ func (d Docker) Exec(o ExecOpts, argv ...string) (int, error) {
 	}
 }
 
-// secretFile writes GUEST=<value-from-host> pairs to a file only this user can read.
-func secretFile(pairs []string) (string, error) {
-	f, err := os.CreateTemp("", "boxer-secret-*")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	if err := f.Chmod(0o600); err != nil {
-		return f.Name(), err
-	}
-	var b strings.Builder
+// secretFlags passes each GUEST=<host variable> pair by name: `-e GUEST` with the value in the
+// CLI's own environment, which docker, podman and Apple container read it from. Nothing reaches
+// the argument vector, and a value of several lines (a PEM key) arrives whole: in the --env-file
+// this replaced, it was cut at the first newline and the rest refused, quoted in the error. A name
+// the CLI reads as its own setting (DOCKER_HOST) is not put in its environment; it goes through a
+// file only this user can read, which holds one line per variable.
+func secretFlags(pairs []string) (args, env []string, file string, err error) {
+	var lines strings.Builder
 	for _, p := range pairs {
 		guest, host, ok := strings.Cut(p, "=")
 		if !ok {
 			guest, host = p, p
 		}
-		if v, set := os.LookupEnv(host); set {
-			fmt.Fprintf(&b, "%s=%s\n", guest, v)
+		v, set := os.LookupEnv(host)
+		if !set {
+			continue
 		}
+		if !strings.HasPrefix(guest, "DOCKER_") && !strings.HasPrefix(guest, "PODMAN_") && !strings.HasPrefix(guest, "CONTAINER") {
+			args = append(args, "-e", guest)
+			env = append(env, guest+"="+v)
+			continue
+		}
+		if strings.ContainsAny(v, "\r\n") {
+			return nil, nil, "", fmt.Errorf("secret %s has more than one line, and its name is one the runtime CLI reads as its own setting; give it another name", guest)
+		}
+		fmt.Fprintf(&lines, "%s=%s\n", guest, v)
 	}
-	_, err = f.WriteString(b.String())
-	return f.Name(), err
+	if lines.Len() == 0 {
+		return args, env, "", nil
+	}
+	f, err := os.CreateTemp("", "boxer-secret-*")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Chmod(0o600); err != nil {
+		return nil, nil, f.Name(), err
+	}
+	if _, err := f.WriteString(lines.String()); err != nil {
+		return nil, nil, f.Name(), err
+	}
+	return append(args, "--env-file", f.Name()), env, f.Name(), nil
 }
 
 // classifyDocker maps the daemon's wording onto the sentinels. Docker's own, not smolvm's — which
 // is the entire reason the sentinels exist.
 func classifyDocker(stderr string) error {
-	s := strings.ToLower(stderr)
+	// Only the CLI's own error lines. A create that pulls first prints "<layer>: Already exists"
+	// for every cached layer, and any later failure was read as a lost race and waited out.
+	var own []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(strings.ToLower(l), "error") {
+			own = append(own, l)
+		}
+	}
+	if len(own) == 0 {
+		own = []string{stderr}
+	}
+	s := strings.ToLower(strings.Join(own, "\n"))
 	switch {
 	case strings.Contains(s, "no such container"), strings.Contains(s, "no such object"):
 		return ErrNotFound

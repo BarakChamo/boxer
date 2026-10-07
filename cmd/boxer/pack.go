@@ -45,8 +45,14 @@ func packCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if sub == "rm" {
 		p, _ := box.NamedPackPath(name)
-		if err := os.Remove(p); err != nil {
+		// Under the pack's lock, as gc removes one: a create booting from it holds it.
+		removed, err := box.RemovePack(p)
+		if err != nil {
 			fmt.Fprintf(stderr, "boxer: no saved pack named %q\n", name)
+			return 1
+		}
+		if !removed {
+			fmt.Fprintf(stderr, "boxer: pack %q is in use by a sandbox being created; try again in a moment\n", name)
 			return 1
 		}
 		fmt.Fprintf(stdout, "boxer: removed pack %s\n", name)

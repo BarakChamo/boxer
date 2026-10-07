@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -46,5 +47,24 @@ func TestReadEarlyEndsWhenItsSourceDoes(t *testing.T) {
 	n, err := early.Read(make([]byte, 4))
 	if n != 0 || err == nil {
 		t.Errorf("reading past the end gave n=%d err=%v", n, err)
+	}
+}
+
+// A command given the early reader as stdin finishes when it exits, whether or not stdin ever
+// closes: os/exec waited for its stdin copy, which was blocked on a stdin that stayed open.
+func TestACommandEndsThoughItsEarlyStdinStaysOpen(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	cmd := exec.Command("sh", "-c", "exit 3")
+	cmd.Stdin = readEarly(pr)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Run() }()
+	select {
+	case err := <-done:
+		if cmd.ProcessState.ExitCode() != 3 {
+			t.Fatalf("exit %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the command exited, but Wait is still waiting on stdin")
 	}
 }

@@ -784,3 +784,101 @@ func TestGitAndConductorRefuseUser(t *testing.T) {
 		}
 	}
 }
+
+// Each sandbox is reclaimed by its own repository's rules. The sweep a command starts used to run
+// with that command's configuration, so one repository's idle_action = "delete" deleted the
+// sandboxes of every other.
+func TestGCJudgesEachSandboxByItsOwnRepository(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	keep := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"never\"\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nidle_action = \"delete\"\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	var kept string
+	for _, r := range ls {
+		ageStamp(t, r["scope"].(string))
+		if r["worktree"] == keep || strings.HasSuffix(keep, r["worktree"].(string)) || strings.HasSuffix(r["worktree"].(string), filepath.Base(keep)) {
+			kept = r["scope"].(string)
+		}
+	}
+	if kept == "" || len(ls) != 2 {
+		t.Fatalf("could not tell the two sandboxes apart: %v", ls)
+	}
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 1 || rows[0]["scope"] == kept {
+		t.Fatalf("only the repository that asked for deletion loses its sandbox: %d %v %s", code, rows, out)
+	}
+	if _, ok, _ := client.Status(kept); !ok {
+		t.Fatal("a sandbox whose repository says never must survive another's sweep")
+	}
+}
+
+// down --scope forgets what every other delete forgets.
+func TestDownScopeForgetsTheSandbox(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "run", "--", "true"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	key := ls[0]["scope"].(string)
+	if box.LastUsed(key).IsZero() {
+		t.Fatal("a run marks the sandbox used")
+	}
+	if code, out := call(t, nil, "down", "--scope", key); code != 0 {
+		t.Fatal(out)
+	}
+	if !box.LastUsed(key).IsZero() {
+		t.Fatal("down --scope left the last-used stamp behind")
+	}
+	if _, ok := box.ReadRunRecord(key); ok {
+		t.Fatal("down --scope left the run record behind")
+	}
+}
+
+// A recreated sandbox is marked used: recreating deleted the stamp, and one with no stamp was never
+// found idle.
+func TestRecreateKeepsTheSandboxReclaimable(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "up", "--recreate"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	if box.LastUsed(ls[0]["scope"].(string)).IsZero() {
+		t.Fatal("a recreated sandbox has no last-used stamp")
+	}
+}
+
+// An idle parent is kept while a fork child is in use: deleting it takes the children with it.
+func TestGCKeepsAParentWhoseChildIsInUse(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nidle_action = \"delete\"\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var names []string
+	if code, out := call(t, &names, "fork", "--prepare", "--count", "1", "--json"); code != 0 || len(names) != 1 {
+		t.Fatalf("fork: %d %s", code, out)
+	}
+	parent := box.ParentOf(names[0])
+	ageStamp(t, parent)
+	if code, out := call(t, nil, "run", "--scope", names[0], "--", "true"); code != 0 {
+		t.Fatal(out)
+	}
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 0 {
+		t.Fatalf("a parent whose child is in use must be kept: %d %v %s", code, rows, out)
+	}
+}

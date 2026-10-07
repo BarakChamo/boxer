@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,10 @@ import (
 // boxer does not do, or several containers, so boxer refuses them by name rather than ignoring
 // them silently.
 type devcontainer struct {
+	// secrets are env names whose value is the host's own variable of that name, taken out of
+	// env: env is baked into the environment pack and passed as KEY=VALUE.
+	secrets []string
+
 	Image                string `json:"image"`
 	InitializeCommand    any    `json:"initializeCommand"`
 	OnCreateCommand      any    `json:"onCreateCommand"`
@@ -90,6 +95,8 @@ func (c *Config) mergeDevcontainer(path, workspace string) error {
 	if err != nil {
 		return err
 	}
+	// Editors on Windows save a byte-order mark, which JSON does not allow and VS Code accepts.
+	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	d, unresolved, err := decodeDevcontainer(stripJSONComments(raw), workspace, c.MountAt)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
@@ -164,6 +171,11 @@ func (c *Config) mergeDevcontainer(path, workspace string) error {
 			c.Env = env
 		}
 	})
+	for _, n := range d.secrets {
+		if !slices.Contains(c.Secrets, n) {
+			c.Secrets = append(c.Secrets, n)
+		}
+	}
 	set("network", len(c.Network.Ports) > 0, func() { c.Network.Ports = d.ports() })
 	// A label is the name a person gave the port, which is exactly what its URL should be called.
 	set("urls", len(c.URLs.Names) > 0, func() {
@@ -519,6 +531,26 @@ func decodeDevcontainer(raw []byte, workspace, defaultMountAt string) (devcontai
 			}
 		}
 	}
+	// "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}" is how a devcontainer passes a host secret. As
+	// env it went into the environment pack and onto the command line; as a secret it is read
+	// from the host when a command runs, by name. Other host values are reported, not moved.
+	var secrets, hostValues []string
+	for _, key := range []string{"containerEnv", "remoteEnv"} {
+		m, _ := tree[key].(map[string]any)
+		for k, v := range m {
+			sv, _ := v.(string)
+			ref := varRef.FindStringSubmatch(sv)
+			switch {
+			case ref != nil && ref[0] == sv && (ref[1] == "localEnv" || ref[1] == "env") && ref[2] == k && ref[3] == "":
+				secrets = append(secrets, k)
+				delete(m, k)
+			case strings.Contains(sv, "${localEnv:") || strings.Contains(sv, "${env:"):
+				hostValues = append(hostValues, fmt.Sprintf("`%s.%s` takes a value from the host environment, which boxer stores in the environment pack; "+
+					"for anything secret, use secrets = [\"%s\"] in boxer.toml instead", key, k, k))
+			}
+		}
+	}
+	sort.Strings(secrets)
 	missing := map[string]map[string]bool{}
 	for key, v := range tree {
 		var inGuest map[string]string
@@ -560,6 +592,7 @@ func decodeDevcontainer(raw []byte, workspace, defaultMountAt string) (devcontai
 		tree["mounts"] = kept
 	}
 	var notes []string
+	notes = append(notes, hostValues...)
 	keys := make([]string, 0, len(missing))
 	for k := range missing {
 		keys = append(keys, k)
@@ -584,6 +617,7 @@ func decodeDevcontainer(raw []byte, workspace, defaultMountAt string) (devcontai
 	}
 	var d devcontainer
 	err = json.Unmarshal(b, &d)
+	d.secrets = secrets
 	return d, notes, err
 }
 

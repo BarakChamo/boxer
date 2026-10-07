@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/vm"
 )
 
@@ -108,6 +109,10 @@ var Harnesses = map[string]Harness{
 }
 
 func init() {
+	config.RegisterHarness(Names()...)
+	// The programs inside mode runs, under the names their integrations have.
+	config.RegisterHarnessAlias("claude", "claude-code")
+	config.RegisterHarnessAlias("gemini", "gemini-cli")
 	box.InsideHooks.Mounts = Mounts
 	box.InsideHooks.AllowHosts = AllowHosts
 	box.InsideHooks.Image = DefaultImage

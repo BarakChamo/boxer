@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -215,23 +216,21 @@ func NotOwned(b Backend, name string) error {
 //
 // GNU timeout kills the command's whole process group. busybox's (Alpine) kills only the process
 // it started, so `npm test` timed out and left its workers running; and an image with no timeout
-// had no deadline at all. Without GNU's, a watchdog freezes and kills the command's process tree,
-// found through /proc. Not setsid: Alpine's forks, so the command would not be this shell's child.
+// had no deadline at all. Without GNU's, a watchdog started in the background checks once a second
+// and, at the deadline, freezes and kills the command's process tree, found through /proc. The
+// command itself is exec'd in the foreground: a background job starts with SIGINT and SIGQUIT
+// ignored, which dash and busybox cannot undo, and a test that interrupts a child would fail.
+// The process name in /proc/N/stat can hold spaces (npm sets "npm run lint"), so the fields are
+// read after its closing parenthesis.
 // ponytail: a process that detaches itself (a double fork) leaves the tree and escapes; GNU's
 // process-group kill would catch it, and nothing without a terminal can make a group here.
 func guestTimeout(d time.Duration, argv []string) []string {
 	secs := strconv.Itoa(int((d + time.Second - 1) / time.Second))
+	watchdog := `tree() { kill -STOP $1 2>/dev/null; for d in /proc/[0-9]*; do read -r s 2>/dev/null < $d/stat || continue; s=${s##*) }; s=${s#* }; [ "${s%% *}" = $1 ] && [ ${d#/proc/} != $$ ] && tree ${d#/proc/}; done; kill -KILL $1 2>/dev/null; }
+n=0; while kill -0 $1 2>/dev/null; do [ $n -ge $2 ] && { tree $1; exit; }; sleep 1; n=$((n+1)); done`
 	line := `timeout --version 2>/dev/null | grep -q GNU && exec timeout -s KILL ` + secs + ` "$@"
-tree() { kill -STOP $1 2>/dev/null; for d in /proc/[0-9]*; do read -r _ _ _ pp _ < $d/stat 2>/dev/null && [ "$pp" = $1 ] && tree ${d#/proc/}; done; kill -KILL $1 2>/dev/null; }
-exec 3<&0
-"$@" <&3 3<&- &
-c=$!
-exec 3<&-
-(trap 'kill $s 2>/dev/null; exit' TERM; sleep ` + secs + ` & s=$!; wait $s && tree $c) >/dev/null 2>&1 &
-w=$!
-wait $c; code=$?
-kill $w 2>/dev/null
-exit $code`
+sh -c '` + watchdog + `' boxer-watchdog $$ ` + secs + ` </dev/null >/dev/null 2>&1 &
+exec "$@"`
 	return append([]string{"sh", "-c", line, "boxer-timeout"}, argv...)
 }
 
@@ -249,6 +248,12 @@ func Output(b Backend, name, workdir string, argv ...string) (string, int, error
 
 // asExitError is errors.As for *exec.ExitError, kept in one place because both backends need it.
 func asExitError(err error, target **exec.ExitError) bool { return errors.As(err, target) }
+
+// killedCLI is the error for a runtime CLI that a signal ended: exit status -1, which is not the
+// command's status, and was recorded as one, as if the command had exited 255.
+func killedCLI(bin string, ee *exec.ExitError) error {
+	return fmt.Errorf("%s was ended by a signal (%v) before it reported the command's exit status", filepath.Base(bin), ee.ProcessState)
+}
 
 // Default returns the backend named by config. An unknown name is an error rather than a silent
 // fall back to smolvm: someone who wrote `backend = "dcoker"` wants to be told, not sandboxed by

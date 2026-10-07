@@ -73,3 +73,15 @@ func TestHostWideFunctionsUseConfiguredBackend(t *testing.T) {
 		t.Fatalf("host backend = %q, want docker", got)
 	}
 }
+
+// A caller may leave the output streams out; boxer discards them rather than panic.
+func TestRunWithoutOutputStreams(t *testing.T) {
+	vmtest.Install(t)
+	b, err := Open(vmtest.Repo(t, vmtest.NoWorktreeCheck), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err := b.Run([]string{"sh", "-c", "echo hi; exit 4"}, RunOpts{Stdin: strings.NewReader("")}); err != nil || code != 4 {
+		t.Fatalf("%d %v", code, err)
+	}
+}

@@ -3,6 +3,7 @@ package vm
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Ownership, for backends that cannot carry a label.
@@ -28,12 +29,21 @@ import (
 // ownedDir is where the marks live, one directory per backend so two backends cannot collide on a
 // name. It resolves the same way every other piece of boxer state does.
 func ownedDir(backend string) string {
-	root := os.Getenv("XDG_STATE_HOME")
-	if root == "" {
-		home, _ := os.UserHomeDir()
-		root = filepath.Join(home, ".local", "state")
+	return filepath.Join(StateHome(), "boxer", "owned", backend)
+}
+
+// StateHome is the XDG state directory boxer keeps its state under: $XDG_STATE_HOME when it is
+// absolute (the specification says to ignore a relative one), else ~/.local/state. With no home
+// directory it is a per-user directory under the system's temporary one: a path relative to the
+// current directory put gc's state, and what gc deletes, wherever the command happened to run.
+func StateHome() string {
+	if d := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(d) {
+		return d
 	}
-	return filepath.Join(root, "boxer", "owned", backend)
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		return filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(os.TempDir(), "boxer-"+strconv.Itoa(os.Getuid()), "state")
 }
 
 // RecordOwned marks a machine as boxer's. Called after a successful create, and only for a backend

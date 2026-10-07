@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -106,11 +107,13 @@ func InstallHarness(dir string, names []string) ([]string, error) {
 
 // DefaultDir is where `boxer shim install` writes without an argument.
 func DefaultDir() string {
-	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+	if d := os.Getenv("XDG_DATA_HOME"); filepath.IsAbs(d) {
 		return filepath.Join(d, "boxer", "shims")
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "boxer", "shims")
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		return filepath.Join(home, ".local", "share", "boxer", "shims")
+	}
+	return filepath.Join(os.TempDir(), "boxer-"+strconv.Itoa(os.Getuid()), "shims")
 }
 
 // shellTemplate is a bash stand-in: an interactive shell in the guest for the current worktree.

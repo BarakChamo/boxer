@@ -93,6 +93,7 @@ func TestAppleDriverAgainstAFakeCLI(t *testing.T) {
 func TestAppleExecPassesOptionsAndExitCodes(t *testing.T) {
 	a, calls := fakeApple(t)
 
+	t.Setenv("TOKEN", "s3cret")
 	var out bytes.Buffer
 	code, err := a.Exec(vm.ExecOpts{Name: "sb-a", User: "node", Workdir: "/workspace/app",
 		Env: []string{"CI=1"}, SecretEnv: []string{"TOKEN=TOKEN"}, Stdout: &out, Stderr: &out}, "sh", "-c", "hello")
@@ -100,12 +101,12 @@ func TestAppleExecPassesOptionsAndExitCodes(t *testing.T) {
 		t.Fatalf("exec: %d %v %q", code, err, out.String())
 	}
 	line := calls()
-	for _, want := range []string{"exec -i -e BOXER_INSIDE=1 -u node -w /workspace/app -e CI=1 --env-file ", " sb-a sh -c hello"} {
+	for _, want := range []string{"exec -i -e BOXER_INSIDE=1 -u node -w /workspace/app -e CI=1 -e TOKEN sb-a sh -c hello"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("exec argv lacks %q: %s", want, line)
 		}
 	}
-	if strings.Contains(line, "TOKEN=") {
+	if strings.Contains(line, "TOKEN=") || strings.Contains(line, "s3cret") {
 		t.Errorf("a secret reached argv: %s", line)
 	}
 

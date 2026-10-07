@@ -42,15 +42,16 @@ func TransportFailure(output string) bool {
 
 // smolvmFailure returns smolvm's own error line from an exec's stderr, or "" when the failure was
 // the guest command's. Only smolvm's wording counts: a guest that prints "Error: tests failed" has
-// failed, and that is its exit code to report.
+// failed, and that is its exit code to report. Only the last line: smolvm reports its own failure
+// and exits, so nothing follows it, and a guest's "Error: ...: connection closed" in the middle of
+// a test run is the guest's.
 func smolvmFailure(stderr string) string {
-	for _, line := range strings.Split(stderr, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Error: vm not found") || strings.HasPrefix(line, "Error: agent operation failed") ||
-			strings.HasPrefix(line, "Error: machine") && strings.Contains(line, "is not running") ||
-			strings.HasPrefix(line, "Error: ") && TransportFailure(line) {
-			return line
-		}
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	line := strings.TrimSpace(lines[len(lines)-1])
+	if strings.HasPrefix(line, "Error: vm not found") || strings.HasPrefix(line, "Error: agent operation failed") ||
+		strings.HasPrefix(line, "Error: machine") && strings.Contains(line, "is not running") ||
+		strings.HasPrefix(line, "Error: ") && TransportFailure(line) {
+		return line
 	}
 	return ""
 }
@@ -494,6 +495,9 @@ func (c Client) Exec(o ExecOpts, argv ...string) (int, error) {
 			_ = cmd.Process.Signal(s)
 		case err := <-done:
 			var ee *exec.ExitError
+			if errors.As(err, &ee) && ee.ExitCode() < 0 {
+				return 1, killedCLI(cmd.Path, ee)
+			}
 			if errors.As(err, &ee) {
 				if own := smolvmFailure(tail.String()); own != "" {
 					return ee.ExitCode(), &Error{Backend: "smolvm", Verb: "machine", Code: ee.ExitCode(), Stderr: own, Kind: classifySmolvm(own)}

@@ -328,3 +328,19 @@ func TestToolModeTellsTheModelUpFront(t *testing.T) {
 		t.Fatal("the package-level tool table was modified")
 	}
 }
+
+// A run's output is bounded to its start and its end, with what was dropped counted.
+func TestRunOutputKeepsItsStartAndEnd(t *testing.T) {
+	h := &headTail{max: 4}
+	for _, w := range []string{"ab", "cdef", "ghij", "kl"} {
+		_, _ = h.Write([]byte(w))
+	}
+	if got := h.String(); got != "abcd\n[boxer: 4 bytes of output omitted]\nijkl" {
+		t.Fatalf("%q", got)
+	}
+	small := &headTail{max: 4}
+	_, _ = small.Write([]byte("abcdef"))
+	if got := small.String(); got != "abcdef" {
+		t.Fatalf("output within both halves is kept whole: %q", got)
+	}
+}

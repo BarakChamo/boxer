@@ -8,9 +8,10 @@ Expect an acknowledgement within three working days and a fix or a plan within f
 
 ## What boxer is, and is not
 
-boxer runs an agent's shell commands inside a sandbox whose only mount is the git worktree. That is
-a real boundary: a command in the guest cannot read your home directory, your keys, or any path
-outside the worktree.
+boxer runs an agent's shell commands inside a sandbox that mounts the git worktree and only what the
+configuration adds: `mounts`, the package caches (read-only), named `volumes`, and in inside mode
+the harness config directories. That is a real boundary: a command in the guest cannot read your
+home directory, your keys, or any other path.
 
 How strong the boundary is depends on the backend, and `boxer doctor` prints which one you have:
 
@@ -37,7 +38,8 @@ paths deliberately stay on the host:
 - In `rewrite` mode, boxer rewrites commands it recognises. A command it does not recognise runs on
   the host. PATH shims and `tool` mode narrow that gap rather than closing it: a shim loses to a
   login shell, and `tool` mode depends on the agent taking the tool it is left with.
-  `enforcement = "both"` is the default for this reason.
+  `enforcement = "both"` is the default for this reason; the shims work once `boxer shim install`
+  has written them and their directory is on the harness's `PATH`.
 
 If your threat model is a hostile agent rather than a careless one, run the harness **inside** the
 guest (`integration = "inside"`, `boxer shell <harness>`), where there is no host shell to reach.

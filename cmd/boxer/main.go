@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -307,6 +308,10 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		// The same as every other way a sandbox is deleted: its run record, stamps, lock,
+		// branchable mark and routes go with it.
+		vm.ForgetOwned(hostVM, *scopeName)
+		box.ForgetScope(*scopeName)
 		if !emit(stdout, []downJSON{{Scope: *scopeName, Removed: true}}, *asJSON) {
 			fmt.Fprintf(stdout, "boxer: %s removed\n", *scopeName)
 		}
@@ -473,7 +478,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		started := time.Now()
 		code, err := e.Run(argv, box.RunOpts{Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty, Timeout: timeout, Task: *taskName})
 		if err != nil {
-			if code == -1 { // passthrough policy: run on the host
+			if fallback := (*box.HostFallback)(nil); errors.As(err, &fallback) { // passthrough policy: run on the host
 				fmt.Fprintln(stderr, err)
 				return hostRun(argv, stdin, stdout, stderr)
 			}
@@ -759,22 +764,63 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	// idle_timeout comes from the config visible here; gc is a host-wide sweep, so the user or
-	// current repository layer decides. "never" disables the idle rule.
+	// The configuration visible here sets the pack rules and is the fallback for a sandbox whose
+	// own repository cannot be read. "never" disables the idle rule.
 	wt, repo := cwdRoot()
 	cfg, err := config.Load(wt, repo)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	idleOf := func(c config.Config) time.Duration {
+		d, _ := time.ParseDuration(c.IdleTimeout) // validated at load; "never" and "" parse to 0
+		return d
+	}
 	// For sandboxes, --all turns the idle rule off rather than making everything idle: a running
 	// sandbox is in use, and only a stopped one is taken below. Packs are aged separately.
 	var idle time.Duration
-	if !*all && cfg.IdleTimeout != "" && cfg.IdleTimeout != "never" {
-		if idle, err = time.ParseDuration(cfg.IdleTimeout); err != nil {
-			fmt.Fprintf(stderr, "idle_timeout = %q: %v\n", cfg.IdleTimeout, err)
-			return 1
+	if !*all {
+		idle = idleOf(cfg)
+	}
+	// Each sandbox is judged by its own repository's idle_timeout and idle_action. The sweep a
+	// command starts runs with that command's configuration, and one repository's
+	// idle_action = "delete" used to delete every other repository's sandboxes on the host.
+	policies := map[string]config.Config{}
+	policyOf := func(m vm.Machine) (time.Duration, string) {
+		root := m.Labels["boxer.root"]
+		c, seen := policies[root]
+		if !seen {
+			c = cfg
+			if w, r := rootsOf(root); root != "" && w != "" {
+				if own, err := config.Load(w, r); err == nil {
+					c = own
+				}
+			}
+			policies[root] = c
 		}
+		if *all {
+			return 0, c.IdleAction
+		}
+		return idleOf(c), c.IdleAction
+	}
+	// A fork child in use keeps its parent: deleting or stopping the parent takes its children
+	// with it, and a child's own stamp is what says it is in use.
+	children := map[string][]string{}
+	for _, m := range ms {
+		if p := box.ParentOf(m.Name); p != "" {
+			children[p] = append(children[p], m.Name)
+		}
+	}
+	unused := func(name string, d time.Duration) bool {
+		if !idleSince(name, d) {
+			return false
+		}
+		for _, c := range children[name] {
+			if last := box.LastUsed(c); !last.IsZero() && time.Since(last) <= d {
+				return false
+			}
+		}
+		return true
 	}
 	code := 0
 	rows := []gcJSON{}
@@ -785,6 +831,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	for _, m := range ms {
 		root := m.Labels["boxer.root"]
 		reason, stop := "", false
+		idle, action := policyOf(m)
 		if parent := box.ParentOf(m.Name); parent != "" && !live[parent] {
 			// A fork child outlives its parent only by accident: nothing addresses it, and it
 			// costs what a sandbox costs.
@@ -793,12 +840,12 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			// Only absence. A worktree boxer cannot stat for another reason (permissions, an
 			// unmounted volume) still exists, and deleting its sandbox would be a guess.
 			reason = fmt.Sprintf("worktree %s is gone", root)
-		} else if idleSince(m.Name, idle) {
-			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", box.LastUsed(m.Name).Format(time.RFC3339), cfg.IdleTimeout)
+		} else if unused(m.Name, idle) {
+			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", box.LastUsed(m.Name).Format(time.RFC3339), idle)
 			// Its worktree still exists, so someone may come back to it. Stopping frees the
 			// memory and keeps what the sandbox holds; an already stopped one has nothing left
 			// to give back but its disk, which --all and min_free_gb deal with.
-			if cfg.IdleAction == "stop" {
+			if action == "stop" {
 				if m.State != "running" {
 					continue
 				}
@@ -825,7 +872,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(reason, "idle") && !idleSince(m.Name, idle) {
+		if strings.HasPrefix(reason, "idle") && !unused(m.Name, idle) {
 			unlock()
 			continue
 		}
@@ -1336,11 +1383,19 @@ func uninstallCmd(args []string, stdout, stderr io.Writer) int {
 // cwdRoot returns (worktreeRoot, repoRoot) for config loading outside a resolved Env.
 func cwdRoot() (string, string) {
 	cwd, _ := os.Getwd()
-	g, err := scope.Detect(cwd)
+	return rootsOf(cwd)
+}
+
+// rootsOf returns (worktreeRoot, repoRoot) for a directory, or empty strings outside a repository.
+func rootsOf(dir string) (string, string) {
+	if dir == "" {
+		return "", ""
+	}
+	g, err := scope.Detect(dir)
 	if err != nil || g.Toplevel == "" {
 		return "", ""
 	}
-	return g.Toplevel, filepath.Dir(g.CommonDir)
+	return g.Toplevel, g.RepoRoot()
 }
 
 // briefJSON is `boxer brief --json`: the facts the brief states, so a harness or a dashboard can

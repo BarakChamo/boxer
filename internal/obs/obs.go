@@ -142,7 +142,7 @@ func ConfigureFrom(t config.Telemetry) {
 // DefaultPath is the file sink's path when none is configured, beside the other host state.
 func DefaultPath() string {
 	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
+	if !filepath.IsAbs(dir) { // the XDG specification ignores a relative path
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return ""

@@ -297,9 +297,9 @@ func (s *Server) call(name string, args map[string]any) (text string, isErr bool
 		if strings.TrimSpace(cmd) == "" {
 			return "command is required", true
 		}
-		var out bytes.Buffer
-		e.Stderr = &out
-		code, err := e.Run([]string{"sh", "-c", cmd}, box.RunOpts{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out})
+		out := &headTail{max: outputCap}
+		e.Stderr = out
+		code, err := e.Run([]string{"sh", "-c", cmd}, box.RunOpts{Stdin: strings.NewReader(""), Stdout: out, Stderr: out})
 		if err != nil {
 			return err.Error(), true
 		}
@@ -307,6 +307,40 @@ func (s *Server) call(name string, args map[string]any) (text string, isErr bool
 	default:
 		return "unknown tool " + name, true
 	}
+}
+
+// outputCap bounds what one boxer_run returns: the start and the end of the output, which is where
+// a command says what it is doing and how it failed. Unbounded, a chatty command filled the
+// server's memory and then the agent's context.
+const outputCap = 64 << 10
+
+// headTail keeps the first and the last max bytes written to it and counts what it drops between.
+type headTail struct {
+	max        int
+	head, tail []byte
+	dropped    int
+}
+
+func (h *headTail) Write(p []byte) (int, error) {
+	n := len(p)
+	if room := h.max - len(h.head); room > 0 {
+		k := min(room, len(p))
+		h.head = append(h.head, p[:k]...)
+		p = p[k:]
+	}
+	h.tail = append(h.tail, p...)
+	if over := len(h.tail) - h.max; over > 0 {
+		h.dropped += over
+		h.tail = append(h.tail[:0], h.tail[over:]...)
+	}
+	return n, nil
+}
+
+func (h *headTail) String() string {
+	if h.dropped == 0 {
+		return string(h.head) + string(h.tail)
+	}
+	return fmt.Sprintf("%s\n[boxer: %d bytes of output omitted]\n%s", h.head, h.dropped, h.tail)
 }
 
 func sortedKeys(m map[string]string) []string {

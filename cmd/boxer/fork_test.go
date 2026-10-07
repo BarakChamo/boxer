@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -156,5 +157,28 @@ func TestForkRmRefusesAnythingThatIsNotAChild(t *testing.T) {
 	// An unknown subcommand is a usage error, not a fork.
 	if code, out := call(t, nil, "fork", "wat"); code == 0 || !strings.Contains(out, "fork") {
 		t.Fatalf("unknown subcommand: %d %s", code, out)
+	}
+}
+
+// A fork child shares its parent's worktree, which is already set up: running in the child must not
+// run setup into the parent's files again.
+func TestForkChildDoesNotRepeatSetup(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"setup = [\"echo x >> setup.runs\"]\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var names []string
+	if code, out := call(t, &names, "fork", "--prepare", "--count", "1", "--json"); code != 0 || len(names) != 1 {
+		t.Fatalf("fork: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "stop", names[0]); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "run", "--scope", names[0], "--", "true"); code != 0 {
+		t.Fatal(out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "setup.runs")); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("setup ran %d times", strings.Count(string(b), "x"))
 	}
 }

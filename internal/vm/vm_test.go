@@ -338,3 +338,41 @@ func TestPackAppearsOnlyWhole(t *testing.T) {
 		t.Fatalf("a failed pack must leave nothing: %v", ents)
 	}
 }
+
+// State never lands relative to the current directory: gc deletes from it.
+func TestStateHomeIsAlwaysAbsolute(t *testing.T) {
+	for _, env := range [][2]string{{"relative/state", "/home/x"}, {"", ""}, {"relative", ""}} {
+		t.Setenv("XDG_STATE_HOME", env[0])
+		t.Setenv("HOME", env[1])
+		if got := vm.StateHome(); !filepath.IsAbs(got) {
+			t.Fatalf("XDG_STATE_HOME=%q HOME=%q: %q", env[0], env[1], got)
+		}
+	}
+	t.Setenv("XDG_STATE_HOME", "/abs/state")
+	if got := vm.StateHome(); got != "/abs/state" {
+		t.Fatal(got)
+	}
+}
+
+// A runtime CLI ended by a signal has not reported the command's status: that is a backend failure,
+// never the command exiting -1.
+func TestASignalledCLIIsABackendFailure(t *testing.T) {
+	c, _ := vmtest.Install(t)
+	vmtest.KillExecOnce(t)
+	var out bytes.Buffer
+	code, err := c.Exec(vm.ExecOpts{Name: "sb-x", Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "true")
+	if err == nil || code < 0 {
+		t.Fatalf("code %d err %v", code, err)
+	}
+}
+
+// smolvm reports its own failure last. A guest line in the middle of the output that happens to
+// read like one is the guest's, and its exit code is the command's.
+func TestOnlySmolvmsLastLineIsItsOwn(t *testing.T) {
+	if vm.SmolvmFailureForTest("Error: hyper: connection closed before message completed\n2 tests failed\n") != "" {
+		t.Error("a guest's line was taken for smolvm's")
+	}
+	if vm.SmolvmFailureForTest("output\nError: agent operation failed: connection closed\n") == "" {
+		t.Error("smolvm's own last line was missed")
+	}
+}

@@ -33,11 +33,11 @@ Any OCI reference works. Without `image`, boxer picks one from the worktree's lo
 | `Gemfile.lock` | `ruby:3-slim-bookworm` |
 | `pom.xml` | `maven:3-eclipse-temurin-21` |
 | `build.gradle`, `build.gradle.kts` | `gradle:8-jdk21` |
-| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` | `node:24-bookworm-slim` |
+| `bun.lock`, `bun.lockb` | `oven/bun:1-slim` |
+| `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock` | `node:24-bookworm-slim` |
 | `uv.lock`, `requirements.txt`, `pyproject.toml` | `python:3.12-slim-bookworm` |
-| `bun.lock` | `oven/bun:1-slim` |
 | `Cargo.lock` | `rust:1-slim-bookworm` |
-| `go.mod` | `golang:1-alpine` |
+| `go.sum`, `go.mod` | `golang:1-alpine` |
 | none of these | `debian:bookworm-slim` |
 
 boxer looks only in the worktree's root, and the first file in the table's order wins. A project

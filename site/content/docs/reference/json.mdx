@@ -156,7 +156,8 @@ scope already had that many.
 
 `down` prints one object. `removed` is `false` when there was no sandbox. `down --all`,
 `down --scope`, `stop` and `rm` print an array, one per sandbox acted on, and `[]` when nothing
-matched. `stop` rows have `removed: false`. A sandbox that failed has `error`. An `rm --volumes`
+matched; `down --scope` with a name that matches no sandbox exits 1 with an [error](#errors)
+instead. `stop` rows have `removed: false`. A sandbox that failed has `error`. An `rm --volumes`
 row can have both `removed: true` and `error` when the sandbox went but its volumes did not.
 
 ## `boxer gc --json`

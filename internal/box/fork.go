@@ -199,6 +199,16 @@ func ResolveName(client vm.Backend, name string) string {
 	return name
 }
 
+// worktreeKey is the scope whose worktree this is. A fork child shares its parent's worktree, so
+// the worktree's markers (setup, prep) are the parent's: keyed by the child, every child looked
+// like a worktree never set up, and `run --scope <child>` ran `npm ci` into the parent's files.
+func (e *Env) worktreeKey() string {
+	if p := ParentOf(e.Scope.Key); p != "" {
+		return p
+	}
+	return e.Scope.Key
+}
+
 // At returns this Env pointed at another sandbox by name — a fork child, or any sandbox a
 // listing named. The configuration and the worktree stay this scope's, because a child is a
 // branch of this worktree and has no other one; only the machine changes.

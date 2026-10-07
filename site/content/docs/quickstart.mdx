@@ -34,7 +34,8 @@ smolvm runs the sandboxes. On Linux, smolvm needs `/dev/kvm` (`sudo usermod -aG 
 The script installs `boxer` into `~/.local/bin`, so that directory must be on your `PATH`, and it
 checks the download against the release's checksums. `BOXER_VERSION=v1.4.1` pins a version, and
 `BOXER_INSTALL_DIR=/usr/local/bin` changes where it goes (GUI apps such as Conductor need a
-directory they can see).
+directory they can see). Both go to the right of the pipe, where the script reads them:
+`curl -fsSL .../install.sh | sudo BOXER_INSTALL_DIR=/usr/local/bin sh`.
 
 **On an Intel Mac, or prefer Docker, podman or Apple `container`?** Skip smolvm. Add `backend = "docker"` (or `"podman"`,
 `"container"`) and `[network] mode = "on"` to your `boxer.toml` in step 3. You get a container per worktree instead of a microVM. See

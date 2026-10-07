@@ -38,7 +38,8 @@ apply here too.
 | `command` | string | Required. A POSIX shell line, run with `sh -c` in the guest |
 | `cwd` | string | Optional. The directory to run in. Defaults to the server's working directory |
 
-Returns stdout and stderr interleaved, followed by `[exit N]`. Stdin is empty. `isError` is set when
+Returns stdout and stderr interleaved, followed by `[exit N]`. Output over 128 KB keeps its first
+and last 64 KB, with a line saying how many bytes were left out between them. Stdin is empty. `isError` is set when
 the exit is non-zero or when boxer refused. A refusal is the same `boxer: <reason>` text, with
 `cause` and `fix` lines, that the CLI prints. The sandbox is created first when
 [`create_on`](/docs/reference/configuration#create_on) includes `run`.

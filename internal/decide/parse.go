@@ -2,6 +2,7 @@ package decide
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -53,14 +54,26 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 	var word strings.Builder
 	inWord := false
 	redirect := false // the next word is a redirection target
+	bad := false
 	flushWord := func() {
 		if !inWord {
 			return
 		}
+		w := word.String()
+		// Arithmetic evaluates a variable's text, and an array index in it runs any substitution
+		// it holds, quoted or not: `x='a[$(npm i)]'; echo $((x))`, `let 'a[$(npm i)]=1'`. So a
+		// word holding an index with a substitution is read for it wherever it appears.
+		if strings.Contains(w, "[$(") || strings.Contains(w, "[`") {
+			if _, inner, ok := lex(w); ok {
+				subs = append(subs, inner...)
+			} else {
+				bad = true
+			}
+		}
 		if redirect {
 			redirect = false
 		} else {
-			words = append(words, word.String())
+			words = append(words, w)
 		}
 		word.Reset()
 		inWord = false
@@ -84,6 +97,22 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 					inWord = true
 				}
 			}
+		case c == '$' && i+1 < len(r) && r[i+1] == '\'':
+			// $'...' honours backslash escapes, so `\'` does not end it. Its text is kept with the
+			// `$`: a program named this way is decided when the line runs, so it is unreadable.
+			j := i + 2
+			for j < len(r) && r[j] != '\'' {
+				if r[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(r) {
+				return nil, nil, false
+			}
+			word.WriteString("$" + string(r[i+2:j]))
+			inWord = true
+			i = j
 		case c == '\'':
 			j := indexRune(r, i+1, '\'')
 			if j < 0 {
@@ -176,6 +205,9 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 		}
 	}
 	flushCmd()
+	if bad {
+		return nil, nil, false
+	}
 	return cmds, subs, true
 }
 
@@ -280,28 +312,91 @@ var keywords = map[string]bool{
 // `case $x in`, `select x in a b`.
 var headers = map[string]bool{"for": true, "case": true, "select": true, "[[": true}
 
-// wrappers run the program given in their arguments. The value lists the options that take a
-// separate argument, so the argument is not mistaken for the program.
-var wrappers = map[string]string{
-	"env":        "-u -C -S",
-	"sudo":       "-u -g -C -D -h -p -r -t -U -T",
-	"doas":       "-u -C",
-	"nohup":      "",
-	"nice":       "-n",
-	"ionice":     "-c -n -p",
-	"time":       "-f -o",
-	"timeout":    "-s -k",
-	"command":    "",
-	"builtin":    "",
-	"exec":       "-a",
-	"stdbuf":     "-i -o -e",
-	"xargs":      "-I -i -n -P -L -l -d -E -e -s -a",
-	"caffeinate": "-w -t",
-	"chronic":    "",
-	"unbuffer":   "",
-	"setsid":     "",
-	"strace":     "-o -e -p -s",
-	"arch":       "",
+// wrapper describes a program that runs the program given in its arguments: the options that take
+// a separate value, the options that take none, and how many positional words (a duration, a CPU
+// mask) come before the program. An option that is in neither list makes the line unreadable: it
+// may take a value, and taking that value for the program let `sudo --user root npm i` through.
+type wrapper struct {
+	takes, flags string
+	positional   int
+}
+
+var wrappers = map[string]wrapper{
+	"env":        {"-u --unset -C --chdir -S --split-string -P", "-i --ignore-environment -0 --null -v --debug", 0},
+	"sudo":       {"-u --user -g --group -C --close-from -D --chdir -h --host -p --prompt -r --role -t --type -U --other-user -T --command-timeout -R --chroot", "-A --askpass -b --background -B --bell -E --preserve-env -H --set-home -i --login -k --reset-timestamp -n --non-interactive -N --no-update -P --preserve-groups -S --stdin -s --shell", 0},
+	"doas":       {"-u -C", "-n -s -L", 0},
+	"nohup":      {"", "", 0},
+	"nice":       {"-n --adjustment", "", 0},
+	"ionice":     {"-c --class -n --classdata -p --pid -P --pgid -u --uid", "-t --ignore", 0},
+	"time":       {"-f --format -o --output", "-p -a --append -v --verbose --portability -l -h", 0},
+	"timeout":    {"-s --signal -k --kill-after", "--foreground --preserve-status -v --verbose -f -p", 1},
+	"command":    {"", "-p -v -V", 0},
+	"builtin":    {"", "", 0},
+	"exec":       {"-a", "-c -l", 0},
+	"stdbuf":     {"-i --input -o --output -e --error", "", 0},
+	"xargs":      {"-I -n --max-args -P --max-procs -L --max-lines -d --delimiter -E -s --max-chars -a --arg-file", "-0 --null -r --no-run-if-empty -t --verbose -p --interactive -x --exit -o --open-tty -i -l -e", 0},
+	"caffeinate": {"-w -t", "-d -i -m -s -u", 0},
+	"chronic":    {"", "-e -v", 0},
+	"unbuffer":   {"", "-p", 0},
+	"setsid":     {"", "-c --ctty -f --fork -w --wait", 0},
+	"strace":     {"-o -e -p -s -a -b -I -O -P -S -u -E -X", "-f -ff -c -C -d -D -F -h -i -k -q -qq -r -t -tt -ttt -T -v -V -w -x -xx -y -yy -z -Z", 0},
+	"arch":       {"-d -e", "-arm64 -arm64e -x86_64 -x86_64h -i386 -32 -64 -c", 0},
+	"taskset":    {"", "-a --all-tasks -c --cpu-list", 1},
+	"chrt":       {"-T --sched-runtime -P --sched-period -D --sched-deadline", "-a --all-tasks -b --batch -d --deadline -f --fifo -i --idle -o --other -r --rr -R --reset-on-fork -v --verbose -m --max", 1},
+	"busybox":    {"", "", 0},
+}
+
+// skipWrapper returns the index of the program in rest, a wrapper's arguments, or ok false when
+// an option is one the wrapper is not known to take.
+func skipWrapper(name string, rest []string) (int, bool) {
+	wr := wrappers[name]
+	takes, flags := strings.Fields(wr.takes), strings.Fields(wr.flags)
+	j := 0
+	for j < len(rest) {
+		a := rest[j]
+		if a == "--" {
+			j++
+			break
+		}
+		if (name == "env" || name == "sudo") && isAssignment(a) {
+			j++
+			continue
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			break
+		}
+		j++
+		if opt, _, found := strings.Cut(a, "="); found && strings.HasPrefix(a, "--") {
+			if !slices.Contains(takes, opt) && !slices.Contains(flags, opt) {
+				return 0, false
+			}
+			continue
+		}
+		if slices.Contains(flags, a) || name == "nice" && isDigits(strings.TrimPrefix(a, "-")) {
+			continue
+		}
+		if slices.Contains(takes, a) {
+			j++
+			continue
+		}
+		if strings.HasPrefix(a, "--") || len(a) < 3 {
+			return 0, false
+		}
+		// Short options run together: -Eu root, -n10, -iv.
+		for k := 1; k < len(a); k++ {
+			o := "-" + string(a[k])
+			if slices.Contains(takes, o) {
+				if k == len(a)-1 {
+					j++ // its value is the next word
+				}
+				break
+			}
+			if !slices.Contains(flags, o) {
+				return 0, false
+			}
+		}
+	}
+	return j + wr.positional, true
 }
 
 // shells run a command line given with -c, which is read as a line of its own.
@@ -316,6 +411,9 @@ func program(words []string, depth int) ([]string, bool) {
 		switch {
 		case isAssignment(w):
 			i++
+			continue
+		case w == "function" || w == "coproc" && i+2 < len(words) && words[i+2] == "{":
+			i += 2 // the name being defined is not a program
 			continue
 		case keywords[w]:
 			i++
@@ -340,6 +438,16 @@ func program(words []string, depth int) ([]string, bool) {
 	switch {
 	case name == "eval":
 		return programs(strings.Join(rest, " "), depth+1)
+	case name == "trap":
+		// trap LINE SIGNAL... runs LINE later, in this shell.
+		j := skipOptions(rest, "")
+		if j+1 < len(rest) {
+			return programs(rest[j], depth+1)
+		}
+		return []string{raw}, true
+	case name == "alias" || name == "shopt" && slices.Contains(rest, "expand_aliases"):
+		// An alias renames a program for the lines after it, which this reader cannot follow.
+		return nil, false
 	case shells[name]:
 		return shellLine(raw, rest, depth)
 	case name == "watch":
@@ -389,35 +497,10 @@ func program(words []string, depth int) ([]string, bool) {
 		}
 	}
 
-	if opts, ok := wrappers[name]; ok {
-		takes := strings.Fields(opts)
-		j := 0
-		if name == "time" && j < len(rest) && rest[j] == "-p" {
-			j++
-		}
-		for j < len(rest) {
-			a := rest[j]
-			if a == "--" {
-				j++
-				break
-			}
-			if name == "env" && isAssignment(a) {
-				j++
-				continue
-			}
-			if !strings.HasPrefix(a, "-") || a == "-" {
-				break
-			}
-			j++
-			for _, o := range takes {
-				if a == o {
-					j++
-					break
-				}
-			}
-		}
-		if name == "timeout" && j < len(rest) {
-			j++ // the duration
+	if _, ok := wrappers[name]; ok {
+		j, ok := skipWrapper(name, rest)
+		if !ok {
+			return nil, false
 		}
 		if j >= len(rest) {
 			return []string{raw}, true

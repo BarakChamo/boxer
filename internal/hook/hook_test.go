@@ -10,6 +10,7 @@ import (
 	"github.com/BarakChamo/boxer/internal/vmtest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -402,5 +403,14 @@ func TestHookPathsReviewThree(t *testing.T) {
 	}
 	if out, _, _ := call(t, "claude-code", pre("Bash", "git status", dir)); out != nil {
 		t.Fatalf("passthrough still runs while the config is broken: %v", out)
+	}
+}
+
+// Every harness the hook speaks for may be configured by name.
+func TestEveryDialectIsAKnownHarnessName(t *testing.T) {
+	for name := range Dialects {
+		if !slices.Contains(config.HarnessNames, name) {
+			t.Errorf("[harness.%s] would be refused", name)
+		}
 	}
 }

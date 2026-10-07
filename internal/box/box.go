@@ -103,11 +103,7 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	repoRoot := ""
-	if g.CommonDir != "" {
-		repoRoot = filepath.Dir(g.CommonDir)
-	}
-	cfg, err := config.Load(g.Toplevel, repoRoot)
+	cfg, err := config.Load(g.Toplevel, g.RepoRoot())
 	if err != nil {
 		return nil, &ConfigError{Err: err}
 	}
@@ -385,14 +381,21 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		if !allowCreate {
 			return false, e.fail(&Error{Reason: "no sandbox exists for this scope", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"})
 		}
+		// The scope's sandbox on another backend, left by a change of `backend`, keeps running
+		// where nothing on this backend sees it, and shares this worktree's state and volumes.
+		if prev := createdOn(e.Scope.Key); prev != "" && prev != e.VM.Name() {
+			fmt.Fprintf(e.Stderr, "boxer: warning: this worktree's sandbox on %s is still there, and shares its volumes with the new one on %s; "+
+				"remove it with: BOXER_BACKEND=%s boxer down\n", prev, e.VM.Name(), prev)
+		}
 		if err := e.create(); err != nil {
 			return false, err
 		}
+		setCreatedOn(e.Scope.Key, e.VM.Name())
 		// A backend that cannot carry boxer's label gets the mark on boxer's side instead, so
 		// `ls` and `gc` can still tell this machine apart from one boxer did not create.
 		vm.RecordOwned(e.VM, e.Scope.Key)
 		created = true
-	} else if m.Running() {
+	} else if m.Running() && provisioned(e.Scope.Key) {
 		// A running sandbox's routes are registered, but the proxy serving them may not be: it
 		// does not survive a reboot or a crash. Checking is a pid-file read; starting it is paid
 		// only when it is actually down.
@@ -403,7 +406,13 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		}
 		return false, nil
 	}
-	if err := e.VM.Start(e.Scope.Key); err != nil {
+	// Cleared before provisioning and set once setup has run, so a sandbox whose setup failed or
+	// was interrupted is provisioned again by the next command rather than taken as ready because
+	// it is running. A running one is not started again.
+	setProvisioned(e.Scope.Key, false)
+	if ok && m.Running() {
+		// fall through to the provisioning steps; each skips what is already done
+	} else if err := e.VM.Start(e.Scope.Key); err != nil {
 		return created, e.fail(&Error{Reason: "sandbox failed to start: " + err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
 	}
 	if err := e.awaitMount(10); err != nil {
@@ -461,6 +470,9 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	if err := e.setup(); err != nil {
 		return created, err
 	}
+	// Not after `ready`: a service that never comes up is something an agent needs to run
+	// commands to debug, and holding every command for ready_timeout would stop it.
+	setProvisioned(e.Scope.Key, true)
 	// Services come after the snapshot: a pack should carry what is installed, not a process that
 	// was running when it was taken.
 	if err := e.startServices(); err != nil {
@@ -469,8 +481,15 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	return created, e.waitReady()
 }
 
-func (e *Env) create() error {
+func (e *Env) create() (err error) {
 	e.seen = nil // the machine is about to change; a memoised one would describe the old one
+	// A new machine is in use now. Recreating deletes the old one, and with it the stamp the
+	// command had just set, and a sandbox with no stamp is never found idle.
+	defer func() {
+		if err == nil {
+			touchLastUsed(e.Scope.Key)
+		}
+	}()
 	if e.Cfg.Build != "" {
 		built, err := e.buildImage()
 		if err != nil {
@@ -572,14 +591,28 @@ func (e *Env) create() error {
 			}
 		}
 	}
-	releasePack := func() {}
+	var unlockPack func()
+	releasePack := func() { // once: a second unlock would act on a descriptor since reused
+		if unlockPack != nil {
+			unlockPack()
+			unlockPack = nil
+		}
+	}
+	defer releasePack()
 	if from != "" {
 		// Held until the machine carries the label: between choosing a pack and labelling the
 		// machine, nothing else tells gc this pack is about to be used. Released right after,
 		// because this process may rebuild the same pack later in Ensure.
 		if unlock, err := lockFileHow(packLock(from), syscall.LOCK_SH); err == nil {
-			releasePack = unlock
+			unlockPack = unlock
 		}
+		// gc may have removed it between choosing it and taking the lock.
+		if !packReady(from) && e.FromPack == "" {
+			releasePack()
+			from = ""
+		}
+	}
+	if from != "" {
 		labels[vm.LabelPrefix+"pack"] = from // the exact reference gc needs before pruning a pack
 		now := time.Now()
 		_ = os.Chtimes(from, now, now) // a pack's mtime is its last use
@@ -621,7 +654,6 @@ func (e *Env) create() error {
 		// afterwards. vm.Create now waits out the lock, and a lock error never condemns a pack.
 		fmt.Fprintf(e.Stderr, "boxer: cached image unusable, pulling directly: %v\n", err)
 		releasePack()
-		releasePack = func() {}
 		_, _ = removePack(from, true)
 		spec.From = ""
 		delete(labels, vm.LabelPrefix+"pack")
@@ -801,19 +833,30 @@ func (e *Env) DropEnvPack() (string, error) {
 	// A rebuild means "prepare this from scratch", which includes the worktree half, whether or not
 	// there is a pack to drop. This was once removed only alongside a pack, so on docker, podman
 	// and Apple container, or with no image_setup, `--rebuild` never ran `setup` again.
-	_ = os.Remove(setupMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg))
+	_ = os.Remove(setupMarkerPath(e.Scope.Root, e.worktreeKey(), e.Cfg))
 	image, _ := e.Image()
 	if image == "" || len(e.Cfg.ImageSetup) == 0 {
 		return "", nil
 	}
-	side := PackPath(EnvKey(image, e.Cfg))
-	if !packReady(side) {
-		return "", nil
+	// On smolvm a built image boots from an archive, and the pack is keyed by the archive's path,
+	// which is known only after the build. Every archive of this Dockerfile is a candidate.
+	images := []string{image}
+	if e.Cfg.Build != "" && e.built == "" {
+		archives, _ := filepath.Glob(filepath.Join(stateRoot(), "images", e.buildTag()+"-*.tar"))
+		images = append(images, archives...)
 	}
-	if _, err := removePack(side, true); err != nil {
-		return "", err
+	dropped := ""
+	for _, img := range images {
+		side := PackPath(EnvKey(img, e.Cfg))
+		if !packReady(side) {
+			continue
+		}
+		if _, err := removePack(side, true); err != nil {
+			return "", err
+		}
+		dropped = side
 	}
-	return side, nil
+	return dropped, nil
 }
 
 func packLock(pack string) string { return strings.TrimSuffix(pack, ".smolmachine") + ".lock" }
@@ -897,10 +940,16 @@ func (e *Env) PackEnv() {
 	e.event(obs.Pack, outcome, time.Since(start), map[string]any{"kind": "env", "image": image, "path": side})
 }
 
-func harnessKey(image, harness string) string {
+func harnessKey(image, harness string, imageSetup []string) string {
 	key := image + "\x00" + harness
 	if InsideHooks.InstallLine != nil {
 		key += "\x00" + InsideHooks.InstallLine(harness)
+	}
+	// The snapshot is taken after image_setup ran, so it carries what image_setup installed: keyed
+	// without it, another repository with the same image and harness booted this one's packages
+	// and skipped its own image_setup, because the guest's marker said it was done.
+	for _, c := range imageSetup {
+		key += "\x00image_setup:" + c
 	}
 	return key
 }
@@ -977,7 +1026,7 @@ func (e *Env) harnessPack(image string) string {
 	if !e.Inside() || e.Harness == "" {
 		return ""
 	}
-	side := PackPath(harnessKey(image, e.Harness))
+	side := PackPath(harnessKey(image, e.Harness, e.Cfg.ImageSetup))
 	if !packReady(side) {
 		return ""
 	}
@@ -996,7 +1045,7 @@ func (e *Env) PackHarness() {
 	if !ok {
 		return
 	}
-	side := PackPath(harnessKey(image, e.Harness))
+	side := PackPath(harnessKey(image, e.Harness, e.Cfg.ImageSetup))
 	stub := strings.TrimSuffix(side, ".smolmachine")
 	if packReady(side) {
 		return
@@ -1263,11 +1312,18 @@ const startMarker = "/tmp/boxer-started"
 // start of a container. The start marker holds it: only smolvm's /tmp is emptied by a stop, and
 // on docker, podman and Apple container a marker that merely existed survived the stop and start,
 // so services were never launched again after idle reclaim or a restart.
-const bootToken = `cut -d' ' -f22 /proc/1/stat`
+//
+// The kernel's boot id is part of it because Apple container boots a fresh VM for every start,
+// and PID 1 can start the same number of ticks after each boot.
+const bootToken = `{ cat /proc/sys/kernel/random/boot_id; cut -d' ' -f22 /proc/1/stat; } 2>/dev/null | tr -d '\n'`
 
 // startedThisBoot succeeds when the marker names this boot; otherwise it clears the previous
-// boot's pid files, whose numbers now belong to other processes.
-const startedThisBoot = `[ "$(cat ` + startMarker + ` 2>/dev/null)" = "$(` + bootToken + `)" ] || { rm -rf ` + serviceDir + `; exit 1; }`
+// boot's pid files, whose numbers now belong to other processes. A token that cannot be read
+// never matches. An empty marker is the form before the token, and counts while a supervisor it
+// started is still alive, so an upgrade does not launch every service a second time.
+const startedThisBoot = `t=$(` + bootToken + `); [ -n "$t" ] && [ "$(cat ` + startMarker + ` 2>/dev/null)" = "$t" ] && exit 0
+if [ -f ` + startMarker + ` ] && [ ! -s ` + startMarker + ` ]; then for f in ` + serviceDir + `/*.pid; do [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && exit 0; done; fi
+rm -rf ` + serviceDir + `; exit 1`
 
 func (e *Env) startServices() error {
 	if len(e.Cfg.Start) == 0 {
@@ -1464,7 +1520,7 @@ func (e *Env) setup() error {
 	if len(e.Cfg.Setup) == 0 {
 		return nil
 	}
-	marker := setupMarkerPath(e.Scope.Root, e.Scope.Key, e.Cfg)
+	marker := setupMarkerPath(e.Scope.Root, e.worktreeKey(), e.Cfg)
 	if _, err := os.Stat(marker); err == nil {
 		return nil
 	}
@@ -1791,13 +1847,27 @@ type RunOpts struct {
 	Task string
 }
 
+// HostFallback is Run's answer when the sandbox could not be provisioned and the policy says to
+// run on the host instead. A type, not a status: -1 is also what a killed process exits with.
+type HostFallback struct{ Err error }
+
+func (h *HostFallback) Error() string { return h.Err.Error() }
+func (h *HostFallback) Unwrap() error { return h.Err }
+
 // Run executes argv in the guest, provisioning first when policy allows. It returns the exit
 // code to propagate. Errors are *Error and already agent-readable.
 func (e *Env) Run(argv []string, o RunOpts) (int, error) {
+	// pkg/boxer callers may leave either stream out; writing to a nil one panicked.
+	if o.Stdout == nil {
+		o.Stdout = io.Discard
+	}
+	if o.Stderr == nil {
+		o.Stderr = io.Discard
+	}
 	if _, err := e.Ensure(config.Has(e.Cfg.CreateOn, "run"), false); err != nil {
 		if e.Cfg.OnSandboxUnavailable == "passthrough" {
 			fmt.Fprintf(o.Stderr, "boxer: sandbox unavailable, running on host (on_sandbox_unavailable = passthrough)\n")
-			return -1, err
+			return -1, &HostFallback{Err: err}
 		}
 		return 1, err
 	}
@@ -1945,11 +2015,7 @@ func lockFileHow(path string, how int) (func(), error) {
 // LastUsedDir holds one zero-byte file per scope whose mtime is the last `run`. smolvm exposes
 // no last-used time, so this is the only host state boxer keeps; losing it only delays gc.
 func LastUsedDir() string {
-	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
-		return filepath.Join(d, "boxer", "last-used")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "boxer", "last-used")
+	return filepath.Join(vm.StateHome(), "boxer", "last-used")
 }
 
 // KeepAlive marks the scope used now and every few minutes until the returned stop is called.
