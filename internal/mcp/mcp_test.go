@@ -3,12 +3,15 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/vmtest"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -114,9 +117,16 @@ func TestRoundTrip(t *testing.T) {
 	if err := s.Serve(strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("want 6 responses (notification ignored), got %d:\n%s", len(lines), out.String())
+	got := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(got) != 6 {
+		t.Fatalf("want 6 responses (notification ignored), got %d:\n%s", len(got), out.String())
+	}
+	// Runs answer when they finish, not in the order asked: a client matches responses by id.
+	lines := make([]string, 6)
+	for _, l := range got {
+		var withID struct{ ID int }
+		_ = json.Unmarshal([]byte(l), &withID)
+		lines[withID.ID-1] = l
 	}
 	var r map[string]any
 	json.Unmarshal([]byte(lines[0]), &r)
@@ -195,7 +205,7 @@ func TestErrorPaths(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, body, want string }{
 		{"unknown tool", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope","arguments":{}}}`, "unknown tool"},
-		{"empty command", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"  "}}}`, "command is required"},
+		{"empty command", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"  "}}}`, "is required"},
 		{"run refused", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"` + dir + `"}}}`, "NO_SANDBOX"},
 	} {
 		r := call(tc.body)
@@ -269,8 +279,10 @@ func TestStatusSaysWhereServersAre(t *testing.T) {
 	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"network = { ports = [\"auto:3000\", \"auto:4000\"] }\n")
 	call := func() string {
 		var r map[string]any
-		json.Unmarshal([]byte(serve(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"`+dir+`"}}}`,
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"boxer_status","arguments":{"cwd":"`+dir+`"}}}`)[1]), &r)
+		// The run, answered, then the status: a run answers when it finishes, so a client that
+		// wants the status after it waits for that answer first.
+		serve(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"true","cwd":"`+dir+`"}}}`)
+		json.Unmarshal([]byte(serve(t, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"boxer_status","arguments":{"cwd":"`+dir+`"}}}`)[0]), &r)
 		return text(r)
 	}
 	out := call()
@@ -342,5 +354,93 @@ func TestRunOutputKeepsItsStartAndEnd(t *testing.T) {
 	_, _ = small.Write([]byte("abcdef"))
 	if got := small.String(); got != "abcdef" {
 		t.Fatalf("output within both halves is kept whole: %q", got)
+	}
+}
+
+// A task runs by name through the tool, since there is no boxer in the guest to run `boxer run --task`.
+func TestRunATaskByName(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[tasks.hello]\ncmd = \"echo task-ran\"\n")
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	if out, isErr := s.call("boxer_run", map[string]any{"task": "hello", "cwd": dir}); isErr || !strings.Contains(out, "task-ran") {
+		t.Fatalf("%v %s", isErr, out)
+	}
+	if out, isErr := s.call("boxer_run", map[string]any{"task": "nope", "cwd": dir}); !isErr || !strings.Contains(out, "hello") {
+		t.Fatalf("an unknown task names the known ones: %s", out)
+	}
+	if _, isErr := s.call("boxer_run", map[string]any{"task": "hello", "command": "ls", "cwd": dir}); !isErr {
+		t.Fatal("command and task together are refused")
+	}
+}
+
+// The server runs in its own repository only: a cwd in another one is refused.
+func TestACwdInAnotherRepositoryIsRefused(t *testing.T) {
+	vmtest.Install(t)
+	other := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	if out, isErr := s.call("boxer_run", map[string]any{"command": "true", "cwd": other}); !isErr || !strings.Contains(out, "another repository") {
+		t.Fatalf("%v %s", isErr, out)
+	}
+}
+
+// A long run does not hold up the rest: ping is answered while boxer_run is still going.
+func TestPingIsAnsweredDuringARun(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	pr, pw := io.Pipe()
+	var out safeBuffer
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	done := make(chan struct{})
+	go func() { _ = s.Serve(pr, &out); close(done) }()
+	fmt.Fprintf(pw, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boxer_run","arguments":{"command":"sleep 3","cwd":%q}}}`+"\n", dir)
+	fmt.Fprintln(pw, `{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(out.String(), `"id":2`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("ping waited for the run: %s", out.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = pw.Close()
+	<-done
+	if !strings.Contains(out.String(), `"id":1`) {
+		t.Fatal("the run's answer was lost")
+	}
+}
+
+type safeBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *safeBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+// A task's own variables reach its command.
+func TestATaskRunsWithItsEnv(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[tasks.hello]\ncmd = \"echo $GREETING\"\nenv = { GREETING = \"task-env\" }\n")
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	if out, isErr := s.call("boxer_run", map[string]any{"task": "hello", "cwd": dir}); isErr || !strings.Contains(out, "task-env") {
+		t.Fatalf("%v %s", isErr, out)
+	}
+}
+
+// Outside a repository there is nothing to keep to; a server in one refuses a cwd outside any.
+func TestSameRepositoryEdges(t *testing.T) {
+	plain := t.TempDir()
+	repo := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	t.Chdir(plain)
+	if !sameRepository(repo) {
+		t.Fatal("a server outside any repository allows anything")
+	}
+	t.Chdir(repo)
+	if sameRepository(plain) {
+		t.Fatal("a directory outside any repository is not this one")
 	}
 }

@@ -158,10 +158,14 @@ func (e *Env) Fork(count int) ([]string, error) {
 		outcome = obs.Failed
 	}
 	e.event(obs.Provision, outcome, time.Since(start), map[string]any{"kind": "fork", "count": count})
-	if err != nil {
-		return nil, err
+	// A child is a copy of a provisioned parent, services and all; without the mark its first
+	// command provisioned it again and launched the services a second time.
+	for _, n := range names {
+		setProvisioned(n, "ok")
 	}
-	return names, nil
+	// The children made before a failure are returned with it: they are running, and a caller
+	// that is not told about them cannot remove them.
+	return names, err
 }
 
 // Forks lists this scope's children.
@@ -183,20 +187,31 @@ func (e *Env) Forks() ([]vm.Machine, error) {
 // into the machine name. A slug is derived from the key, so the only way back is to look at what
 // exists; an unknown name is returned unchanged so the caller's own "no such sandbox" is what the
 // reader sees.
-func ResolveName(client vm.Backend, name string) string {
+//
+// A two-word name carries 12 bits, so two sandboxes can share one; then the name is refused rather
+// than taken to mean whichever was listed first, and the keys are given to choose from.
+func ResolveName(client vm.Backend, name string) (string, error) {
 	if _, ok, err := client.Status(name); err == nil && ok {
-		return name
+		return name, nil
 	}
 	all, err := client.List()
 	if err != nil {
-		return name
+		return name, nil
 	}
+	var keys []string
 	for _, m := range all {
 		if scope.Slug(m.Name) == name {
-			return m.Name
+			keys = append(keys, m.Name)
 		}
 	}
-	return name
+	switch len(keys) {
+	case 0:
+		return name, nil
+	case 1:
+		return keys[0], nil
+	}
+	return "", &Error{Reason: fmt.Sprintf("%q names %d sandboxes: %s", name, len(keys), strings.Join(keys, ", ")),
+		Cause: "AMBIGUOUS_NAME", Fix: "name it by its key: " + keys[0]}
 }
 
 // worktreeKey is the scope whose worktree this is. A fork child shares its parent's worktree, so
@@ -213,10 +228,15 @@ func (e *Env) worktreeKey() string {
 // listing named. The configuration and the worktree stay this scope's, because a child is a
 // branch of this worktree and has no other one; only the machine changes.
 func (e *Env) At(name string) (*Env, error) {
-	name = ResolveName(e.VM, name)
-	if _, ok, err := e.VM.Status(name); err != nil {
+	name, err := ResolveName(e.VM, name)
+	if err != nil {
 		return nil, err
-	} else if !ok {
+	}
+	// Owned, as for down --scope: on docker, `--scope postgres` would otherwise exec in a
+	// container boxer did not make.
+	if owned, err := vm.OwnsName(e.VM, name); err != nil {
+		return nil, err
+	} else if !owned {
 		return nil, &Error{Reason: fmt.Sprintf("no sandbox named %q", name), Cause: "NO_SUCH_SCOPE",
 			Scope: e.Scope, Fix: "boxer ls"}
 	}

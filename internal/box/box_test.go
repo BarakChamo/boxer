@@ -116,10 +116,20 @@ func TestSetupFailureDeletesVM(t *testing.T) {
 	if _, exists, _ := e2.Exists(); !exists {
 		t.Fatal("a failed worktree setup must leave the VM alone")
 	}
-	// And the next command sets it up again: a running sandbox whose setup failed is not ready.
-	_, err = e2.Ensure(true, false)
-	if be, ok := err.(*Error); !ok || be.Cause != "SETUP_FAILED" {
-		t.Fatalf("a running sandbox whose setup failed must run setup again, got %v", err)
+	// A setup that failed leaves the sandbox usable: the agent needs it to find out why, and a
+	// setup repeated before every command would stop it doing anything else.
+	if _, err = e2.Ensure(true, false); err != nil {
+		t.Fatalf("a sandbox whose setup failed still runs commands, got %v", err)
+	}
+	// `boxer up` asks again.
+	e2.RetryFailedSetup()
+	if _, err = e2.Ensure(true, false); err == nil {
+		t.Fatal("up must run the failed setup again")
+	}
+	// A setup that never finished (interrupted) is run again by the next command.
+	setProvisioned(e2.Scope.Key, "")
+	if _, err = e2.Ensure(true, false); err == nil {
+		t.Fatal("an interrupted setup must run again")
 	}
 }
 
@@ -1477,5 +1487,31 @@ func TestASandboxLeftOnAnotherBackendIsNamed(t *testing.T) {
 	}
 	if createdOn(e.Scope.Key) != e.VM.Name() {
 		t.Fatal("the record names the new backend")
+	}
+}
+
+// Two sandboxes can share a two-word name; the name is refused rather than taken to mean the
+// first one listed, which down --scope would then have deleted.
+func TestAnAmbiguousTwoWordNameIsRefused(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	seen := map[string]string{}
+	var a, b string
+	for i := 0; a == ""; i++ {
+		k := fmt.Sprintf("sb-%012x", i)
+		if prev, ok := seen[scope.Slug(k)]; ok {
+			a, b = prev, k
+		}
+		seen[scope.Slug(k)] = k
+	}
+	for _, k := range []string{a, b} {
+		if err := client.Create(vm.CreateSpec{Name: k, Image: "alpine", Labels: map[string]string{vm.LabelPrefix + "scope": k}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ResolveName(client, scope.Slug(a)); err == nil || !strings.Contains(err.Error(), a) || !strings.Contains(err.Error(), b) {
+		t.Fatalf("want a refusal naming both keys, got %v", err)
+	}
+	if got, err := ResolveName(client, a); err != nil || got != a {
+		t.Fatalf("a key still resolves: %q %v", got, err)
 	}
 }

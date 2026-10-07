@@ -99,6 +99,12 @@ These run on the host. A hostile agent can use any of them to reach your machine
 | The skill on its own | A skill or plugin installed without `boxer install` only asks the agent to use boxer. See [skills and plugins](/docs/setup/skills-and-plugins). |
 | `mode = "off"` and `enforcement = "audit"` | Neither sandboxes anything. `audit` prints what boxer would have rewritten or blocked, and runs the command on the host. |
 | `on_sandbox_unavailable = "passthrough"` | Off by default (`"fail"`). When set, a command whose sandbox cannot be provisioned runs on the host instead of failing. |
+| `boxer` itself | It is passthrough, so an agent can run `boxer rm`, `boxer down --scope` or `boxer run --scope` against any sandbox on the host, other worktrees' included. Filtered `rm` asks a person and refuses an agent without `-y`; nothing else limits it. |
+
+Two facts about how a rewrite reaches the harness. Claude Code gets a rewritten command back
+already approved (`permissionDecision: "allow"`), so it does not prompt for an intercepted line it
+would have prompted for. And the harness gives the hook a time limit: in the Claude Code plugin,
+30 seconds for each command and 600 for session start, which is when boxer provisions.
 
 ## If the threat model is adversarial
 
@@ -114,7 +120,9 @@ boxer shell claude
 
 The agent has no shell on the host. It can still change files the host later runs: the worktree is
 mounted read-write, including a main checkout's `.git/hooks`, and so is every harness config
-directory below. A hook written into `~/.claude/settings.json` or `.git/hooks` runs on the host the
+directory below. The worktree is read-write in every mode, so this holds outside inside mode too:
+a command in the guest can write `.git/hooks`, `.claude/settings.json` and `boxer.toml`, and read
+`.git/config`, where `actions/checkout` keeps its token unless told not to. A hook written into `~/.claude/settings.json` or `.git/hooks` runs on the host the
 next time you use that harness, or git, outside the sandbox.
 
 Every harness config directory that exists on the host (`~/.claude`,

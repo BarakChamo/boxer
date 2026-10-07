@@ -259,7 +259,16 @@ func capsuleReplay(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 			fmt.Fprintf(stdout, "boxer: applied %s\n", c.Git.Patch)
 		}
 	}
-	applyCapsuleConfig(&e.Cfg, c.Config)
+	for _, note := range applyCapsuleConfig(&e.Cfg, c.Config) {
+		fmt.Fprintln(stderr, "boxer: "+note)
+	}
+	if err := e.Cfg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "boxer: the capsule's configuration is not valid: %v\n", err)
+		return 1
+	}
+	if _, exists, _ := e.Exists(); exists {
+		fmt.Fprintln(stderr, "boxer: a sandbox already exists here, so the capsule's image and setup apply only after `boxer down`")
+	}
 	e.CWD = filepath.Join(e.Scope.Root, filepath.FromSlash(c.Run.Dir))
 	started := time.Now()
 	fmt.Fprintf(stdout, "boxer: replaying %q in %s\n", c.Run.Command, c.Run.Dir)
@@ -292,7 +301,11 @@ func capsuleVerdict(e *box.Env, c capsule, code int, started time.Time, stdout i
 	return 0
 }
 
-func applyCapsuleConfig(cfg *config.Config, c capsuleConfig) {
+// applyCapsuleConfig lays a capsule's environment over the repository's. A capsule is a file
+// someone attached to an issue, so nothing in it may reach further than the repository already
+// does: its mounts (a host directory, ~/.ssh) are never applied, and its network only when it is
+// no wider than this repository's. It returns what it left out.
+func applyCapsuleConfig(cfg *config.Config, c capsuleConfig) (notes []string) {
 	if c.Image != "" {
 		cfg.Image = c.Image
 	}
@@ -305,15 +318,26 @@ func applyCapsuleConfig(cfg *config.Config, c capsuleConfig) {
 	if len(c.Env) > 0 {
 		cfg.Env = c.Env
 	}
-	if len(c.Mounts) > 0 {
-		cfg.Mounts = c.Mounts
+	if len(c.Mounts) > 0 && !slices.Equal(c.Mounts, cfg.Mounts) {
+		notes = append(notes, "the capsule's mounts are not applied: a capsule cannot give the sandbox host directories")
 	}
-	if c.NetworkMode != "" {
+	wider := map[string]int{"off": 0, "allowlist": 1, "on": 2}
+	switch {
+	case c.NetworkMode != "" && wider[c.NetworkMode] > wider[cfg.Network.Mode]:
+		notes = append(notes, fmt.Sprintf("the capsule's network.mode %q is wider than this repository's %q and is not applied", c.NetworkMode, cfg.Network.Mode))
+	case c.NetworkMode != "":
 		cfg.Network.Mode = c.NetworkMode
 	}
 	if len(c.AllowHosts) > 0 {
+		for _, h := range c.AllowHosts {
+			if !slices.Contains(cfg.Network.AllowHosts, h) {
+				notes = append(notes, "the capsule's allow_hosts name hosts this repository does not allow, and are not applied")
+				return notes
+			}
+		}
 		cfg.Network.AllowHosts = c.AllowHosts
 	}
+	return notes
 }
 
 func readCapsule(arg string) (capsule, string, error) {
@@ -348,10 +372,17 @@ func resolveHere() (*box.Env, error) {
 // --allow-dirty` works: Go's flag package stops at the first operand, and a path that has to come
 // before its flags is a trap nobody expects from a CLI.
 func firstOperand(args []string) (string, []string) {
-	for i, a := range args {
-		if !strings.HasPrefix(a, "-") {
-			return a, append(append([]string{}, args[:i]...), args[i+1:]...)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			// The identity flags take a value; it is not the name. `pack save --harness claude
+			// base` named the pack "claude".
+			if f := strings.TrimLeft(a, "-"); !strings.Contains(f, "=") && (f == "harness" || f == "session" || f == "agent") {
+				i++
+			}
+			continue
 		}
+		return a, append(append([]string{}, args[:i]...), args[i+1:]...)
 	}
 	return "", args
 }
@@ -369,16 +400,31 @@ func gitHere(root string, ignore ...string) (string, bool) {
 	if err != nil {
 		return head, false
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(st)), "\n") {
+	// Each line is "XY path": the status is two columns, so the line is not trimmed (" M x"
+	// would lose a letter of its path), and an ignored file is that exact file, not any file of
+	// the same name elsewhere in the tree.
+	for _, line := range strings.Split(strings.TrimRight(string(st), "\n"), "\n") {
 		if len(line) < 4 {
 			continue
 		}
-		name := strings.TrimSpace(line[3:])
+		name := filepath.Join(root, line[3:])
 		if !slices.ContainsFunc(ignore, func(ig string) bool {
-			return ig != "" && filepath.Base(ig) == filepath.Base(name)
+			abs, err := filepath.Abs(ig)
+			return ig != "" && err == nil && sameFile(abs, name)
 		}) {
 			return head, true
 		}
 	}
 	return head, false
+}
+
+// sameFile compares two paths through symlinks (/var and /private/var on macOS).
+func sameFile(a, b string) bool {
+	if ra, err := filepath.EvalSymlinks(a); err == nil {
+		a = ra
+	}
+	if rb, err := filepath.EvalSymlinks(b); err == nil {
+		b = rb
+	}
+	return a == b
 }

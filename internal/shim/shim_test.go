@@ -125,3 +125,66 @@ func TestNeverShimsShellsOrItsOwnTools(t *testing.T) {
 		}
 	}
 }
+
+// Installing again removes boxer's shims for programs no longer listed, and nothing else.
+func TestInstallRemovesShimsNoLongerListed(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Install(dir, []string{"npm", "node"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mine"), []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(dir, []string{"npm"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node")); !os.IsNotExist(err) {
+		t.Fatal("the node shim must go")
+	}
+	for _, keep := range []string{"npm", "mine", Marker} {
+		if _, err := os.Stat(filepath.Join(dir, keep)); err != nil {
+			t.Fatalf("%s must stay: %v", keep, err)
+		}
+	}
+}
+
+// The shim takes its own directory out of PATH however it is written there, and leaves every
+// other entry as it was: a glob in an entry was expanded, and a trailing slash kept the shim on it.
+func TestShimStripsItsDirectoryExactly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Install(dir, []string{"npm"}); err != nil {
+		t.Fatal(err)
+	}
+	stub := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stub, "boxer"), []byte("#!/bin/sh\nprintf '%s\\n' \"$PATH\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.MkdirAll(filepath.Join(stub, "g1"), 0o755)
+	_ = os.MkdirAll(filepath.Join(stub, "g2"), 0o755)
+	path := dir + "/:" + stub + ":" + filepath.Join(stub, "g*") + ":/usr/bin:/bin"
+	cmd := exec.Command(filepath.Join(dir, "npm"))
+	cmd.Env = []string{"PATH=" + path}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := stub + ":" + filepath.Join(stub, "g*") + ":/usr/bin:/bin"
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("PATH handed on:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Harness shims are boxer's, so boxer drops them from its own PATH; they are not program shims,
+// so nothing reads them as npm's.
+func TestHarnessShimsHaveTheirOwnMarker(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := InstallHarness(dir, []string{"claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := SanitizePath(dir + ":/usr/bin"); got != "/usr/bin" {
+		t.Fatalf("boxer must not run its own harness shims: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, Marker)); err == nil {
+		t.Fatal("a directory of harness shims is not the program shims")
+	}
+}

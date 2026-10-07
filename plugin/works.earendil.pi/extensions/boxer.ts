@@ -41,6 +41,9 @@ function run(args: string[], cwd: string): Promise<{ code: number; out: string }
     proc.stdout.on("data", (d) => (out += d.toString()));
     proc.stderr.on("data", (d) => (out += d.toString()));
     proc.on("close", (code) => resolve({ code: code ?? 1, out }));
+    // A boxer that cannot be started emits "error" and never "close": without this the tool call
+    // never returned.
+    proc.on("error", (err) => resolve({ code: 127, out: `could not run boxer (${err.message})` }));
   });
 }
 

@@ -16,3 +16,4 @@ site/out/
 
 # Personal Claude Code settings; never shared.
 .claude/settings.local.json
+/boxer

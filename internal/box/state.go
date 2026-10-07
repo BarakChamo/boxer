@@ -152,20 +152,27 @@ func HostBackend(cwd string) string {
 	return e.Cfg.Backend
 }
 
-// provisioned reports whether the scope's sandbox finished setup since it was last provisioned.
-func provisioned(key string) bool {
-	_, err := os.Stat(filepath.Join(stateRoot(), "provisioned", key))
-	return err == nil
+// provisioned is how the scope's sandbox's last provisioning ended: "ok", "failed" (setup ran and
+// failed), or "" when it never finished, which the next command treats as not provisioned.
+func provisioned(key string) string {
+	b, err := os.ReadFile(filepath.Join(stateRoot(), "provisioned", key))
+	if err != nil {
+		return ""
+	}
+	if s := strings.TrimSpace(string(b)); s != "" {
+		return s
+	}
+	return "ok" // an empty file is the form before the outcome was recorded
 }
 
-func setProvisioned(key string, done bool) {
+func setProvisioned(key, outcome string) {
 	p := filepath.Join(stateRoot(), "provisioned", key)
-	if !done {
+	if outcome == "" {
 		_ = os.Remove(p)
 		return
 	}
 	if os.MkdirAll(filepath.Dir(p), 0o755) == nil {
-		_ = os.WriteFile(p, nil, 0o644)
+		_ = os.WriteFile(p, []byte(outcome+"\n"), 0o644)
 	}
 }
 

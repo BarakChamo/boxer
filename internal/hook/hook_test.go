@@ -3,11 +3,14 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/scope"
 	"github.com/BarakChamo/boxer/internal/shim"
 	"github.com/BarakChamo/boxer/internal/vmtest"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -412,5 +415,48 @@ func TestEveryDialectIsAKnownHarnessName(t *testing.T) {
 		if !slices.Contains(config.HarnessNames, name) {
 			t.Errorf("[harness.%s] would be refused", name)
 		}
+	}
+}
+
+// An ID with shell syntax in it is quoted in the rewritten line, and a harness with its own table
+// is named so the run resolves the same scope the hook decided for.
+func TestRewriteQuotesIdentityAndNamesTheHarness(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"isolation = \"session\"\n[harness.claude-code]\nmode = \"rewrite\"\n")
+	in := fmt.Sprintf(`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"s 1; rm -rf x","cwd":%q,"tool_input":{"command":"npm test"}}`, dir)
+	var out bytes.Buffer
+	if code := Run("claude-code", strings.NewReader(in), &out, io.Discard, box.Resolve); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), `--harness claude-code`) || !strings.Contains(out.String(), `--session 's 1; rm -rf x'`) {
+		t.Fatalf("%s", out.String())
+	}
+}
+
+// Three ways the hook let an intercepted command through on input it could not read.
+func TestHookFailsClosedOnWhatItCannotRead(t *testing.T) {
+	vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	pre := func(harness, body string, resolve Resolver) string {
+		var out bytes.Buffer
+		Run(harness, strings.NewReader(body), &out, io.Discard, resolve)
+		return out.String()
+	}
+	claude := fmt.Sprintf(`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":%q,"tool_input":{"command":"npm test"}}`, dir)
+	// An inherited BOXER_INSIDE that is not boxer's own value does not turn the hook off.
+	t.Setenv("BOXER_INSIDE", "0")
+	if out := pre("claude-code", claude, box.Resolve); !strings.Contains(out, "boxer run") {
+		t.Fatalf("BOXER_INSIDE=0 silenced the hook: %q", out)
+	}
+	t.Setenv("BOXER_INSIDE", "")
+	// A directory boxer cannot read is not a directory with no repository.
+	broken := func(string, string, scope.Identity) (*box.Env, error) { return nil, errors.New("git: not found") }
+	if out := pre("claude-code", claude, broken); !strings.Contains(out, "deny") {
+		t.Fatalf("an unreadable directory allowed npm: %q", out)
+	}
+	// Copilot arguments that are not JSON are not an empty command.
+	copilot := fmt.Sprintf(`{"hook_event_name":"preToolUse","toolName":"bash","cwd":%q,"toolArgs":"{not json"}`, dir)
+	if out := pre("copilot", copilot, box.Resolve); !strings.Contains(out, "deny") && !strings.Contains(out, "boxer run") {
+		t.Fatalf("unreadable toolArgs were allowed to run as they are: %q", out)
 	}
 }

@@ -101,7 +101,9 @@ The harness gets the repository's `[env]`, `secrets` and `env_passthrough`, as `
 and its own login variables, such as `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Secrets and
 login variables are passed by name, so their values are never in a command line on the host.
 
-If the install is interrupted, run `boxer up --recreate`.
+If the install is interrupted, run `boxer shell <harness>` again: boxer records the install only
+once it has finished, so the next session installs it again. Two sessions starting at once install
+one after the other.
 
 ## Paths
 

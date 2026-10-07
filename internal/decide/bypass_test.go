@@ -77,6 +77,16 @@ var escapes = []string{
 	"trap -- 'npm i' EXIT",
 	"function f { npm i; }; f",
 	`echo $'\'' ; npm i # '`,
+	// Found by the fifth review.
+	"$(echo npm) i",
+	"`echo npm` i",
+	"eval $(echo npm i)",
+	`eval "$(printf 'npm i')"`,
+	`sh -c "$(printf 'npm i')"`,
+	"cat <<EOF\n# $(npm i)\nEOF",
+	"cat <<EOF\n'\nEOF\nnpm i #'",
+	": <<-EOF\n\t\"\n\tEOF\nnpm i #\"",
+	"echo a\r#$(npm i)",
 	"x='a[$(npm i >&2)]'; echo $((x))",
 	"let 'a[$(npm i)]=1'",
 	"read 'a[`npm i`]' <<< x",
@@ -101,10 +111,35 @@ var readEscapes = []string{
 	"chrt -f 10 npm i",
 	"busybox sh -c 'npm i'",
 	"stdbuf -oL npm test",
+	// Found by the fifth review.
+	"$(echo /abs/npm) i",
+	"echo npm | xargs env",
+	"echo npm | xargs nohup",
+	"echo npm | xargs sh -c",
+	"NPM i", // macOS's filesystem is case-insensitive
+	"env -S 'npm\\_i'",
+	"script -q /dev/null npm i",
+	"gtimeout 5 npm i",
+	"genv npm i",
+	"=npm i",
+	"repeat 1 npm i",
+	"noglob npm i",
+	"nocorrect npm i",
+	"echo *(e:'npm i':)",
+	"x='$(npm i)'; echo ${(e)x}",
+	"source <(echo 'npm i')",
+	". <(echo 'npm i')",
+	"BASH_ENV=<(echo 'npm i') bash -c true",
+	"zmodload zsh/zpty; zpty w npm i",
+	"git -c alias.x='!npm i' x",
+	"cat << EOF\n$(npm i)\nEOF",
+	"cat <<EOF\n\\$(x) `npm i`\nEOF",
+	"cat <<EOF\n$((1+$(npm -v)))\nEOF",
+	"cat <<\\EOF\nx\nEOF\nnpm i",
+	"echo $(cat <<EOF\nx\nEOF\n) && npm i",
 	"sudo --frobnicate x npm i", // an option boxer does not know may take a value
 	"env --frobnicate=x npm i",
 	"sudo -Ez npm i",
-	"echo 'a[$(npm i'",
 	"echo $'npm i",
 	"echo $(echo \\) ; npm i)",
 }
@@ -132,6 +167,21 @@ var stays = []string{
 	"bash --version",
 	"trap 'rm -f x' EXIT",
 	"trap",
+	"echo 'a[$(npm i'",    // an index that never closes runs nothing
+	"grep -c '[$(]' x.sh", // the usual reason one appears
+	`echo "PATH=$PATH"`,
+	"declare -p BOXER_MODE",
+	"export X=BOXER_MODE",
+	"echo a | xargs -i{} ls {}",
+	"zpty w",
+	"source ./env.sh",
+	// A commit message written the way agents write them, apostrophe and all.
+	"git commit -m \"$(cat <<'EOF'\nfix: don't break the build\n\nCo-Authored-By: x\nEOF\n)\"",
+	"cat <<EOF\nhello $USER, it's fine\nEOF",
+	"cat <<'EOF' > notes.txt\nnpm i is mentioned, not run\nEOF",
+	"arr=(a b); echo ${arr[0]}",
+	"f() { ls; }; f",
+	"git -c user.name=x log",
 	"time git status",
 	"nice -n 5 git gc",
 	"env -i HOME=/x git log",
@@ -261,7 +311,10 @@ func TestUnreadableLinesAreSandboxed(t *testing.T) {
 		nested = "echo $(" + nested + ")"
 	}
 	for _, c := range []string{deep, nested, `echo "npm i`, "echo $(npm i", "echo `npm i", "echo 'npm i",
-		"diff <(npm ls", `echo "$(npm i"`, "echo \"`npm i", `echo $(echo 'x)`, `echo $(echo "x)`} {
+		"diff <(npm ls", `echo "$(npm i"`, "echo \"`npm i", `echo $(echo 'x)`, `echo $(echo "x)`,
+		// Here-documents boxer cannot read to their end.
+		"cat <<'EOF", "cat <<\n", "cat <<EOF\nnever closed", "cat <<EOF\n`npm i\nEOF", "cat <<EOF\n$(npm i\nEOF",
+		"cat <<EOF\n$(( $(\nEOF", "echo $(cat <<EOF\nx\n)", "echo $(cat <<'EOF", "bash <(echo npm i)"} {
 		if Decide(with(c, nil)).Action != Rewrite {
 			t.Errorf("%q must be sandboxed", c)
 		}
@@ -348,6 +401,7 @@ func TestBoxerVariablesAreRefused(t *testing.T) {
 		"declare -n r=BOXER_MODE; r=off",
 		"BOXER_MODE[0]=off",
 		"env -S 'BOXER_MODE=off ls'",
+		"env -S 'ls; BOXER_MODE=off'",
 	} {
 		if d := Decide(with(c, nil)); d.Action != Block || !strings.Contains(d.Reason, "BOXER_") {
 			t.Errorf("%q: %+v", c, d)
@@ -381,6 +435,8 @@ func TestNamedByPath(t *testing.T) {
 		"command -p npm i":                            true,
 		"env -P /opt/homebrew/bin npm i":              true,
 		"echo $PATH":                                  false,
+		"echo PATH=/x && npm i":                       false,
+		"FOO=1 PATH=/x npm i":                         true,
 		"echo $(PATH=/x npm i)":                       true,
 		"sh -c 'PATH=/x npm i'":                       true,
 	} {

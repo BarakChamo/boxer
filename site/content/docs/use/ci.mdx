@@ -1,0 +1,68 @@
+---
+title: Run in CI
+description: Run an agent's commands in boxer on a CI runner, with docker as the backend, a pinned version, exit codes a job can read, and cleanup.
+---
+
+A CI job is a host like any other, and boxer runs there the same way. The differences are what a
+runner lacks and what a job needs to read back.
+
+## Choose the backend
+
+docker is installed on GitHub's Ubuntu runners, and needs nothing else. smolvm needs `/dev/kvm`,
+and your user must be able to open it, which a job cannot arrange by logging in again. Check with
+`ls -l /dev/kvm` on your runner before choosing smolvm.
+
+docker refuses `network.mode = "allowlist"`, so set the mode the job runs with. Commands in the
+guest then have the network the runner has. See [backends](/docs/backends).
+
+## A GitHub Actions job
+
+```yaml
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BOXER_VERSION: v1.4.1        # pin it; unpinned, the installer asks GitHub's API without a token
+      BOXER_BACKEND: docker
+      BOXER_NETWORK_MODE: "on"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # the guest can read .git/config
+      - run: |
+          curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: boxer up
+      - run: boxer run --task test --fail-on-test-failures
+      - if: always()
+        run: boxer rm --all --volumes -y
+```
+
+`actions/checkout` gives a main checkout rather than a linked worktree. boxer warns about that by
+default ([`require_worktree`](/docs/reference/configuration#require_worktree)); set
+`BOXER_REQUIRE_WORKTREE=off` to silence it. An agent run headless in the job (`claude -p`, `opencode
+run`) reads the hooks you committed, as it does on your machine.
+
+## Read the outcome
+
+- `boxer run` exits with the command's own status. boxer's own failure (a sandbox that could not
+  start) is 1, and a task that ran past its `timeout` is 137, which is also what an out-of-memory
+  kill exits with.
+- `boxer doctor` exits 1 only for an error. To fail a job on its warnings, read them:
+  `boxer doctor --json | jq -e '.warnings | length == 0'`.
+- `--json` on `ls`, `status`, `doctor` and the rest gives shapes listed in the
+  [JSON reference](/docs/reference/json).
+
+## Clean up
+
+A runner is thrown away, but a self-hosted one is not. `boxer rm --all --volumes -y` removes every
+sandbox boxer made on the backend, and their volumes. Without `-y`, a filtered `rm` outside a
+terminal is refused rather than run.
+
+## What is not protected
+
+The agent itself runs on the runner, with the job's environment, its secrets and the runner's
+network. `git` and `gh` run there with the job's token. Only the commands on
+[`intercept`](/docs/reference/configuration#intercept) run in the sandbox, and on docker the sandbox
+shares the runner's kernel. See [security](/docs/concepts/security).

@@ -44,6 +44,15 @@ func setsBoxerEnv(cmd string, depth int) bool {
 	return false
 }
 
+func allAssignments(words []string) bool {
+	for _, w := range words {
+		if !isAssignment(w) {
+			return false
+		}
+	}
+	return true
+}
+
 // varName is the variable a word names or assigns: `BOXER_MODE+=x`, `BOXER_MODE[0]=x` and
 // `BOXER_MODE` are all BOXER_MODE.
 func varName(w string) string {
@@ -91,14 +100,20 @@ func setsInWords(words []string, depth int) bool {
 	args := words[k+1:]
 	switch path.Base(words[k]) {
 	case "export", "declare", "typeset", "readonly", "local":
+		nameref, printing := slices.Contains(args, "-n"), slices.Contains(args, "-p")
 		for _, a := range args {
 			if strings.HasPrefix(a, "-") {
 				continue
 			}
-			// A bare name exports whatever this line set it to; a nameref (`declare -n r=BOXER_MODE`)
-			// makes another name set it.
-			_, val, _ := strings.Cut(a, "=")
-			if containment[varName(a)] || containment[val] {
+			// An assignment sets it; a bare name after export exports whatever this line set it
+			// to; a nameref (`declare -n r=BOXER_MODE`) makes another name set it. `declare -p`
+			// only prints, and `export X=BOXER_MODE` only names it.
+			name, val, assigns := strings.Cut(a, "=")
+			switch {
+			case printing:
+			case containment[varName(name)] && (assigns || words[k] == "export"):
+				return true
+			case nameref && containment[val]:
 				return true
 			}
 		}
@@ -211,15 +226,20 @@ func needsSandbox(cmd string, intercept, passthrough []string) bool {
 		return len(intercept) > 0
 	}
 	for _, raw := range progs {
-		prog := path.Base(raw)
-		if prog == "" || prog == "." || prog == "boxer" || slices.Contains(passthrough, prog) {
+		// Lower case: macOS's filesystem is case-insensitive, and `NPM i` runs npm there.
+		prog := strings.ToLower(path.Base(raw))
+		if prog == "" || prog == "." || prog == "boxer" || containsFold(passthrough, prog) {
 			continue
 		}
-		if all || slices.Contains(intercept, prog) {
+		if all || containsFold(intercept, prog) {
 			return true
 		}
 	}
 	return false
+}
+
+func containsFold(list []string, s string) bool {
+	return slices.ContainsFunc(list, func(x string) bool { return strings.EqualFold(x, s) })
 }
 
 // NamedByPath reports whether the line runs an intercepted program by a path rather than by name
@@ -234,7 +254,7 @@ func NamedByPath(cmd string, intercept []string) bool {
 	}
 	all := len(intercept) == 1 && intercept[0] == "*"
 	for _, raw := range progs {
-		if strings.Contains(raw, "/") && (all || slices.Contains(intercept, path.Base(raw))) {
+		if strings.Contains(raw, "/") && (all || containsFold(intercept, path.Base(raw))) {
 			return true
 		}
 	}
@@ -254,7 +274,9 @@ func choosesPath(cmd string) bool {
 	}
 	for _, words := range cmds {
 		for j, w := range words {
-			if varName(w) == "PATH" && strings.Contains(w, "=") {
+			// An assignment, not a word that looks like one: `echo "PATH=$PATH"` sets nothing.
+			setter := slices.Contains([]string{"export", "env", "declare", "typeset", "readonly", "local"}, path.Base(words[0]))
+			if varName(w) == "PATH" && strings.Contains(w, "=") && (setter || allAssignments(words[:j])) {
 				return true
 			}
 			if j+1 < len(words) && words[j+1] == "-p" && (w == "command" || w == "hash") || w == "env" && j+1 < len(words) && words[j+1] == "-P" {

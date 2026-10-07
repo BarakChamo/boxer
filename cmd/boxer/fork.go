@@ -50,6 +50,10 @@ func forkCmd(args []string, stdout, stderr io.Writer) int {
 	names, err := e.Fork(*count)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		for _, n := range names {
+			fmt.Fprintf(stderr, "boxer: made %s before the failure; boxer fork rm %s removes it\n", n, n)
+		}
+		emit(stdout, names, *asJSON)
 		return 1
 	}
 	// --count is how many children this scope should have, so asking for two when one is already
@@ -132,7 +136,12 @@ func forkRm(args []string, stdout, stderr io.Writer) int {
 			names = append(names, m.Name)
 		}
 	case name != "":
-		names = []string{box.ResolveName(client, name)}
+		n, err := box.ResolveName(client, name)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		names = []string{n}
 	default:
 		fmt.Fprintln(stderr, "usage: boxer fork rm <name> | --all")
 		return 2

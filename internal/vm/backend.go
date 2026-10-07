@@ -227,7 +227,7 @@ func NotOwned(b Backend, name string) error {
 func guestTimeout(d time.Duration, argv []string) []string {
 	secs := strconv.Itoa(int((d + time.Second - 1) / time.Second))
 	watchdog := `tree() { kill -STOP $1 2>/dev/null; for d in /proc/[0-9]*; do read -r s 2>/dev/null < $d/stat || continue; s=${s##*) }; s=${s#* }; [ "${s%% *}" = $1 ] && [ ${d#/proc/} != $$ ] && tree ${d#/proc/}; done; kill -KILL $1 2>/dev/null; }
-n=0; while kill -0 $1 2>/dev/null; do [ $n -ge $2 ] && { tree $1; exit; }; sleep 1; n=$((n+1)); done`
+n=0; while kill -0 $1 2>/dev/null; do [ $n -ge $2 ] && { tree $1; exit; }; sleep 1 || exit; n=$((n+1)); done`
 	line := `timeout --version 2>/dev/null | grep -q GNU && exec timeout -s KILL ` + secs + ` "$@"
 sh -c '` + watchdog + `' boxer-watchdog $$ ` + secs + ` </dev/null >/dev/null 2>&1 &
 exec "$@"`

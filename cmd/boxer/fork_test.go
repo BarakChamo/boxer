@@ -182,3 +182,25 @@ func TestForkChildDoesNotRepeatSetup(t *testing.T) {
 		t.Fatalf("setup ran %d times", strings.Count(string(b), "x"))
 	}
 }
+
+// A fork child is a copy of a provisioned parent, services included: its first command does not
+// provision it again or launch the services a second time.
+func TestForkChildIsNotProvisionedAgain(t *testing.T) {
+	_, log := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"start = [\"sleep 600\"]\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var names []string
+	if code, out := call(t, &names, "fork", "--prepare", "--count", "1", "--json"); code != 0 || len(names) != 1 {
+		t.Fatalf("fork: %d %s", code, out)
+	}
+	before, _ := os.ReadFile(log)
+	if code, out := call(t, nil, "run", "--scope", names[0], "--", "true"); code != 0 {
+		t.Fatal(out)
+	}
+	after, _ := os.ReadFile(log)
+	if strings.Contains(string(after[len(before):]), "HUP;") {
+		t.Fatalf("the child's first command launched the services again:\n%s", after[len(before):])
+	}
+}

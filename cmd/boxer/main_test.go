@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/BarakChamo/boxer/internal/box"
+	"github.com/BarakChamo/boxer/internal/config"
 	"github.com/BarakChamo/boxer/internal/inside"
 	"github.com/BarakChamo/boxer/internal/vm"
 	"github.com/BarakChamo/boxer/internal/vmtest"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -767,6 +769,12 @@ func TestScopedCommandsRefuseFlagsTheyIgnore(t *testing.T) {
 			t.Fatalf("%v: %d %s", args, code, out)
 		}
 	}
+	// A name where a flag belongs: `down swift-crab` deleted this worktree's sandbox instead.
+	for _, args := range [][]string{{"down", "swift-crab"}, {"status", "sb-000000000000"}, {"restart", "web"}} {
+		if code, out := call(t, nil, args...); code != 2 || !strings.Contains(out, "takes no arguments") {
+			t.Fatalf("%v: %d %s", args, code, out)
+		}
+	}
 	if code, out := call(t, nil, "doctor", "--json", "--session", "s"); code != 0 {
 		t.Fatalf("flags a command reads still work: %d %s", code, out)
 	}
@@ -880,5 +888,143 @@ func TestGCKeepsAParentWhoseChildIsInUse(t *testing.T) {
 	var rows []map[string]any
 	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 0 {
 		t.Fatalf("a parent whose child is in use must be kept: %d %v %s", code, rows, out)
+	}
+}
+
+// A sandbox whose own configuration cannot be read is not judged by the rules of the directory gc
+// runs in: that is another repository's idle_action.
+func TestGCDoesNotApplyAnotherRepositorysRulesWhenItsOwnAreBroken(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	broken := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	key := ls[0]["scope"].(string)
+	if err := os.WriteFile(filepath.Join(broken, "boxer.toml"), []byte("this is = = not toml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nidle_action = \"delete\"\n")
+	ageStamp(t, key) // after RepoIn, which gives each repository its own state directory
+	code, out := call(t, nil, "gc", "--json")
+	if _, ok, _ := client.Status(key); !ok {
+		t.Fatalf("deleted under another repository's idle_action: %d %s", code, out)
+	}
+}
+
+// `pack use` with a name that does not exist refuses before it touches the sandbox.
+func TestPackUseOfAMissingPackKeepsTheSandbox(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	key := ls[0]["scope"].(string)
+	if code, out := call(t, nil, "pack", "use", "typo"); code != 1 || !strings.Contains(out, "NO_SUCH_PACK") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if _, ok, _ := client.Status(key); !ok {
+		t.Fatal("the sandbox was deleted for a pack that does not exist")
+	}
+}
+
+// A capsule is a file from someone else: it cannot mount host directories or widen the network.
+func TestCapsuleConfigCannotWidenTheSandbox(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Network.Mode = "allowlist"
+	cfg.Network.AllowHosts = []string{"registry.npmjs.org"}
+	notes := applyCapsuleConfig(&cfg, capsuleConfig{Mounts: []string{"/Users/x/.ssh:/x"}, NetworkMode: "on", AllowHosts: []string{"evil.example"}, Image: "alpine"})
+	if len(cfg.Mounts) != 0 || cfg.Network.Mode != "allowlist" || slices.Contains(cfg.Network.AllowHosts, "evil.example") || len(notes) != 3 {
+		t.Fatalf("mounts %v mode %q hosts %v notes %v", cfg.Mounts, cfg.Network.Mode, cfg.Network.AllowHosts, notes)
+	}
+	if cfg.Image != "alpine" {
+		t.Fatal("the environment it describes is still applied")
+	}
+	applyCapsuleConfig(&cfg, capsuleConfig{NetworkMode: "off"})
+	if cfg.Network.Mode != "off" {
+		t.Fatal("a narrower network is applied")
+	}
+}
+
+// A flag's value is not the operand: `pack save --harness claude base` names the pack base.
+func TestFirstOperandSkipsFlagValues(t *testing.T) {
+	if name, rest := firstOperand([]string{"--harness", "claude", "base"}); name != "base" || strings.Join(rest, " ") != "--harness claude" {
+		t.Fatalf("%q %v", name, rest)
+	}
+	if name, _ := firstOperand([]string{"--session=x", "base"}); name != "base" {
+		t.Fatal(name)
+	}
+}
+
+// The first modified file keeps its whole name, and an ignored capsule file is that file only.
+func TestGitHereReadsPorcelainExactly(t *testing.T) {
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	_ = os.WriteFile(filepath.Join(dir, "capsule.toml"), []byte("x"), 0o644)
+	if out, err := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	if out, err := exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c").CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	_ = os.WriteFile(filepath.Join(dir, "capsule.toml"), []byte("y"), 0o644) // " M capsule.toml"
+	if _, dirty := gitHere(dir, filepath.Join(dir, "capsule.toml")); dirty {
+		st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+		t.Fatalf("the capsule's own file must be ignored:\n%s", st)
+	}
+	_ = os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "sub", "capsule.toml"), []byte("z"), 0o644)
+	if _, dirty := gitHere(dir, filepath.Join(dir, "capsule.toml")); !dirty {
+		t.Fatal("another file of the same name is a change")
+	}
+}
+
+// Small CLI refusals from the fifth review.
+func TestCLIRefusesWhatItCannotMean(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"[network]\nports = [\"auto:3000\"]\n")
+	if code, out := call(t, nil, "watch", "--interval", "0"); code != 2 {
+		t.Fatalf("watch --interval 0: %d %s", code, out)
+	}
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "url", "--json"); code != 2 {
+		t.Fatalf("url --json: %d %s", code, out)
+	}
+	// A container boxer did not make is not a scope to run in.
+	if err := client.Create(vm.CreateSpec{Name: "postgres", Image: "alpine"}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, nil, "run", "--scope", "postgres", "--", "true"); code != 1 {
+		t.Fatalf("run --scope on a machine boxer does not own: %d %s", code, out)
+	}
+	var ls []map[string]any
+	call(t, &ls, "ls", "--json")
+	if code, out := call(t, nil, "stop", ls[0]["scope"].(string)); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "url"); code != 3 || !strings.Contains(out, "stopped") {
+		t.Fatalf("url on a stopped sandbox: %d %s", code, out)
+	}
+}
+
+// A shim outside any repository runs its program on the host, as if there were no shim.
+func TestAShimOutsideARepositoryRunsOnTheHost(t *testing.T) {
+	vmtest.Install(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("BOXER_SHIM", "1")
+	if code, out := call(t, nil, "run", "--", "sh", "-c", "echo on-the-host; exit 3"); code != 3 || !strings.Contains(out, "on-the-host") {
+		t.Fatalf("%d %s", code, out)
+	}
+}
+
+// A command run on the host and ended by a signal exits as a shell reports it, 128 plus the
+// signal, so a script can tell an interrupt from a failure.
+func TestAHostRunEndedBySignalExitsAsAShellWould(t *testing.T) {
+	if code := hostRun([]string{"sh", "-c", "kill -TERM $$"}, strings.NewReader(""), io.Discard, io.Discard); code != 143 {
+		t.Fatalf("exit %d, want 143", code)
 	}
 }

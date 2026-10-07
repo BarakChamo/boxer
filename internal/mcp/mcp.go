@@ -12,10 +12,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
@@ -71,9 +74,9 @@ var tools = []map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{"type": "string", "description": "POSIX shell command line, executed with sh -c"},
+				"task":    map[string]any{"type": "string", "description": "Name of a task boxer.toml declares, run instead of a command line; the brief lists them"},
 				"cwd":     map[string]any{"type": "string", "description": "Host directory to run in; defaults to the repository root"},
 			},
-			"required": []string{"command"},
 		},
 	},
 	{
@@ -89,6 +92,19 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	enc := json.NewEncoder(w)
+	var mu sync.Mutex
+	var werr error
+	send := func(r response) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err := enc.Encode(r); err != nil && werr == nil {
+			werr = err
+		}
+	}
+	// A tool call runs beside the others: boxer_run can take minutes, and run one at a time it
+	// left ping, and every other call, unanswered until it finished.
+	var calls sync.WaitGroup
+	defer calls.Wait()
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
@@ -96,14 +112,22 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 		}
 		var req request
 		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "parse error"}})
+			send(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "parse error"}})
 			continue
 		}
 		if req.ID == nil { // notification
 			continue
 		}
-		res := s.handle(req)
-		if err := enc.Encode(res); err != nil {
+		if req.Method == "tools/call" && bytes.Contains(req.Params, []byte(`"boxer_run"`)) {
+			calls.Add(1)
+			go func() { defer calls.Done(); send(s.handle(req)) }()
+			continue
+		}
+		send(s.handle(req))
+		mu.Lock()
+		err := werr
+		mu.Unlock()
+		if err != nil {
 			return err
 		}
 	}
@@ -115,8 +139,16 @@ func (s *Server) handle(req request) response {
 	switch req.Method {
 	case "initialize":
 		s.sessionStart()
+		// The client's version when boxer speaks it, as the protocol asks; boxer's own otherwise.
+		version := protocolVersion
+		var p struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		if json.Unmarshal(req.Params, &p) == nil && slices.Contains([]string{"2025-06-18", "2025-03-26", "2024-11-05"}, p.ProtocolVersion) {
+			version = p.ProtocolVersion
+		}
 		result := map[string]any{
-			"protocolVersion": protocolVersion,
+			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "boxer", "version": s.Version},
 		}
@@ -233,6 +265,12 @@ func (s *Server) sessionEnd() {
 // worktree falls back to the server's own directory, with a note in the result.
 func (s *Server) resolve(cwd string) (*box.Env, string, error) {
 	e, err := s.Resolve(cwd, s.Harness, scope.Identity{})
+	if err == nil && cwd != "" && !sameRepository(cwd) {
+		// The server belongs to the repository it was started in. Another repository's
+		// sandbox, mounted read-write under that repository's boxer.toml, is not this tool's to
+		// run in, and was a way past a harness's own path restrictions.
+		return nil, "", fmt.Errorf("cwd %q is in another repository than this server's; run boxer there instead", cwd)
+	}
 	if err == nil || cwd == "" {
 		return e, "", err
 	}
@@ -294,12 +332,34 @@ func (s *Server) call(name string, args map[string]any) (text string, isErr bool
 		}
 		return out, false
 	case "boxer_run":
-		if strings.TrimSpace(cmd) == "" {
-			return "command is required", true
+		// A task by name, as `boxer run --task` runs it: there is no boxer in the guest, so an
+		// agent told to run `boxer run --task test` through this tool had no way to.
+		taskName, _ := args["task"].(string)
+		argv := []string{"sh", "-c", cmd}
+		var timeout time.Duration
+		switch {
+		case taskName != "" && strings.TrimSpace(cmd) != "":
+			return "give command or task, not both", true
+		case taskName != "":
+			t, ok := e.Cfg.Tasks[taskName]
+			if !ok {
+				return fmt.Sprintf("no task named %q in boxer.toml; tasks: %s", taskName, strings.Join(e.Cfg.TaskNames(), ", ")), true
+			}
+			argv = []string{"sh", "-c", t.Cmd}
+			if len(t.Env) > 0 {
+				pre := []string{"env"}
+				for _, k := range slices.Sorted(maps.Keys(t.Env)) {
+					pre = append(pre, k+"="+t.Env[k])
+				}
+				argv = append(pre, argv...)
+			}
+			timeout, _ = time.ParseDuration(t.Timeout) // validated at load
+		case strings.TrimSpace(cmd) == "":
+			return "command (or task) is required", true
 		}
 		out := &headTail{max: outputCap}
 		e.Stderr = out
-		code, err := e.Run([]string{"sh", "-c", cmd}, box.RunOpts{Stdin: strings.NewReader(""), Stdout: out, Stderr: out})
+		code, err := e.Run(argv, box.RunOpts{Stdin: strings.NewReader(""), Stdout: out, Stderr: out, Timeout: timeout, Task: taskName})
 		if err != nil {
 			return err.Error(), true
 		}
@@ -350,4 +410,25 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// sameRepository reports whether dir is in the repository this process runs in: the same git
+// common directory, so any worktree of it counts. Outside a repository there is nothing to keep
+// to, and anything is allowed.
+func sameRepository(dir string) bool {
+	here, err := os.Getwd()
+	if err != nil {
+		return true
+	}
+	g0, err0 := scope.Detect(here)
+	g1, err1 := scope.Detect(dir)
+	if err0 != nil || g0.CommonDir == "" {
+		return true
+	}
+	if err1 != nil || g1.CommonDir == "" {
+		return false
+	}
+	a, _ := filepath.EvalSymlinks(g0.CommonDir)
+	b, _ := filepath.EvalSymlinks(g1.CommonDir)
+	return a == b
 }

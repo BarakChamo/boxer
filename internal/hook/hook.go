@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/BarakChamo/boxer/internal/sh"
 	"io"
 	"os"
 	"path/filepath"
@@ -157,10 +158,12 @@ func toolArgs(d Dialect, in Input) map[string]any {
 		return m
 	}
 	var s string
-	if json.Unmarshal(in.ToolArgs, &s) == nil {
-		_ = json.Unmarshal([]byte(s), &m)
+	if json.Unmarshal(in.ToolArgs, &s) == nil && json.Unmarshal([]byte(s), &m) == nil {
+		return m
 	}
-	return m
+	// Arguments boxer cannot read are not an empty command, which would be allowed: a line made
+	// of an unclosed quote is one the reader refuses to call safe.
+	return map[string]any{"command": "'"}
 }
 
 // Resolver lets tests substitute box.Resolve.
@@ -242,6 +245,17 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 					"fix boxer.toml (boxer doctor shows the error), or set BOXER_MODE=off to run it on the host")
 			}
 		}
+		// A directory that is not a repository is not boxer's. One that could not be read at all
+		// (git missing, a worktree deleted from under the session) may well be, and allowing
+		// everything there ran intercepted commands on the host whatever the policy said.
+		if purpose == "intercept" && e == nil && !errors.As(err, &berr) && os.Getenv("BOXER_MODE") != "off" {
+			cmd, _ := toolArgs(d, in)["command"].(string)
+			def := config.Defaults()
+			if decide.Decide(decide.Input{Command: cmd, Mode: def.Mode, Intercept: def.Intercepted(), Passthrough: def.Passthrough}).Action != decide.Allow {
+				return deny(d, stdout, "boxer could not tell which repository this is, so this command was not run: "+err.Error(),
+					"check that git works here, or set BOXER_MODE=off to run it on the host")
+			}
+		}
 		return 0
 	}
 	switch purpose {
@@ -311,6 +325,12 @@ func withIdentity(cmd string, e *box.Env) string {
 	flags := e.IdentityArgs()
 	if len(flags) == 0 || !strings.HasPrefix(cmd, "boxer run ") {
 		return cmd
+	}
+	// Quoted: an ID with a space or a `;` in it went into the host shell line as written.
+	for i, f := range flags {
+		if !strings.HasPrefix(f, "--") && strings.Trim(f, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:@-") != "" {
+			flags[i] = sh.Quote(f)
+		}
 	}
 	return "boxer run " + strings.Join(flags, " ") + " " + strings.TrimPrefix(cmd, "boxer run ")
 }

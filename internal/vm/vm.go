@@ -28,7 +28,9 @@ const LabelPrefix = "boxer."
 const InsideEnv = "BOXER_INSIDE"
 
 // Inside reports whether this process is already running in a boxer guest.
-func Inside() bool { return os.Getenv(InsideEnv) != "" }
+// Only "1", the value boxer sets: any other value in a harness's environment (an inherited
+// BOXER_INSIDE=0) turned every hook off.
+func Inside() bool { return os.Getenv(InsideEnv) == "1" }
 
 // Error, the sentinels and the predicates live in errors.go.
 

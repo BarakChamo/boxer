@@ -402,6 +402,7 @@ func Load(worktreeRoot, repoRoot string) (Config, error) {
 	if err := cfg.applyEnv(); err != nil {
 		return cfg, err
 	}
+	cfg.dropBadProgramNames()
 	return cfg, cfg.Validate()
 }
 
@@ -416,6 +417,7 @@ func LoadFiles(paths ...string) (Config, error) {
 	if err := cfg.applyEnv(); err != nil {
 		return cfg, err
 	}
+	cfg.dropBadProgramNames()
 	return cfg, cfg.Validate()
 }
 
@@ -567,6 +569,9 @@ var deprecatedKeys = map[string]string{
 // envKeys are the scalar settings that may be overridden from the environment (R-CFG: every key
 // settable by environment for harnesses that only offer environment control). Lists are not
 // overridable; they are repository policy.
+// SettingEnv lists the environment variables that change configuration.
+func SettingEnv() []string { return sortedEnvKeys() }
+
 var envKeys = map[string]func(c *Config, v string) error{
 	"BOXER_BACKEND": func(c *Config, v string) error { c.Backend = v; return nil },
 	"BOXER_URLS": func(c *Config, v string) error {
@@ -692,6 +697,17 @@ func (c Config) ForHarness(name string) Config {
 	return out
 }
 
+// HasHarnessTable reports whether a [harness.<name>] table configures this harness, under either
+// of its names.
+func (c Config) HasHarnessTable(name string) bool {
+	for k := range c.Harness {
+		if canonicalHarness(k) == canonicalHarness(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // HarnessNames are the names a [harness.<name>] table may use. The core names no harness: the
 // packages that hold the harness tables (the hook's dialects, inside mode's programs) register
 // theirs, and an empty list checks nothing.
@@ -759,6 +775,27 @@ type URLsConfig struct {
 
 // Validate rejects values outside their enumerations so a typo cannot silently disable
 // enforcement (R-CFG-2).
+// dropBadProgramNames takes out of intercept, intercept_also and passthrough what is not a program
+// name, with a warning. They become PATH shim files and words in the shims' scripts, where a space
+// or a newline ran the wrong command, or a second line, on the host; and a path never matched,
+// since a program is matched by name. Dropped rather than refused: refusing failed every command
+// and every hook in a repository whose file had worked before.
+func (c *Config) dropBadProgramNames() {
+	for key, list := range map[string]*[]string{"intercept": &c.Intercept, "intercept_also": &c.InterceptAlso, "passthrough": &c.Passthrough} {
+		kept := (*list)[:0:0]
+		for _, n := range *list {
+			if n == "*" || programName.MatchString(n) {
+				kept = append(kept, n)
+				continue
+			}
+			c.Warnings = append(c.Warnings, fmt.Sprintf("%s: %q is not a program name and is ignored; list names, not paths", key, n))
+		}
+		if len(kept) != len(*list) {
+			*list = kept
+		}
+	}
+}
+
 func (c Config) Validate() error {
 	checks := []struct {
 		key, val string
@@ -873,15 +910,6 @@ func (c Config) Validate() error {
 	if c.User != "" && !userName.MatchString(c.User) {
 		return fmt.Errorf("user = %q; want a user name or uid, optionally with :group", c.User)
 	}
-	// Program names become PATH shim files and words in their scripts: a space or a newline in
-	// one ran the wrong command, or a second line, on the host.
-	for key, list := range map[string][]string{"intercept": c.Intercept, "intercept_also": c.InterceptAlso, "passthrough": c.Passthrough} {
-		for _, n := range list {
-			if (n != "*" || key != "intercept") && !programName.MatchString(n) {
-				return fmt.Errorf("%s contains %q; want a program name: letters, digits, '.', '_', '+' and '-'", key, n)
-			}
-		}
-	}
 	for _, p := range c.Network.Ports {
 		for _, n := range portNumber.FindAllString(strings.SplitN(p, "/", 2)[0], -1) {
 			if v, _ := strconv.Atoi(n); v > 65535 && !strings.Contains(p, n+".") && !strings.Contains(p, "."+n) {
@@ -894,7 +922,7 @@ func (c Config) Validate() error {
 	}
 	for k := range c.Env {
 		if !envName.MatchString(k) {
-			return fmt.Errorf("[env] name %q; want letters, digits and '_', not starting with a digit", k)
+			return fmt.Errorf("[env] name %q; a variable name cannot hold '=', spaces or control characters", k)
 		}
 	}
 	for key, list := range map[string][]string{"secrets": c.Secrets, "env_passthrough": c.EnvPassthrough} {
@@ -914,9 +942,10 @@ func (c Config) Validate() error {
 }
 
 var (
-	programName = regexp.MustCompile(`^[A-Za-z0-9._+][A-Za-z0-9._+-]*$`)
-	envName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	portNumber  = regexp.MustCompile(`\d+`)
+	programName = regexp.MustCompile(`^[A-Za-z0-9_+][A-Za-z0-9._+-]*$`)
+	// Anything a process environment can hold as a name: npm reads `npm_config_@scope:registry`.
+	envName    = regexp.MustCompile(`^[^=\s\x00-\x1f]+$`)
+	portNumber = regexp.MustCompile(`\d+`)
 )
 
 var userName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$`)

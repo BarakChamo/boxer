@@ -14,7 +14,7 @@ import (
 const template = `#!/bin/sh
 # boxer shim: %[1]s runs inside the sandbox for this worktree.
 d=$(cd "$(dirname "$0")" && pwd)
-new=; IFS=:; for p in $PATH; do [ "$p" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS
+set -f; new=; IFS=:; for p in $PATH; do [ "${p%%/}" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS; set +f
 PATH=$new
 export PATH
 BOXER_SHIM=1 exec boxer run -- %[1]s "$@"
@@ -35,7 +35,7 @@ func SanitizePath(path string) string {
 		if dir == "" {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(dir, Marker)); err == nil {
+		if isShimDir(dir) {
 			continue
 		}
 		keep = append(keep, dir)
@@ -53,10 +53,7 @@ func SanitizePath(path string) string {
 // still running two days later. An interactive guest shell is `boxer-bash` (InstallShell) for
 // exactly this reason; the wildcard `*` is a policy for the hook, not a list of programs.
 func Install(dir string, programs []string) ([]string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, Marker), []byte("boxer shims; boxer removes this directory from its own PATH\n"), 0o644); err != nil {
+	if err := mark(dir, Marker); err != nil {
 		return nil, err
 	}
 	var written []string
@@ -70,6 +67,24 @@ func Install(dir string, programs []string) ([]string, error) {
 		}
 		written = append(written, path)
 	}
+	// A program taken out of the list keeps its old shim otherwise, and taking `node` out is what
+	// the docs advise when a node-based harness breaks. Only a file that is exactly boxer's shim
+	// for its own name goes; anything else in the directory is someone's.
+	keep := map[string]bool{}
+	for _, w := range written {
+		keep[filepath.Base(w)] = true
+	}
+	if ents, err := os.ReadDir(dir); err == nil {
+		for _, e := range ents {
+			name := e.Name()
+			if keep[name] || name == Marker || e.IsDir() {
+				continue
+			}
+			if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil && string(b) == fmt.Sprintf(template, name) {
+				_ = os.Remove(filepath.Join(dir, name))
+			}
+		}
+	}
 	return written, nil
 }
 
@@ -82,7 +97,7 @@ const harnessTemplate = `#!/bin/sh
 HERDR_AGENT=%[1]s
 export HERDR_AGENT
 d=$(cd "$(dirname "$0")" && pwd)
-new=; IFS=:; for p in $PATH; do [ "$p" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS
+set -f; new=; IFS=:; for p in $PATH; do [ "${p%%/}" = "$d" ] || new="${new:+$new:}$p"; done; unset IFS; set +f
 PATH=$new
 export PATH
 exec boxer shell %[1]s -- "$@"
@@ -91,7 +106,7 @@ exec boxer shell %[1]s -- "$@"
 // InstallHarness writes shims named after harness binaries that exec `boxer shell <name>`, so an
 // orchestrator that spawns the harness by name lands inside the guest.
 func InstallHarness(dir string, names []string) ([]string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := mark(dir, HarnessMarker); err != nil {
 		return nil, err
 	}
 	var written []string
@@ -151,9 +166,32 @@ exec boxer run --tty -- env \
 
 // InstallShell writes dir/boxer-bash and returns its path.
 func InstallShell(dir string) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := mark(dir, HarnessMarker); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, "boxer-bash")
 	return path, os.WriteFile(path, []byte(shellTemplate), 0o755)
+}
+
+// HarnessMarker names a directory of harness shims or boxer-bash. It is a marker of its own: the
+// hook reads Marker as "the program shims are on PATH" before letting a block-only harness defer
+// to them, and a directory of harness shims holds none of those.
+const HarnessMarker = ".boxer-harness-shims"
+
+// mark creates dir and names it as boxer's: SanitizePath drops a directory with either marker from
+// boxer's own PATH, and harness shims and boxer-bash had none.
+func mark(dir, marker string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, marker), []byte("boxer shims; boxer removes this directory from its own PATH\n"), 0o644)
+}
+
+func isShimDir(dir string) bool {
+	for _, m := range []string{Marker, HarnessMarker} {
+		if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+			return true
+		}
+	}
+	return false
 }

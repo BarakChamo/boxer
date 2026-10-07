@@ -355,10 +355,10 @@ A named pack is a snapshot of a sandbox's filesystem, not its processes. See
 
 | Subcommand | |
 | --- | --- |
-| `save <name>` | Snapshot this scope's sandbox. `NO_SANDBOX` when there is none |
+| `save <name>` | Snapshot this scope's sandbox. smolvm snapshots only a stopped machine, so the sandbox is stopped and started again around it: a command running in it is cut off, and its services restart. `NO_SANDBOX` when there is none |
 | `ls` | List saved packs, newest first |
-| `use <name>` | Recreate this scope's sandbox from one. `NO_SUCH_PACK` when it was never saved |
-| `rm <name>` | Delete one. Exit 1 when there is no such pack |
+| `use <name>` | Recreate this scope's sandbox from one. `NO_SUCH_PACK` when it was never saved, before anything is deleted |
+| `rm <name>` | Delete one. Exit 1 when there is no such pack, or while a sandbox is being created from it |
 
 boxer checks a pack name before use because it becomes a path segment. An invalid name exits 2.
 
@@ -503,7 +503,7 @@ ACP server in the sandbox with stdio piped. Both set `integration = "inside"`. S
 
 | Flag | Default | |
 | --- | --- | --- |
-| `-e KEY=VALUE` | | A variable for the guest process. Repeatable |
+| `-e KEY=VALUE` | | A variable for the guest process, passed by name so its value is not in a command line. `-e KEY` passes the host's value. Repeatable |
 
 Harnesses are `claude`, `codex`, `copilot`, `fx`, `gemini`, `grok`, `kimi`, `opencode` and `pi`.
 `fx` and `pi` have no ACP server.

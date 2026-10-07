@@ -6,9 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Fixes from a third and a fourth full review, each finding reproduced or covered by a test.
+Fixes from the third, fourth and fifth full reviews, each finding reproduced or covered by a test.
 
 ### Security
+- A substitution in program position (`$(echo npm) i`, `` `echo npm` i ``, `eval $(...)`) ran npm
+  on the host: it left an empty word that was taken for no program at all. Such a name is now
+  unreadable, so the line is sandboxed.
+- Here-document bodies are read as text, with their substitutions read when the delimiter is
+  unquoted; a quote or comment in a body no longer hides the line after it. An apostrophe in a
+  commit message written with `$(cat <<'EOF' ...)` is no longer misread either.
+- Also caught: `xargs` handing its input to a bare wrapper or shell, a carriage return before `#`,
+  upper-case names on macOS (`NPM i`), `env -S` escapes, BSD `script`, the Homebrew `g` tools,
+  zsh's `=npm`, `repeat`, `noglob`, `nocorrect`, glob qualifiers, `${(e)...}` and `zpty`,
+  `source <(...)`, `BASH_ENV=`, and `git -c alias.x='!...'`.
+- The hook no longer lets commands through when it cannot read the directory, Copilot's arguments,
+  or a `BOXER_INSIDE` other than boxer's own `1`.
+- `boxer_run` runs only in the server's own repository.
+- `capsule replay` never applies a capsule's mounts, nor a network wider than the repository's.
+- `boxer shell -e KEY=VALUE` passes the value by name, out of the command line.
 - The command reader follows `trap` lines, function bodies, `coproc`, `$'...'` quoting, `$(...)`
   inside array indexes (which arithmetic runs, even from a quoted string), `taskset`, `chrt` and
   `busybox`, and long and combined wrapper options (`sudo --user root`, `sudo -Eu root`,
@@ -36,8 +51,29 @@ Fixes from a third and a fourth full review, each finding reproduced or covered 
 - `user` in `boxer.toml` must be a user name or `uid[:gid]`; it reaches the guest's shell unquoted.
 
 ### Fixed
-- A sandbox whose setup failed or was interrupted is set up again by the next command, instead of
-  being taken as ready because it is running.
+- A sandbox whose setup was interrupted is set up again by the next command. One whose setup
+  failed stays usable, so the agent can find out why, and `boxer up` tries again.
+- `pack use` checks the pack before it deletes the sandbox. `down`, `status` and `restart` refuse
+  a name given where a flag belongs (`boxer down swift-crab` deleted this worktree's sandbox). A
+  two-word name that matches two sandboxes is refused. `rm` with a filter needs `-y` outside a
+  terminal, as documented.
+- Fork children are not provisioned again on their first command, and a partial fork reports the
+  children it made. gc does not judge a sandbox by another repository's rules when its own cannot
+  be read.
+- The MCP server answers while a `boxer_run` is going, negotiates its protocol version, and runs a
+  task by name (`task`), since there is no `boxer` in the guest to run `boxer run --task`.
+- A rewritten command carries `--harness` when a `[harness.<name>]` table applies, and quotes the
+  session and agent IDs.
+- PATH shims outside a repository run their program on the host; shims for programs no longer
+  listed are removed; a passthrough program gets no shim; the PATH a shim hands on keeps every
+  other entry as written.
+- Inside mode installs a harness under the sandbox's lock, creates its config directory so it is
+  mounted, and keys the harness cache by `setup` too.
+- An invalid program name in `intercept` lists is dropped with a warning rather than failing every
+  command; env names may hold anything but `=`, whitespace and control characters.
+- `url` on a stopped sandbox, `watch --interval 0`, `integrations add --user NAME`,
+  `pack save --harness X NAME`, `backends --probe` with `BOXER_BACKEND` set, and a host command
+  ended by a signal (now 128 plus the signal) all do what they say.
 - gc judges each sandbox by its own repository's `idle_timeout` and `idle_action`; the sweep a
   command started used that command's, so one repository could delete every other's sandboxes. A
   parent whose fork child is in use is kept, and a recreated sandbox can be reclaimed again.
@@ -89,6 +125,7 @@ Fixes from a third and a fourth full review, each finding reproduced or covered 
   worktree instead), and `install`/`uninstall git|conductor --user` are refused.
 
 ### Documentation
+- A page for running boxer in CI.
 - `down`, `stop` and `rm` rows can carry `error`; gc's `volumes` and `stopped` rows are described.
 - `up --json` and `run --json` say which refusals they print as JSON.
 - New quickstart platform table and install details, and an allowlist section on what it does not

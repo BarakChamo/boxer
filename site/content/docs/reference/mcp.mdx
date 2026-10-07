@@ -9,7 +9,9 @@ description: "boxer's MCP server: the boxer_run and boxer_status tools, the brie
 boxer mcp [--harness NAME]
 ```
 
-It serves MCP over stdio as newline-delimited JSON-RPC 2.0, protocol `2025-06-18`. It answers
+It serves MCP over stdio as newline-delimited JSON-RPC 2.0, protocol `2025-06-18` (or `2025-03-26`
+and `2024-11-05` when the client asks for one). `boxer_run` calls run side by side and each answers
+when it finishes, so `ping` and other calls are answered during a long run. It answers
 `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list` and `resources/read`. It ignores
 notifications. Any harness that supports MCP can use it, including harnesses boxer has no
 specific integration for.
@@ -35,8 +37,9 @@ apply here too.
 
 | Field | Type | |
 | --- | --- | --- |
-| `command` | string | Required. A POSIX shell line, run with `sh -c` in the guest |
-| `cwd` | string | Optional. The directory to run in. Defaults to the server's working directory |
+| `command` | string | A POSIX shell line, run with `sh -c` in the guest. Give this or `task` |
+| `task` | string | A [`[tasks]`](/docs/configure/tasks) entry to run, with its environment and timeout, as `boxer run --task` does |
+| `cwd` | string | Optional. The directory to run in. Defaults to the server's working directory. A directory in another repository is refused; another worktree of the same one is not |
 
 Returns stdout and stderr interleaved, followed by `[exit N]`. Output over 128 KB keeps its first
 and last 64 KB, with a line saying how many bytes were left out between them. Stdin is empty. `isError` is set when

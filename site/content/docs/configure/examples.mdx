@@ -114,7 +114,15 @@ description = "the Go tests"
 ```
 
 With module dependencies, add `go mod download` to `setup` and `"proxy.golang.org"` and
-`"sum.golang.org"` to `allow_hosts`.
+`"sum.golang.org"` to `allow_hosts`. Go keeps modules outside the worktree, where a recreated
+sandbox loses them, so point its caches into the worktree and ignore that directory in git:
+
+```toml
+[env]
+GOMODCACHE = "/workspace/.cache/gomod"
+GOCACHE    = "/workspace/.cache/gobuild"
+GOFLAGS    = "-modcacherw"
+```
 
 ## From a devcontainer
 

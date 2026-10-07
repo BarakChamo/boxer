@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
@@ -290,11 +291,23 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "boxer %s does not take %s\n", cmd, strings.Join(stray, ", "))
 		return 2
 	}
+	// Only run takes words after its flags. `boxer down swift-crab` deleted this worktree's
+	// sandbox, not swift-crab, and exited 0.
+	if cmd != "run" && fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "boxer %s takes no arguments (got %q); another sandbox is named with --scope, or with `boxer rm NAME`\n", cmd, fs.Arg(0))
+		return 2
+	}
 	// A sandbox can be taken down by name, from anywhere: a dashboard built on `ls --json` has
 	// machine names, not worktrees, and the worktree may be gone.
 	if cmd == "down" && *scopeName != "" {
 		hostVM := vm.Host(hostBackend())
-		*scopeName = box.ResolveName(hostVM, *scopeName)
+		resolved, err := box.ResolveName(hostVM, *scopeName)
+		if err != nil {
+			emit(stdout, errorRow(err), *asJSON)
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		*scopeName = resolved
 		if owned, err := vm.OwnsName(hostVM, *scopeName); err != nil || !owned {
 			if err == nil {
 				err = vm.NotOwned(hostVM, *scopeName)
@@ -339,6 +352,14 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		return printDoctor(r, stdout)
 	}
+	// A PATH shim is on the PATH everywhere, and outside any repository there is no sandbox to
+	// send its program to: `npm` in ~ ran into "not inside a git repository" and exit 1. It runs
+	// as if there were no shim. Only for that case; a broken configuration still refuses.
+	var berr *box.Error
+	if err != nil && cmd == "run" && os.Getenv("BOXER_SHIM") == "1" && errors.As(err, &berr) && berr.Cause == "NO_REPOSITORY" && fs.NArg() > 0 {
+		_ = os.Unsetenv("BOXER_SHIM")
+		return hostRun(fs.Args(), stdin, stdout, stderr)
+	}
 	if err != nil {
 		emit(stdout, errorRow(err), *asJSON)
 		fmt.Fprintln(stderr, err)
@@ -382,6 +403,7 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 				fmt.Fprintf(stdout, "boxer: dropped the cached environment %s\n", filepath.Base(n))
 			}
 		}
+		e.RetryFailedSetup()
 		created, err := e.Ensure(true, *recreate || *rebuild)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
@@ -498,6 +520,10 @@ func hostRun(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	c.Stdin, c.Stdout, c.Stderr = stdin, stdout, stderr
 	if err := c.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
+			// Ended by a signal: the shell convention, 128 plus its number, rather than -1 (255).
+			if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+				return 128 + int(ws.Signal())
+			}
 			return ee.ExitCode()
 		}
 		fmt.Fprintln(stderr, err)
@@ -792,9 +818,14 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		if !seen {
 			c = cfg
 			if w, r := rootsOf(root); root != "" && w != "" {
-				if own, err := config.Load(w, r); err == nil {
-					c = own
+				own, err := config.Load(w, r)
+				if err != nil {
+					// Its own rules cannot be read, and this directory's are not its rules:
+					// no idle rule at all, rather than another repository's.
+					own = cfg
+					own.IdleTimeout = "never"
 				}
+				c = own
 			}
 			policies[root] = c
 		}
@@ -1094,7 +1125,9 @@ func insideCmd(kind string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	tty := kind == "shell" && cli.IsTerminal(os.Stdin) && cli.IsTerminal(os.Stdout)
 	code, err := inside.Run(e, name, fs.Args(), kind == "acp", inside.Options{TTY: tty, Env: extra, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 	if err != nil {
+		// boxer's failure, not the harness's exit status: 127 read as "command not found".
 		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	return code
 }
@@ -1147,7 +1180,14 @@ func shimCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	paths, err := shim.Install(dir, cfg.Intercepted())
+	// A program the hook keeps on the host is not shimmed into the sandbox either.
+	var programs []string
+	for _, p := range cfg.Intercepted() {
+		if !slices.Contains(cfg.Passthrough, p) {
+			programs = append(programs, p)
+		}
+	}
+	paths, err := shim.Install(dir, programs)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -1521,6 +1561,10 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(all, "A", false, "shorthand for --all-backends")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *interval <= 0 { // a zero interval asked the backend for a listing as fast as it could answer
+		fmt.Fprintf(stderr, "boxer watch: --interval %s; want a positive duration such as 1s\n", *interval)
 		return 2
 	}
 	client := vm.Host(hostBackend())

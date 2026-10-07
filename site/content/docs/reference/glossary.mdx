@@ -105,8 +105,8 @@ and no hooks. See [skills and plugins](/docs/setup/skills-and-plugins).
 **portless.** The local reverse proxy boxer uses to give forwarded ports stable names, on port 1355
 by default. See [URLs](/docs/configure/urls).
 
-**Prep.** The `[prep]` command list, which runs on the host in the worktree before the sandbox
-exists. It is opt-in and only safe for packages with prebuilt binaries. See
+**Prep.** The `[prep]` command list, which runs on the host in the worktree while the sandbox
+boots. It is opt-in and only safe for packages with prebuilt binaries. See
 [prep](/docs/reference/configuration#prep).
 
 **Rewrite.** Replacing a command with `boxer run -c '<command>'` before it runs, so the agent sees

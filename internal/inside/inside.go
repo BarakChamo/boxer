@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BarakChamo/boxer/internal/box"
@@ -193,11 +194,24 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if hint := loginHint(h, o.Env); hint != "" {
 		fmt.Fprintln(e.Stderr, "boxer: "+hint)
 	}
+	// Mounted only if it exists when the sandbox is made: a harness run before it ever logged in
+	// on the host wrote its login to the guest's disk, gone with the sandbox.
+	if dir := configDir(h); dir != "" {
+		_ = os.MkdirAll(dir, 0o700)
+	}
 	created, err := e.Ensure(true, false)
 	if err != nil {
 		return 1, err
 	}
-	if err := install(e, name, h); err != nil {
+	// Under the sandbox's lock: two sessions starting together ran two installs at once, and two
+	// apt-based ones fought over dpkg's lock. Released before PackHarness, which takes it itself.
+	unlock, err := box.LockScope(e.Scope.Key)
+	if err != nil {
+		return 1, err
+	}
+	err = install(e, name, h)
+	unlock()
+	if err != nil {
 		return 1, err
 	}
 	// Caching the harness stops and restarts the VM. Only one this call just made can be stopped
@@ -242,7 +256,7 @@ func install(e *box.Env, name string, h Harness) error {
 	if code == 0 {
 		return nil
 	}
-	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox (once per host)\n", name)
+	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox\n", name)
 	// npm inside the guest sees a slow registry through TSI: long fetch timeouts, and the whole
 	// line retried once, cover the idle timeouts observed in eval runs.
 	// npm exits 0 when an optional platform package fails to download, which leaves a harness
@@ -317,7 +331,29 @@ func guestEnv(h Harness, extra []string) (env, secrets []string, err error) {
 			secrets = append(secrets, k+"="+k)
 		}
 	}
-	return append(env, extra...), secrets, nil
+	// -e values go the same way, by name: `-e CLAUDE_CODE_OAUTH_TOKEN=...` put the token on the
+	// runtime's command line, which every local user can read. A bare -e NAME takes the host's.
+	for _, kv := range extra {
+		k, v, hasValue := strings.Cut(kv, "=")
+		// One that overrides a variable set above (CODEX_HOME, HOME) replaces it there: that list
+		// is passed by value, and a name passed both ways got the list's, not the caller's.
+		if i := slices.IndexFunc(env, func(e string) bool { return strings.HasPrefix(e, k+"=") }); hasValue && i >= 0 {
+			env[i] = kv
+			continue
+		}
+		if hasValue {
+			if err := os.Setenv(k, v); err != nil {
+				return nil, nil, fmt.Errorf("-e %s: %v", k, err)
+			}
+		} else if _, ok := os.LookupEnv(k); !ok {
+			continue
+		}
+		// Once: the runtime refuses a secret named twice, and the harness's own may name it too.
+		if !slices.Contains(secrets, k+"="+k) {
+			secrets = append(secrets, k+"="+k)
+		}
+	}
+	return env, secrets, nil
 }
 
 func firstNonEmpty(a, b string) string {

@@ -367,6 +367,11 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		}
 	}()
 
+	if e.FromPack != "" {
+		if _, err := e.fromPackPath(); err != nil {
+			return false, err
+		}
+	}
 	m, ok, err := e.Exists()
 	if err != nil {
 		return false, err
@@ -395,7 +400,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		// `ls` and `gc` can still tell this machine apart from one boxer did not create.
 		vm.RecordOwned(e.VM, e.Scope.Key)
 		created = true
-	} else if m.Running() && provisioned(e.Scope.Key) {
+	} else if m.Running() && provisioned(e.Scope.Key) != "" {
 		// A running sandbox's routes are registered, but the proxy serving them may not be: it
 		// does not survive a reboot or a crash. Checking is a pid-file read; starting it is paid
 		// only when it is actually down.
@@ -409,7 +414,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	// Cleared before provisioning and set once setup has run, so a sandbox whose setup failed or
 	// was interrupted is provisioned again by the next command rather than taken as ready because
 	// it is running. A running one is not started again.
-	setProvisioned(e.Scope.Key, false)
+	setProvisioned(e.Scope.Key, "")
 	if ok && m.Running() {
 		// fall through to the provisioning steps; each skips what is already done
 	} else if err := e.VM.Start(e.Scope.Key); err != nil {
@@ -468,11 +473,15 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 		return created, err
 	}
 	if err := e.setup(); err != nil {
+		// Concluded, not interrupted: the sandbox stays usable, because the agent needs it to
+		// find out why, and repeating a failing setup before every command would stop it doing
+		// anything else. `boxer up` tries again.
+		setProvisioned(e.Scope.Key, "failed")
 		return created, err
 	}
 	// Not after `ready`: a service that never comes up is something an agent needs to run
 	// commands to debug, and holding every command for ready_timeout would stop it.
-	setProvisioned(e.Scope.Key, true)
+	setProvisioned(e.Scope.Key, "ok")
 	// Services come after the snapshot: a pack should carry what is installed, not a process that
 	// was running when it was taken.
 	if err := e.startServices(); err != nil {
@@ -573,13 +582,9 @@ func (e *Env) create() (err error) {
 	if e.FromPack != "" {
 		// A named pack is an explicit instruction, so it wins over the ladder below and a missing
 		// one is an error rather than a silent fall back to pulling the image.
-		p, err := NamedPackPath(e.FromPack)
+		p, err := e.fromPackPath()
 		if err != nil {
 			return err
-		}
-		if !packReady(p) {
-			return &Error{Reason: fmt.Sprintf("no saved pack named %q", e.FromPack), Cause: "NO_SUCH_PACK",
-				Scope: e.Scope, Fix: "boxer pack ls"}
 		}
 		from = p
 	} else if e.Cfg.Smolfile == "" && image != "" {
@@ -954,6 +959,13 @@ func harnessKey(image, harness string, imageSetup []string) string {
 	return key
 }
 
+// harnessSetup is what the harness pack carries besides image_setup: `setup` ran before the
+// snapshot, with the repository's secrets, and what it wrote outside the worktree (a token in
+// ~/.npmrc, a global install) is in the pack. Keyed with it, another repository does not boot that.
+func harnessSetup(cfg config.Config) []string {
+	return append(append([]string{}, cfg.ImageSetup...), cfg.Setup...)
+}
+
 // harnessPack returns the pack of image with this harness installed when one exists, so a new
 // inside-mode VM skips the install (R-GUEST-4).
 // PortsOf reads back the guest-to-host port mapping a machine was created with.
@@ -1026,7 +1038,7 @@ func (e *Env) harnessPack(image string) string {
 	if !e.Inside() || e.Harness == "" {
 		return ""
 	}
-	side := PackPath(harnessKey(image, e.Harness, e.Cfg.ImageSetup))
+	side := PackPath(harnessKey(image, e.Harness, harnessSetup(e.Cfg)))
 	if !packReady(side) {
 		return ""
 	}
@@ -1045,7 +1057,7 @@ func (e *Env) PackHarness() {
 	if !ok {
 		return
 	}
-	side := PackPath(harnessKey(image, e.Harness, e.Cfg.ImageSetup))
+	side := PackPath(harnessKey(image, e.Harness, harnessSetup(e.Cfg)))
 	stub := strings.TrimSuffix(side, ".smolmachine")
 	if packReady(side) {
 		return
@@ -1854,6 +1866,32 @@ type HostFallback struct{ Err error }
 func (h *HostFallback) Error() string { return h.Err.Error() }
 func (h *HostFallback) Unwrap() error { return h.Err }
 
+// fromPackPath is the named pack this Env is to start from, or why it cannot: an unknown name, or
+// a backend that cannot boot one. Asked before anything is deleted: `pack use typo` used to
+// destroy the sandbox and only then say there was no such pack.
+func (e *Env) fromPackPath() (string, error) {
+	if _, ok := e.VM.(vm.Packer); !ok {
+		return "", vm.Unsupported(e.VM, "start from a saved pack", "set backend = \"smolvm\", which snapshots a machine to a file")
+	}
+	p, err := NamedPackPath(e.FromPack)
+	if err != nil {
+		return "", err
+	}
+	if !packReady(p) {
+		return "", &Error{Reason: fmt.Sprintf("no saved pack named %q", e.FromPack), Cause: "NO_SUCH_PACK",
+			Scope: e.Scope, Fix: "boxer pack ls"}
+	}
+	return p, nil
+}
+
+// RetryFailedSetup makes the next Ensure provision a running sandbox again when its setup failed
+// last time. `boxer up` calls it: a person who fixed the cause asks again that way.
+func (e *Env) RetryFailedSetup() {
+	if provisioned(e.Scope.Key) == "failed" {
+		setProvisioned(e.Scope.Key, "")
+	}
+}
+
 // Run executes argv in the guest, provisioning first when policy allows. It returns the exit
 // code to propagate. Errors are *Error and already agent-readable.
 func (e *Env) Run(argv []string, o RunOpts) (int, error) {
@@ -1970,6 +2008,10 @@ func lockScope(key string) (func(), error) {
 	}
 	return lockFile(filepath.Join(dir, key))
 }
+
+// LockScope takes the scope's lock, waiting for it: for work outside Ensure that must not overlap
+// another boxer's on the same sandbox.
+func LockScope(key string) (unlock func(), err error) { return lockScope(key) }
 
 // TryLockScope takes the scope's lock only if nobody holds it. gc uses it so that it never stops
 // or deletes a sandbox while a command is provisioning it, and never waits on one that is.
@@ -2116,7 +2158,7 @@ func (e *Env) UpDetached() error {
 		return err
 	}
 	args := []string{"up"}
-	if e.Harness != "" {
+	if e.Harness != "" && !e.Cfg.HasHarnessTable(e.Harness) { // IdentityArgs names it otherwise
 		args = append(args, "--harness", e.Harness)
 	}
 	cmd := exec.Command(exe, append(args, e.IdentityArgs()...)...)
@@ -2131,8 +2173,16 @@ func (e *Env) UpDetached() error {
 
 // IdentityArgs are the --session and --agent flags another boxer invocation needs to resolve
 // this Env's scope; empty unless the isolation uses those ids.
+//
+// The harness is named only when a [harness.<name>] table would change what the run resolves;
+// without it the rewritten run applied the top-level settings and could land in another sandbox
+// than the one the hook decided for. The values are an argument vector; a caller building a shell
+// line quotes them.
 func (e *Env) IdentityArgs() []string {
 	var args []string
+	if e.Harness != "" && e.Cfg.HasHarnessTable(e.Harness) {
+		args = append(args, "--harness", e.Harness)
+	}
 	if e.Cfg.Isolation == "session" || e.Cfg.Isolation == "subagent" {
 		if e.ID.SessionID != "" {
 			args = append(args, "--session", e.ID.SessionID)
@@ -2200,7 +2250,7 @@ func InstructionsFor(cfg config.Config, runTool string) string {
 	// reads the skill still learns them here, and a task is the one command whose spelling the
 	// repository guarantees.
 	if names := cfg.TaskNames(); len(names) > 0 {
-		b.WriteString("This repository declares tasks; prefer them over composing a command line:\n")
+		b.WriteString("This repository declares tasks; prefer them over composing a command line. Run one with `boxer run --task NAME`, or with " + runTool + " and its `task` argument:\n")
 		// A described task is listed on its own line with what it is for, because choosing the
 		// right task is the decision the agent actually has to make; an undescribed one falls back
 		// to its command line, which is the only description it has.

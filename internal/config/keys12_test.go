@@ -33,13 +33,10 @@ func TestNewKeysDefaultAndValidate(t *testing.T) {
 		"build = \"Dockerfile\"\nsmolfile = \"Smolfile\"",
 		`user = "node; rm -rf /"`,
 		`user = "a b"`,
-		`intercept_also = ["npm i"]`,
-		"intercept_also = [\"x\\nrm\"]",
-		`passthrough = ["git;rm"]`,
 		"[network]\nports = [\"70000:3000\"]",
 		`mount_at = "workspace"`,
-		"[env]\n\"A-B\" = \"1\"",
 		`secrets = ["TOKEN=x"]`,
+		"[env]\n\"A B\" = \"1\"",
 		`packs_keep_last = -1`,
 		`reclaim_every = "0s"`,
 	} {
@@ -152,5 +149,17 @@ func TestHarnessTablesByEitherName(t *testing.T) {
 	}
 	if _, err := load(t, "[harness.cladue-code]\nmode = \"tool\"\n"); err == nil {
 		t.Fatal("a misspelt harness table must be refused")
+	}
+}
+
+// A name that is not a program is dropped with a warning rather than refused: refusing failed
+// every command in a repository whose file had worked before.
+func TestBadProgramNamesAreDroppedNotRefused(t *testing.T) {
+	c, err := load(t, "intercept_also = [\"npm i\", \"x\\nrm\", \"rails\", \"bin/rake\"]\npassthrough = [\"*\"]\n[env]\n\"npm_config_@org:registry\" = \"https://x\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.InterceptAlso, ",") != "rails" || len(c.Warnings) != 3 {
+		t.Fatalf("kept %v, warned %v", c.InterceptAlso, c.Warnings)
 	}
 }

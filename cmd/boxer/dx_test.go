@@ -72,7 +72,7 @@ func TestStopAndRm(t *testing.T) {
 		t.Fatalf("after stop: %d %v", code, st)
 	}
 	var rows []map[string]any
-	if code, _ := call(t, &rows, "rm", "--stopped", "--json"); code != 0 || len(rows) != 1 || rows[0]["scope"] != key {
+	if code, _ := call(t, &rows, "rm", "--stopped", "-y", "--json"); code != 0 || len(rows) != 1 || rows[0]["scope"] != key {
 		t.Fatalf("rm --stopped: %d %v", code, rows)
 	}
 	if code, _ := call(t, &st, "status", "--json"); code != exitAbsent {
@@ -88,14 +88,14 @@ func TestRmGone(t *testing.T) {
 		t.Fatal(out)
 	}
 	var rows []map[string]any
-	if code, _ := call(t, &rows, "rm", "--gone", "--json"); code != 0 || len(rows) != 0 {
+	if code, _ := call(t, &rows, "rm", "--gone", "-y", "--json"); code != 0 || len(rows) != 0 {
 		t.Fatalf("a live worktree is not gone: %v", rows)
 	}
 	t.Chdir(t.TempDir())
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := call(t, &rows, "rm", "--gone", "--json"); code != 0 || len(rows) != 1 {
+	if code, _ := call(t, &rows, "rm", "--gone", "-y", "--json"); code != 0 || len(rows) != 1 {
 		t.Fatalf("rm --gone: %d %v", code, rows)
 	}
 }
@@ -348,5 +348,34 @@ func TestDXHelpers(t *testing.T) {
 	}
 	if got := lastLines("only", 3); got != "only" {
 		t.Fatalf("lastLines short %q", got)
+	}
+}
+
+// A probe tests the backend it names, whatever BOXER_BACKEND says, and puts the variable back.
+func TestProbeIgnoresTheBackendVariable(t *testing.T) {
+	vmtest.Install(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("BOXER_BACKEND", "dcoker")
+	p := runProbe("smolvm")
+	if p == nil || strings.Contains(p.Error, "dcoker") {
+		t.Fatalf("the probe ran on BOXER_BACKEND's backend: %+v", p)
+	}
+	if os.Getenv("BOXER_BACKEND") != "dcoker" {
+		t.Fatal("the variable must be restored")
+	}
+}
+
+// What a person is asked, an agent is refused: rm with a filter needs -y outside a terminal.
+func TestRmWithAFilterNeedsYesFromAnAgent(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	if code, out := call(t, nil, "rm", "--all"); code != 2 || !strings.Contains(out, "-y") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if ms, _ := client.List(); len(ms) != 1 {
+		t.Fatal("nothing may be removed without -y")
 	}
 }

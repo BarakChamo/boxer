@@ -325,6 +325,16 @@ func selectMachines(ms []hostMachine, names []string, gone, stopped bool) ([]hos
 		if !matched[n] {
 			return nil, fmt.Errorf("no boxer sandbox named %q (boxer ls -A lists them)", n)
 		}
+		// Two-word names can collide; one that matches several is refused, not applied to all.
+		var keys []string
+		for _, h := range out {
+			if n != h.m.Name && n == scope.Slug(h.m.Name) {
+				keys = append(keys, h.m.Name)
+			}
+		}
+		if len(keys) > 1 {
+			return nil, fmt.Errorf("%q names %d sandboxes (%s); name one by its key", n, len(keys), strings.Join(keys, ", "))
+		}
 	}
 	return out, nil
 }
@@ -436,7 +446,14 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	}
 	// A filter is a question about what it will match, so a person is shown the answer first; a
 	// sandbox named on the command line was the answer already.
-	if verb == "rm" && (len(targets) > 1 || *all || *gone || *stopped) && !*yes && out.Mode == cli.Human {
+	if verb == "rm" && (len(targets) > 1 || *all || *gone || *stopped) && !*yes {
+		if out.Mode != cli.Human {
+			// What a person is asked, an agent or a pipe is refused: it deleted every sandbox on
+			// the host without a question, other worktrees' included.
+			fmt.Fprintf(stderr, "boxer: rm would remove %s; a person is asked, and anything else must say so\n", plural(len(targets), "sandbox", "sandboxes"))
+			fmt.Fprintln(stderr, "boxer: fix: add -y")
+			return 2
+		}
 		if !confirm(out, stdin, "remove "+plural(len(targets), "sandbox", "sandboxes")+"?") {
 			return 1
 		}
@@ -678,6 +695,14 @@ func runProbe(backend string) *probe {
 	mode := "off"
 	if vm.CapsOf(vm.Host(backend)).Allowlist {
 		mode = "allowlist"
+	}
+	// The probe's own file decides: BOXER_BACKEND, BOXER_IMAGE and the rest override a file, and
+	// with one set every row probed that backend and reported it under its own name.
+	for _, name := range config.SettingEnv() {
+		if v, ok := os.LookupEnv(name); ok {
+			_ = os.Unsetenv(name)
+			defer os.Setenv(name, v) //nolint:errcheck // restoring what was there
+		}
 	}
 	toml := fmt.Sprintf("backend = %q\nimage = \"mirror.gcr.io/library/alpine:3.20\"\nrequire_worktree = \"off\"\nmemory = \"512M\"\ncpus = 1\nnetwork = { mode = %q }\n", backend, mode)
 	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644); err != nil {
@@ -963,10 +988,17 @@ func integrationsAdd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: boxer integrations add <harness>|skill|plugin [--user] [--agent NAME]")
 		return 2
 	}
-	what := args[0]
-	if _, err := parseAnywhere(fs, args[1:]); err != nil {
+	// Flags before or after the name, as everywhere else: `add --user claude-code` read --user as
+	// the integration.
+	names, err := parseAnywhere(fs, args)
+	if err != nil {
 		return 2
 	}
+	if len(names) != 1 {
+		fmt.Fprintln(stderr, "usage: boxer integrations add <harness>|skill|plugin [--user] [--agent NAME]")
+		return 2
+	}
+	what := names[0]
 	var cmd *exec.Cmd
 	switch what {
 	case "skill":
@@ -1035,6 +1067,14 @@ func urlCmd(open bool, e *box.Env, args []string, stdout, stderr io.Writer) int 
 	if !ok {
 		fmt.Fprintln(stderr, "boxer: no sandbox for this worktree\nboxer: fix: boxer up")
 		return 4
+	}
+	if len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		fmt.Fprintf(stderr, "boxer url takes a guest port, not %q\n", args[0])
+		return 2
+	}
+	if !m.Running() { // its address would answer nothing
+		fmt.Fprintln(stderr, "boxer: this worktree's sandbox is stopped\nboxer: fix: boxer up")
+		return 3
 	}
 	urls := e.URLs(m)
 	for guest, host := range box.PortsOf(m) {

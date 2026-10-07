@@ -90,7 +90,8 @@ func TestGuestEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(env, "\n")
-	for _, want := range []string{"HOME=/Users/x", "CODEX_HOME=/Users/x/codex-home", "EXTRA=1", `CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`} {
+	t.Cleanup(func() { _ = os.Unsetenv("EXTRA") })
+	for _, want := range []string{"HOME=/Users/x", "CODEX_HOME=/Users/x/codex-home", `CODEX_CONFIG={"sandbox_mode":"danger-full-access"}`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in\n%s", want, joined)
 		}
@@ -98,6 +99,10 @@ func TestGuestEnv(t *testing.T) {
 	// The harness's keys go by name, never by value: a value in env is a value in the host's argv.
 	if strings.Contains(joined, "OPENAI_API_KEY") {
 		t.Fatalf("an API key must not be passed as KEY=value:\n%s", joined)
+	}
+	// An -e value goes by name too: it was a token on the runtime's command line.
+	if strings.Contains(joined, "EXTRA") || !slices.Contains(secrets, "EXTRA=EXTRA") || os.Getenv("EXTRA") != "1" {
+		t.Fatalf("-e EXTRA=1 must be passed by name: env %s secrets %v", joined, secrets)
 	}
 	if s := strings.Join(secrets, " "); !strings.Contains(s, "OPENAI_API_KEY=OPENAI_API_KEY") || !strings.Contains(s, "OPENAI_BASE_URL=OPENAI_BASE_URL") {
 		t.Fatalf("the harness's keys are passed by name: %v", secrets)
@@ -311,5 +316,55 @@ func TestEveryInsideHarnessIsAKnownHarnessName(t *testing.T) {
 		if !slices.Contains(config.HarnessNames, n) {
 			t.Errorf("[harness.%s] would be refused", n)
 		}
+	}
+}
+
+// -e NAME takes the host's value by name, and is left out when the host has none.
+func TestGuestEnvExtrasByName(t *testing.T) {
+	t.Setenv("HOME", "/Users/x")
+	t.Setenv("BOXER_TEST_SET", "v")
+	_ = os.Unsetenv("BOXER_TEST_UNSET")
+	_, secrets, err := guestEnv(Harnesses["codex"], []string{"BOXER_TEST_SET", "BOXER_TEST_UNSET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(secrets, "BOXER_TEST_SET=BOXER_TEST_SET") || slices.Contains(secrets, "BOXER_TEST_UNSET=BOXER_TEST_UNSET") {
+		t.Fatalf("%v", secrets)
+	}
+	if _, _, err := guestEnv(Harnesses["codex"], []string{"=x"}); err == nil {
+		t.Fatal("a variable with no name is refused")
+	}
+}
+
+// An -e that overrides a variable boxer sets replaces it: the caller's config directory, not the
+// default, is the one the harness reads.
+func TestGuestEnvExtraOverridesItsOwnVariable(t *testing.T) {
+	t.Setenv("HOME", "/Users/x")
+	t.Setenv("CODEX_HOME", "")
+	env, secrets, err := guestEnv(Harnesses["codex"], []string{"CODEX_HOME=/tmp/eval-codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(env, "CODEX_HOME=/tmp/eval-codex") || slices.Contains(secrets, "CODEX_HOME=CODEX_HOME") {
+		t.Fatalf("env %v secrets %v", env, secrets)
+	}
+}
+
+// A name the harness passes itself and an -e both name is passed once: the runtime refuses two.
+func TestGuestEnvNamesASecretOnce(t *testing.T) {
+	t.Setenv("HOME", "/Users/x")
+	t.Setenv("OPENAI_API_KEY", "k")
+	_, secrets, err := guestEnv(Harnesses["codex"], []string{"OPENAI_API_KEY=other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, s := range secrets {
+		if s == "OPENAI_API_KEY=OPENAI_API_KEY" {
+			n++
+		}
+	}
+	if n != 1 || os.Getenv("OPENAI_API_KEY") != "other" {
+		t.Fatalf("%v", secrets)
 	}
 }
