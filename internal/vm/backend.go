@@ -393,8 +393,22 @@ func runtimeFailure(b Backend, code int, h *headWriter, prefixes map[int][]strin
 // smolvm binds loopback, and the container backends now match it. A spec that already names an
 // address ("0.0.0.0:3000:3000") is the user's choice and passes through.
 func loopbackPort(p string) string {
-	if strings.Count(p, ":") == 1 {
-		return "127.0.0.1:" + p
+	spec, proto, hasProto := strings.Cut(p, "/")
+	withProto := func(s string) string {
+		if hasProto {
+			return s + "/" + proto
+		}
+		return s
 	}
-	return p
+	switch strings.Count(spec, ":") {
+	case 0:
+		// A bare port is host and guest on loopback, not docker's "all interfaces, random host".
+		return withProto("127.0.0.1:" + spec + ":" + spec)
+	case 1:
+		// host:guest, with no address: bind loopback, as smolvm does.
+		return withProto("127.0.0.1:" + spec)
+	default:
+		// An explicit address the user wrote (0.0.0.0:…, 127.0.0.1:…, [::1]:…) is kept.
+		return p
+	}
 }

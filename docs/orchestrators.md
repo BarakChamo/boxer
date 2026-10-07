@@ -103,7 +103,7 @@ the shape rather than by reading about it.
   also see a stale mount; boxer proves the mount by writing through it and recreates the sandbox
   once if it never passes.
 - **Nothing left behind.** `boxer ls -A` lists every sandbox on every backend with whether its
-  worktree still exists; `boxer rm --gone -A` removes the ones whose worktree is gone, with their
+  worktree still exists; `boxer rm --gone -A -y` removes the ones whose worktree is gone, with their
   URLs and host state. `gc` does the same in the background.
 
 ## Drivers and checklists (2026-09-18)

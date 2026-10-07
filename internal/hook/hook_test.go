@@ -431,6 +431,15 @@ func TestRewriteQuotesIdentityAndNamesTheHarness(t *testing.T) {
 	if !strings.Contains(out.String(), `--harness claude-code`) || !strings.Contains(out.String(), `--session 's 1; rm -rf x'`) {
 		t.Fatalf("%s", out.String())
 	}
+	// A value that starts with -- is quoted too, not taken for a flag.
+	in2 := fmt.Sprintf(`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"--x;touch /tmp/p","cwd":%q,"tool_input":{"command":"npm test"}}`, dir)
+	var out2 bytes.Buffer
+	if code := Run("claude-code", strings.NewReader(in2), &out2, io.Discard, box.Resolve); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out2.String(), `--session '--x;touch /tmp/p'`) {
+		t.Fatalf("a value starting with -- must be quoted: %s", out2.String())
+	}
 }
 
 // Three ways the hook let an intercepted command through on input it could not read.

@@ -203,15 +203,7 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	if err != nil {
 		return 1, err
 	}
-	// Under the sandbox's lock: two sessions starting together ran two installs at once, and two
-	// apt-based ones fought over dpkg's lock. Released before PackHarness, which takes it itself.
-	unlock, err := box.LockScope(e.Scope.Key)
-	if err != nil {
-		return 1, err
-	}
-	err = install(e, name, h)
-	unlock()
-	if err != nil {
+	if err := install(e, name, h); err != nil {
 		return 1, err
 	}
 	// Caching the harness stops and restarts the VM. Only one this call just made can be stopped
@@ -227,7 +219,9 @@ func Run(e *box.Env, name string, args []string, acp bool, o Options) (int, erro
 	// The repository's own [env], then the harness's: the harness session is where the agent runs
 	// the repository's commands, so it gets what `boxer run` gives them.
 	env = append(e.GuestEnv(), env...)
-	secrets = append(secrets, e.HostSecrets()...)
+	// The runtime refuses a secret named twice, and the repository's secrets (CI in the default
+	// env_passthrough, a name in `secrets`) can repeat one the harness or an -e already named.
+	secrets = dedupeSecrets(append(secrets, e.HostSecrets()...))
 	if m, ok, err := e.Exists(); err == nil && ok {
 		env = append(env, e.ServerEnv(m)...)
 	}
@@ -256,6 +250,18 @@ func install(e *box.Env, name string, h Harness) error {
 	if code == 0 {
 		return nil
 	}
+	// Under the sandbox's lock: two sessions starting together ran two installs at once, and two
+	// apt-based ones fought over dpkg's lock. The lock is released around a restart, which takes
+	// it itself — holding it there deadlocked `boxer shell`.
+	unlock, err := box.LockScope(e.Scope.Key)
+	if err != nil {
+		return err
+	}
+	defer func() { unlock() }() // unlock may be reassigned by the retry below
+	// Someone else may have installed it while we waited for the lock.
+	if _, c, _ := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "test -f "+marker); c == 0 {
+		return nil
+	}
 	fmt.Fprintf(e.Stderr, "boxer: installing %s in the sandbox\n", name)
 	// npm inside the guest sees a slow registry through TSI: long fetch timeouts, and the whole
 	// line retried once, cover the idle timeouts observed in eval runs.
@@ -282,13 +288,19 @@ func install(e *box.Env, name string, h Harness) error {
 	// A dropped exec transport is smolvm's, not npm's: restart the VM and run the whole line again.
 	if (err != nil || code != 0) && transportError(msg) {
 		fmt.Fprintln(e.Stderr, "boxer: the sandbox dropped the connection during install; restarting it and retrying once")
-		if rerr := e.Restart(); rerr == nil {
+		unlock() // Restart provisions, which takes this lock
+		rerr := e.Restart()
+		unlock, err = box.LockScope(e.Scope.Key)
+		if err != nil {
+			return err
+		}
+		if rerr == nil {
 			code, msg, err = run()
 		}
 	}
 	if err != nil || code != 0 {
 		return &box.Error{Reason: fmt.Sprintf("installing %s failed (exit %d): %s", name, code, LastLines(msg, 3)), Cause: "HARNESS_INSTALL_FAILED", Scope: e.Scope,
-			Fix: "check network.allow_hosts includes registry.npmjs.org, then: boxer shell " + name}
+			Fix: "add registry.npmjs.org to network.allow_hosts, then: boxer up --recreate && boxer shell " + name}
 	}
 	return nil
 }
@@ -376,4 +388,19 @@ func LastLines(s string, n int) string {
 		keep = keep[len(keep)-n:]
 	}
 	return strings.Join(keep, "; ")
+}
+
+// dedupeSecrets keeps the first GUEST=HOST pair for each guest name: the runtime refuses two.
+func dedupeSecrets(pairs []string) []string {
+	seen := map[string]bool{}
+	out := pairs[:0:0]
+	for _, p := range pairs {
+		name, _, _ := strings.Cut(p, "=")
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, p)
+	}
+	return out
 }

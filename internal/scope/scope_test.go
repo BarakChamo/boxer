@@ -1,6 +1,7 @@
 package scope
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -79,5 +80,32 @@ func TestResolve(t *testing.T) {
 	}
 	if len(wtA.Key) != 15 || wtA.Key[:3] != "sb-" {
 		t.Fatalf("key shape: %q", wtA.Key)
+	}
+}
+
+// GitCommand runs git with the repository's own hooks, fsmonitor, pager and external diff turned
+// off, so a config the guest can write cannot run a command when boxer reads the worktree's state.
+func TestGitCommandRunsNothingTheConfigNames(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := GitCommand(dir, args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+	ran := filepath.Join(t.TempDir(), "ran")
+	run("config", "core.fsmonitor", "touch "+ran)
+	run("config", "core.pager", "touch "+ran)
+	if out, err := GitCommand(dir, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("GitCommand ran a command the config named")
+	}
+	// It still answers: HEAD resolves.
+	if out, err := GitCommand(dir, "rev-parse", "HEAD").CombinedOutput(); err != nil || len(out) < 7 {
+		t.Fatalf("rev-parse: %v %s", err, out)
 	}
 }

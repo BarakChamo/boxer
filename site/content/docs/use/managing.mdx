@@ -38,7 +38,7 @@ For the current worktree only, run `boxer status`. To print only its address, ru
 
 ```sh
 boxer rm swift-crab             # by name or scope key
-boxer rm --gone                 # every sandbox whose worktree no longer exists
+boxer rm --gone -y              # every sandbox whose worktree no longer exists (a script needs -y)
 boxer rm --stopped              # every one that is not running
 boxer rm --all                  # every one on the configured backend (-A: every backend)
 boxer rm -i                     # choose from a list

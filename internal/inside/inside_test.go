@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/box"
 	"github.com/BarakChamo/boxer/internal/scope"
@@ -43,8 +44,10 @@ func TestInstallRetriesAfterDroppedTransport(t *testing.T) {
 		t.Fatalf("install must succeed after one dropped exec: %v", err)
 	}
 	b, _ := os.ReadFile(log)
-	if strings.Count(string(b), "harness-x") != 3 || !strings.Contains(string(b), "machine stop") {
-		t.Fatalf("want marker check, failed install, stop+start, retried install:\n%s", b)
+	// marker check, recheck under the lock, the failed install, the stop+start, the retry: the
+	// recheck is the double-checked lock that stops two sessions installing at once.
+	if strings.Count(string(b), "harness-x") != 4 || !strings.Contains(string(b), "machine stop") {
+		t.Fatalf("want marker check, lock recheck, failed install, stop+start, retried install:\n%s", b)
 	}
 }
 
@@ -366,5 +369,36 @@ func TestGuestEnvNamesASecretOnce(t *testing.T) {
 	}
 	if n != 1 || os.Getenv("OPENAI_API_KEY") != "other" {
 		t.Fatalf("%v", secrets)
+	}
+}
+
+// A dropped connection during install restarts the sandbox and retries without deadlocking: the
+// install lock is released around the restart, which takes it itself.
+func TestInstallRetryDoesNotDeadlock(t *testing.T) {
+	_, _ = vmtest.Install(t)
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck+"integration = \"inside\"\n")
+	e, err := box.Resolve(dir, "claude", scope.Identity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Stderr = io.Discard
+	// The install exec drops its connection once, which triggers the restart-and-retry path.
+	vmtest.FailExecOnce(t, "NPM_CONFIG_FETCH_TIMEOUT")
+	done := make(chan int, 1)
+	go func() {
+		code, _ := Run(e, "claude", []string{"--version"}, false, Options{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
+		done <- code
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("install deadlocked on the scope lock")
+	}
+}
+
+// A name the repository's secrets and an -e both carry is passed once; the runtime refuses two.
+func TestInsideSecretsAreDeduped(t *testing.T) {
+	if got := dedupeSecrets([]string{"TOK=TOK", "CI=CI", "TOK=TOK"}); len(got) != 2 {
+		t.Fatalf("%v", got)
 	}
 }

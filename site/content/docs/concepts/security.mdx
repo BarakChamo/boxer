@@ -146,6 +146,21 @@ The numbers and method are in [Benchmarks](/docs/evals/benchmarks).
 
 A `boxer.toml`, a skill or a plugin in a repository is code you are about to run.
 
+The worktree is mounted read-write, so code in the sandbox — the agent, or an npm postinstall it
+triggers — can rewrite `boxer.toml` or `devcontainer.json`, which boxer reads on the host. The keys
+that reach the host (`prep`, `mounts`, `build`, `mode`, `enforcement`, `passthrough`, `intercept`,
+`secrets`, `env_passthrough`, `network`, `on_sandbox_unavailable`, `telemetry.path` and
+`[harness.*]`) are held back until a person approves the configuration with
+[`boxer trust`](/docs/reference/cli#boxer-trust). Until then the sandbox runs with boxer's defaults
+for those keys, so a configuration the guest planted cannot run a host command or widen the sandbox
+on its own. A change to any of those keys has to be approved again. boxer's own `git` is also run
+with `core.fsmonitor`, hooks, the pager and external diff turned off, so a `.git/config` the guest
+writes cannot run a command when boxer reads the worktree's git state.
+
+This does not cover everything. A repository you clone and trust can still ship a hostile
+configuration, and `boxer trust` only confirms that a person saw it, not that it is safe. Review a
+`boxer.toml` the way you review a CI configuration.
+
 | Runs in the guest | Runs **on the host** |
 | --- | --- |
 | `setup`, `image_setup`, `start`, `[tasks]` | `[prep]` commands, and hooks and MCP servers named in a harness's configuration |

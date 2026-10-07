@@ -67,12 +67,12 @@ repository with `image_setup` caches the result, so the next worktree skips it.
 ## Clean up
 
 Orchestrators delete worktrees without telling boxer. boxer's background sweep (`auto_reclaim`,
-every 6 hours by default) removes their sandboxes. To do it now, `boxer rm --gone -A` removes only sandboxes whose worktree is gone, on every
+every 6 hours by default) removes their sandboxes. To do it now, `boxer rm --gone -A -y` removes only sandboxes whose worktree is gone, on every
 backend. `boxer gc` also stops idle sandboxes (or deletes them, with
 [`idle_action = "delete"`](/docs/reference/configuration#idle_action)) and removes unused caches.
 
 ```sh
-boxer rm --gone -A
+boxer rm --gone -A -y
 ```
 
 ## Why not a user-level plugin?

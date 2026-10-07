@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -164,4 +165,19 @@ func ResolveTagged(isolation, onMissingID string, g Git, id Identity, tag string
 		Degraded:  degraded,
 		Reason:    reason,
 	}, nil
+}
+
+// GitCommand is git as boxer runs it on the host, in a worktree whose files the sandbox can write.
+// A repository's own config can name commands git runs for it: core.fsmonitor on every status, a
+// pager, an external diff, hooks. In a main checkout .git/config is inside the mount, so code in
+// the guest could plant one and boxer's next `git status` ran it on the host. These are turned off
+// for boxer's own calls; a person's own git is theirs.
+// ponytail: a clean filter named in .gitattributes and .git/config can still run during status;
+// closing that needs the worktree's .git kept out of the guest's reach.
+func GitCommand(dir string, args ...string) *exec.Cmd {
+	base := []string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+		"-c", "core.pager=cat", "-c", "diff.external=", "-c", "core.sshCommand=false"}
+	cmd := exec.Command("git", append(base, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_PAGER=cat", "GIT_EXTERNAL_DIFF=")
+	return cmd
 }

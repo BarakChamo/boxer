@@ -147,11 +147,13 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 			if i+2 < len(r) && r[i+2] == '(' {
 				// $(( arithmetic )) runs nothing itself, but a $(...) inside it still runs: only
 				// the substitutions inside the expression are read, never the expression.
-				j := matchParen(r, i+2)
+				// An expression, so its text is read only for substitutions: `<<` there is a
+				// shift, and read as a here-document it hid the lines after it.
+				j := matchArith(r, i+2)
 				if j < 0 {
 					return nil, nil, false
 				}
-				_, inner, ok := lex(string(r[i+3 : j]))
+				inner, ok := bodySubs(r[i+3 : j])
 				if !ok {
 					return nil, nil, false
 				}
@@ -227,6 +229,19 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 				i = end
 			}
 			pending = nil
+		case c == '(' && !inWord && i+1 < len(r) && r[i+1] == '(':
+			// An arithmetic command, `(( ... ))`: an expression, read only for substitutions.
+			j := matchArith(r, i)
+			if j < 0 {
+				return nil, nil, false
+			}
+			inner, ok := bodySubs(r[i+2 : j])
+			if !ok {
+				return nil, nil, false
+			}
+			subs = append(subs, inner...)
+			flushCmd()
+			i = j
 		case c == '(' && inWord && !strings.HasSuffix(word.String(), "=") && (i+1 >= len(r) || r[i+1] != ')'):
 			// Word text then a parenthesis: zsh's glob qualifiers (`*(e:'npm i':)`) and
 			// parameter flags (`${(e)x}`) run code from inside the word. A function definition
@@ -239,7 +254,9 @@ func lex(cmd string) (cmds [][]string, subs []string, ok bool) {
 			// Not \r: every shell keeps it in the word, so `a\r#$(npm i)` has no comment in it.
 			flushWord()
 		case c == '#' && !inWord:
-			for i < len(r) && r[i] != '\n' {
+			// Up to the newline, not past it: the newline still ends the command and starts any
+			// here-document body, which a comment after `<<EOF` used to swallow.
+			for i+1 < len(r) && r[i+1] != '\n' {
 				i++
 			}
 			flushCmd()
@@ -347,12 +364,16 @@ func bodySubs(r []rune) (subs []string, ok bool) {
 			subs = append(subs, string(r[i+1:j]))
 			i = j
 		case r[i] == '$' && i+1 < len(r) && r[i+1] == '(':
+			arith := i+2 < len(r) && r[i+2] == '('
 			j := matchParen(r, i+1)
+			if arith {
+				j = matchArith(r, i+1)
+			}
 			if j < 0 {
 				return nil, false
 			}
 			if i+2 < len(r) && r[i+2] == '(' {
-				_, inner, ok := lex(string(r[i+3 : j]))
+				inner, ok := bodySubs(r[i+3 : j])
 				if !ok {
 					return nil, false
 				}
@@ -383,12 +404,16 @@ func doubleQuoted(r []rune, from int) (end int, subs []string, ok bool) {
 			subs = append(subs, string(r[i+1:j]))
 			i = j
 		case r[i] == '$' && i+1 < len(r) && r[i+1] == '(':
+			arith := i+2 < len(r) && r[i+2] == '('
 			j := matchParen(r, i+1)
+			if arith {
+				j = matchArith(r, i+1)
+			}
 			if j < 0 {
 				return 0, nil, false
 			}
 			if i+2 < len(r) && r[i+2] == '(' { // arithmetic: only what it substitutes
-				_, inner, ok := lex(string(r[i+3 : j]))
+				inner, ok := bodySubs(r[i+3 : j])
 				if !ok {
 					return 0, nil, false
 				}
@@ -403,13 +428,18 @@ func doubleQuoted(r []rune, from int) (end int, subs []string, ok bool) {
 }
 
 // matchParen returns the index of the ')' closing the '(' at open, honouring quotes and nesting.
-func matchParen(r []rune, open int) int {
+func matchParen(r []rune, open int) int { return matchParenIn(r, open, false) }
+
+// matchArith is matchParen for arithmetic, where `<<` is a shift, not a here-document.
+func matchArith(r []rune, open int) int { return matchParenIn(r, open, true) }
+
+func matchParenIn(r []rune, open int, arith bool) int {
 	depth := 0
 	var pending []heredoc
 	for i := open; i < len(r); i++ {
 		// A here-document's body is text: an apostrophe in `$(cat <<'EOF' ... don't ... EOF)`, the
 		// usual way an agent writes a commit message, is not a quote.
-		if r[i] == '<' && i+1 < len(r) && r[i+1] == '<' && (i+2 >= len(r) || r[i+2] != '<') {
+		if !arith && r[i] == '<' && i+1 < len(r) && r[i+1] == '<' && (i+2 >= len(r) || r[i+2] != '<') {
 			h, end, ok := heredocAt(r, i)
 			if !ok {
 				return -1

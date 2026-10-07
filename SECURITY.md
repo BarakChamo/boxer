@@ -43,11 +43,16 @@ paths deliberately stay on the host:
 
 If your threat model is a hostile agent rather than a careless one, run the harness **inside** the
 guest (`integration = "inside"`, `boxer shell <harness>`), where there is no host shell to reach.
+Note two limits of inside mode: it mounts every harness's configuration directory (`~/.claude`,
+`~/.codex`, and the rest) read-write, so code in the guest can read those credentials and write
+hooks into them; and boxer reads the worktree's `boxer.toml` on the host, so a change to a
+host-affecting key is held back until you approve it with `boxer trust`. Inside mode narrows the
+blast radius; it is not a boundary against code that is actively hostile.
 
 ## The trust boundary around content
 
 A skill, a plugin, or a `boxer.toml` in a repository is executable input. `setup` commands and
-`[tasks]` run in the guest; hooks and MCP servers named in a harness's configuration run **on the
+`[tasks]` run in the guest; `prep`, hooks and MCP servers named in a harness's configuration run **on the
 host**. Treat a repository's boxer configuration with the same suspicion as its `Makefile`. boxer
 never fetches configuration or content from the network.
 

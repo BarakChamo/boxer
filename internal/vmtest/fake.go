@@ -344,6 +344,9 @@ func Install(t *testing.T) (vm.Client, string) {
 	t.Setenv("FAKE_LOG", log)
 	t.Setenv("FAKE_STATE", filepath.Join(dir, "state"))
 	t.Setenv("BOXER_SMOLVM", bin)
+	// A test repository is the operator's own, so its host-affecting keys are trusted; a test of
+	// the trust gate itself sets BOXER_TRUST back to "".
+	t.Setenv("BOXER_TRUST", "1")
 	// A fake machine must never write to the developer's own state. Without this, a test that
 	// installed the fake but made no repository (a backend probe, say) cached `fake-pack` into
 	// the real pack directory, where a real create would later find it. A test that already

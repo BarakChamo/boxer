@@ -1515,3 +1515,19 @@ func TestAnAmbiguousTwoWordNameIsRefused(t *testing.T) {
 		t.Fatalf("a key still resolves: %q %v", got, err)
 	}
 }
+
+// boxer's own git does not run commands a repository's config names: in a main checkout the
+// sandbox can write .git/config, and a planted core.fsmonitor ran on the host on every command.
+func TestBoxersGitRunsNothingTheRepositoryNames(t *testing.T) {
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	ran := filepath.Join(t.TempDir(), "ran")
+	for _, kv := range [][2]string{{"core.fsmonitor", "touch " + ran}, {"core.pager", "touch " + ran}} {
+		if out, err := exec.Command("git", "-C", dir, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
+			t.Fatal(string(out))
+		}
+	}
+	gitState(dir)
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("boxer's git status ran a command the repository's config named")
+	}
+}

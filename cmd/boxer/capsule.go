@@ -122,7 +122,7 @@ func capsuleNew(args []string, stdout, stderr io.Writer) int {
 	// A dirty tree is the usual case for a failure worth capturing, and a capsule that quietly
 	// dropped the uncommitted half would replay something that never failed.
 	if rec.Dirty {
-		patch, err := exec.Command("git", "-C", e.Scope.Root, "diff", "HEAD").Output()
+		patch, err := scope.GitCommand(e.Scope.Root, "diff", "HEAD").Output()
 		if err == nil && len(patch) > 0 {
 			p := patchPath(*out)
 			if err := os.WriteFile(p, patch, 0o644); err != nil {
@@ -307,7 +307,13 @@ func capsuleVerdict(e *box.Env, c capsule, code int, started time.Time, stdout i
 // no wider than this repository's. It returns what it left out.
 func applyCapsuleConfig(cfg *config.Config, c capsuleConfig) (notes []string) {
 	if c.Image != "" {
-		cfg.Image = c.Image
+		// A capsule is someone else's file; a local-path image (a `docker save` archive or a
+		// rootfs directory) would be a host path it chose, which it is not allowed to give.
+		if box.IsLocalImage(c.Image) {
+			notes = append(notes, "the capsule's image is a local path and is not applied; it names a file on this host")
+		} else {
+			cfg.Image = c.Image
+		}
 	}
 	if len(c.ImageSetup) > 0 {
 		cfg.ImageSetup = c.ImageSetup
@@ -391,12 +397,12 @@ func firstOperand(args []string) (string, []string) {
 // writing a capsule dirties the tree it describes, and refusing to replay because of that would
 // make `capsule new && capsule replay` impossible.
 func gitHere(root string, ignore ...string) (string, bool) {
-	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	out, err := scope.GitCommand(root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return "", false
 	}
 	head := strings.TrimSpace(string(out))
-	st, err := exec.Command("git", "-C", root, "status", "--porcelain").Output()
+	st, err := scope.GitCommand(root, "status", "--porcelain").Output()
 	if err != nil {
 		return head, false
 	}

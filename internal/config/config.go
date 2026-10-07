@@ -912,7 +912,7 @@ func (c Config) Validate() error {
 	}
 	for _, p := range c.Network.Ports {
 		for _, n := range portNumber.FindAllString(strings.SplitN(p, "/", 2)[0], -1) {
-			if v, _ := strconv.Atoi(n); v > 65535 && !strings.Contains(p, n+".") && !strings.Contains(p, "."+n) {
+			if v, _ := strconv.Atoi(n); (v == 0 || v > 65535) && !strings.Contains(p, n+".") && !strings.Contains(p, "."+n) {
 				return fmt.Errorf("network.ports entry %q: %s is not a port (1-65535)", p, n)
 			}
 		}
@@ -961,6 +961,12 @@ var portSpec = regexp.MustCompile(`^(auto:\d+|(\[[0-9A-Fa-f:.]+\]:|(\d{1,3}\.){3
 
 // Intercepted is the full list of programs that go to the sandbox: intercept plus intercept_also.
 func (c Config) Intercepted() []string {
+	// `intercept = ["*"]` means everything, and stays everything whatever intercept_also adds:
+	// the reader treats the list `["*"]` as the wildcard, and `["*", "rails"]` was read as two
+	// literal names, so the `*` matched nothing and `terraform` ran on the host.
+	if slices.Contains(c.Intercept, "*") {
+		return []string{"*"}
+	}
 	out := slices.Clone(c.Intercept)
 	for _, p := range c.InterceptAlso {
 		if !slices.Contains(out, p) {

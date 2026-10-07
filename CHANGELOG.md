@@ -6,9 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Fixes from the third, fourth and fifth full reviews, each finding reproduced or covered by a test.
+Fixes from the third through sixth full reviews, each finding reproduced or covered by a test.
 
 ### Security
+- **Trust on change.** Code in the sandbox can rewrite the worktree's `boxer.toml` and
+  `devcontainer.json`, which boxer reads on the host. The keys that reach the host — `prep`,
+  `mounts`, `build`, `mode`, `enforcement`, `passthrough`, `intercept`, `secrets`,
+  `env_passthrough`, `network`, `on_sandbox_unavailable`, `telemetry.path` and `[harness.*]` — are
+  held back until a person approves the configuration with `boxer trust`. The sandbox still runs
+  with boxer's defaults meanwhile. `BOXER_TRUST=1` approves everything, for CI.
+- boxer's own `git` runs with `core.fsmonitor`, hooks, the pager and external diff turned off, so a
+  `.git/config` written from the guest cannot run a command when boxer reads the worktree's state.
+- The command reader no longer reads `<<` inside arithmetic (`((x<<N))`, `$((x<<N))`) as a
+  here-document, and a comment after a here-document operator no longer swallows the next line.
+- The MCP `cwd` cannot escape the server's repository through `<mount>/..`.
+- `intercept = ["*"]` stays a wildcard when `intercept_also` adds a name; before, `terraform` ran
+  on the host.
+- A bare or `/proto` port forward binds `127.0.0.1`; only an address you write publishes on every
+  interface.
+
+### Security (reader, continued)
 - A substitution in program position (`$(echo npm) i`, `` `echo npm` i ``, `eval $(...)`) ran npm
   on the host: it left an empty word that was taken for no program at all. Such a name is now
   unreadable, so the line is sandboxed.
@@ -51,6 +68,13 @@ Fixes from the third, fourth and fifth full reviews, each finding reproduced or 
 - `user` in `boxer.toml` must be a user name or `uid[:gid]`; it reaches the guest's shell unquoted.
 
 ### Fixed
+- `boxer shell` could hang when a harness install hit a dropped connection: the install lock is now
+  released around the restart it triggers.
+- A session or agent id that starts with `--` is quoted in the rewritten command; a repository's
+  secret named by both `[env]`/`secrets` and `-e` is passed once.
+- A backend that is not answering reaches `up`, `run`, `status` and `restart` with a
+  `BACKEND_UNAVAILABLE` cause and a fix, not raw text. `capsule replay` refuses a local-path image.
+  `boxer shell` with an unknown harness exits 2. Several wrong fix-lines are corrected.
 - A sandbox whose setup was interrupted is set up again by the next command. One whose setup
   failed stays usable, so the agent can find out why, and `boxer up` tries again.
 - `pack use` checks the pack before it deletes the sandbox. `down`, `status` and `restart` refuse

@@ -349,7 +349,7 @@ func (e *Env) boxerStdin(dir, stdin string, args ...string) (string, error) {
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(e.Work, "xdg"), "XDG_STATE_HOME="+filepath.Join(e.Work, "xdg-state"),
-		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"))
+		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"), "BOXER_TRUST=1")
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -358,7 +358,7 @@ func (e *Env) boxer(dir string, args ...string) (string, error) {
 	cmd := exec.Command(e.Boxer, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(e.Work, "xdg"), "XDG_STATE_HOME="+filepath.Join(e.Work, "xdg-state"),
-		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"))
+		"BOXER_PACKS="+filepath.Join(os.TempDir(), "boxer-eval-packs"), "BOXER_TRUST=1")
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -366,7 +366,7 @@ func (e *Env) boxer(dir string, args ...string) (string, error) {
 // BaseEnv is the environment every harness process gets: boxer first on PATH, isolated config,
 // the trace file, and the fake model when t1.
 func (e *Env) BaseEnv() []string {
-	env := []string{}
+	env := []string{"BOXER_TRUST=1"}
 	for _, kv := range os.Environ() {
 		k := strings.SplitN(kv, "=", 2)[0]
 		switch k {

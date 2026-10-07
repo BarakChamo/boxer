@@ -34,6 +34,7 @@ last. Every other command wants its flags before any positional argument or `--`
 | [`brief`](#boxer-brief) | The agent-facing summary of this checkout |
 | [`tasks`](#boxer-tasks) | The commands `[tasks]` declares |
 | [`fork`](#boxer-fork) | Branch copy-on-write children of a smolvm sandbox |
+| [`trust`](#boxer-trust) | Approve this worktree's host-affecting configuration |
 | [`pack`](#boxer-pack) | Save and reuse named snapshots of a sandbox |
 | [`capsule`](#boxer-capsule) | Record the last run and replay it |
 | [`logs`](#boxer-logs) | Read the event log |
@@ -340,6 +341,29 @@ Branches copy-on-write children off this scope's smolvm sandbox. Children share 
 
 `fork ls` lists this scope's children. `fork rm <name>` removes one child and `fork rm --all`
 removes all of them. A name that is not a fork child exits 2.
+
+## `boxer trust`
+
+```sh
+boxer trust
+boxer trust --show
+```
+
+Approves this worktree's host-affecting configuration. The worktree is mounted read-write, so code
+in the sandbox can rewrite `boxer.toml` or `devcontainer.json`, which boxer reads on the host. The
+keys that reach the host — `prep`, `mounts`, `build`, `mode`, `enforcement`, `passthrough`,
+`intercept`, `secrets`, `env_passthrough`, `network`, `on_sandbox_unavailable`, `telemetry.path`
+and `[harness.*]` overrides — are held back until a person who has seen the configuration runs this.
+Until then the sandbox still runs, with boxer's defaults for those keys; everything else (`image`,
+`cpus`, `tasks`, `ready`) takes effect without approval.
+
+`--show` lists the host-affecting keys and exits without approving. Trust is per worktree, and a
+changed set of those keys has to be approved again. `BOXER_TRUST=1` approves every configuration
+without a prompt, for CI and other places the repository is yours to begin with.
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--show` | `false` | List the host-affecting keys without approving them |
 
 ## `boxer pack`
 

@@ -53,5 +53,5 @@ evaluations.
 If archiving a workspace removes its worktree (check with `git worktree list`), boxer treats the
 sandbox as gone: the next `boxer gc`, or the automatic sweep, deletes the sandbox, and its
 [volumes](/docs/reference/configuration#volumes) a week later. A database kept in a volume goes
-with them. Dump what you want to keep before you archive. `boxer rm --gone --volumes` reclaims the
+with them. Dump what you want to keep before you archive. `boxer rm --gone --volumes -y` reclaims the
 space at once; without `--volumes`, `rm` keeps them.

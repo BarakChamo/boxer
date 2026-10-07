@@ -282,7 +282,10 @@ func TestPublishedPortsBindLoopback(t *testing.T) {
 	for in, want := range map[string]string{
 		"51043:3000":          "127.0.0.1:51043:3000",
 		"3000:3000":           "127.0.0.1:3000:3000",
-		"0.0.0.0:3000:3000":   "0.0.0.0:3000:3000",
+		"3000":                "127.0.0.1:3000:3000", // a bare port is not all interfaces
+		"3000/udp":            "127.0.0.1:3000:3000/udp",
+		"8080:3000/tcp":       "127.0.0.1:8080:3000/tcp",
+		"0.0.0.0:3000:3000":   "0.0.0.0:3000:3000", // an explicit address the user chose
 		"127.0.0.1:3000:3000": "127.0.0.1:3000:3000",
 	} {
 		if got := vm.LoopbackPortForTest(in); got != want {

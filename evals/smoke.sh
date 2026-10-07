@@ -17,6 +17,8 @@ export XDG_CONFIG_HOME
 # The automatic sweep is asynchronous and would race the gc checks below, reaping an orphan before
 # the explicit `boxer gc` sees it. The sweep has its own check at the end of this file.
 export BOXER_NO_RECLAIM=1
+# The test repositories are the operator's own, so their host-affecting keys are trusted.
+export BOXER_TRUST=1
 # The line below points XDG_CONFIG_HOME at an empty directory so boxer reads no user config. That
 # is right for boxer and wrong for podman, which keeps its *connection* registry — which machine,
 # which socket — under the same variable, in `containers/`. Isolating it makes the podman client
@@ -433,6 +435,21 @@ mkrepo "$WORK/cl" "$BASE"; (cd "$WORK/cl" && boxer up >/dev/null 2>&1); echo x >
 check "ls says backend and worktree state" 'boxer ls --json | python3 -c "import json,sys;import os;r=[x for x in json.load(sys.stdin) if os.path.realpath(x[\"worktree\"])==os.path.realpath(sys.argv[1])][0];sys.exit(0 if r[\"backend\"]==sys.argv[2] and r[\"git\"][\"dirty\"] else 1)" "$WORK/cl" "$BACKEND"'
 CLK=$(cd "$WORK/cl" && scopekey)
 check "rm by name removes it" 'boxer rm "$CLK" >/dev/null 2>&1 && ! boxer ls --json | grep -q "$CLK"'
+
+echo "# host-affecting config is held back until trusted"
+# A guest cannot be relied on to write boxer.toml here, but the effect is the same: a config with a
+# prep command is not run on the host until `boxer trust` approves it.
+tr="$WORK/trust"
+mkrepo "$tr" "$BASE
+[prep]
+commands = [\"touch $tr/prep-ran\"]"
+cd "$tr"
+( unset BOXER_TRUST; boxer run -c true >/dev/null 2>&1 )
+check "untrusted prep does not run on the host" '[ ! -e "$tr/prep-ran" ]'
+check "untrusted run still works" '[ "$(unset BOXER_TRUST; boxer run -c "echo ok" 2>/dev/null)" = ok ]'
+( unset BOXER_TRUST; boxer trust >/dev/null 2>&1; boxer run -c true >/dev/null 2>&1 )
+check "trusted prep runs on the host" '[ -e "$tr/prep-ran" ]'
+boxer down >/dev/null 2>&1 || true
 
 echo "# services are supervised, and restart relaunches them"
 # Two services, each counting its starts in the worktree, which survives every kind of restart.

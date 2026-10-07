@@ -444,3 +444,16 @@ func TestSameRepositoryEdges(t *testing.T) {
 		t.Fatal("a directory outside any repository is not this one")
 	}
 }
+
+// A cwd under the mount but pointing out of the worktree with `..` is not this repository.
+func TestMountRelativeCwdCannotEscapeTheRepository(t *testing.T) {
+	vmtest.Install(t)
+	other := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	dir := vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	s := &Server{Resolve: box.Resolve, Version: "t"}
+	// MountAt defaults to /workspace; /workspace/../<escape> joins to the worktree's parent.
+	escape := "/workspace/../" + filepath.Base(other)
+	if out, isErr := s.call("boxer_run", map[string]any{"command": "true", "cwd": escape}); !isErr && !strings.Contains(out, dir) {
+		t.Fatalf("mount-relative cwd escaped: %v %s", isErr, out)
+	}
+}

@@ -326,9 +326,14 @@ func withIdentity(cmd string, e *box.Env) string {
 	if len(flags) == 0 || !strings.HasPrefix(cmd, "boxer run ") {
 		return cmd
 	}
-	// Quoted: an ID with a space or a `;` in it went into the host shell line as written.
+	// Every value is quoted, by what it is and not by how it looks: a value that happens to start
+	// with `--` (`--x;cmd`) was left unquoted and reached the host shell as written.
+	names := map[string]bool{"--harness": true, "--session": true, "--agent": true}
+	plain := func(v string) bool {
+		return v != "" && strings.Trim(v, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:@-") == ""
+	}
 	for i, f := range flags {
-		if !strings.HasPrefix(f, "--") && strings.Trim(f, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:@-") != "" {
+		if !names[f] && !plain(f) {
 			flags[i] = sh.Quote(f)
 		}
 	}

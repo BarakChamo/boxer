@@ -280,8 +280,13 @@ func (s *Server) resolve(cwd string) (*box.Env, string, error) {
 	}
 	if mount := base.MountAt(); cwd == mount || strings.HasPrefix(cwd, mount+"/") {
 		host := filepath.Join(base.Scope.Root, strings.TrimPrefix(cwd, mount))
-		if m, merr := s.Resolve(host, s.Harness, scope.Identity{}); merr == nil {
-			return m, "", nil
+		// filepath.Join cleaned any `..`, so a cwd like `<mount>/../other` now points outside the
+		// worktree. It must still be this repository: the same check as above, which the mount
+		// mapping used to skip.
+		if sameRepository(host) {
+			if m, merr := s.Resolve(host, s.Harness, scope.Identity{}); merr == nil {
+				return m, "", nil
+			}
 		}
 	}
 	return base, fmt.Sprintf("note: cwd %q is not inside a git worktree; ran in %s\n", cwd, base.CWD), nil

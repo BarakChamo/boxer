@@ -2,8 +2,8 @@ package box
 
 import (
 	"encoding/json"
+	"github.com/BarakChamo/boxer/internal/scope"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -153,12 +153,12 @@ func CommandLine(argv []string) string {
 // gitState reports the worktree's HEAD and whether it has uncommitted changes, so a replay can say
 // what it is replaying against. git is a host passthrough everywhere else in boxer too.
 func gitState(root string) (head string, dirty bool) {
-	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	out, err := scope.GitCommand(root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return "", false
 	}
 	head = strings.TrimSpace(string(out))
-	st, err := exec.Command("git", "-C", root, "status", "--porcelain").Output()
+	st, err := scope.GitCommand(root, "status", "--porcelain").Output()
 	return head, err == nil && len(strings.TrimSpace(string(st))) > 0
 }
 

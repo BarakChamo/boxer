@@ -931,6 +931,20 @@ func TestPackUseOfAMissingPackKeepsTheSandbox(t *testing.T) {
 	}
 }
 
+// A capsule cannot give the sandbox a local-path image, which names a file on this host.
+func TestCapsuleCannotApplyALocalImage(t *testing.T) {
+	cfg := config.Defaults()
+	notes := applyCapsuleConfig(&cfg, capsuleConfig{Image: "./image.tar"})
+	if cfg.Image == "./image.tar" || len(notes) == 0 {
+		t.Fatalf("a local image was applied: %q %v", cfg.Image, notes)
+	}
+	cfg2 := config.Defaults()
+	applyCapsuleConfig(&cfg2, capsuleConfig{Image: "alpine:3.21"})
+	if cfg2.Image != "alpine:3.21" {
+		t.Fatal("a registry image is still applied")
+	}
+}
+
 // A capsule is a file from someone else: it cannot mount host directories or widen the network.
 func TestCapsuleConfigCannotWidenTheSandbox(t *testing.T) {
 	cfg := config.Defaults()
@@ -1026,5 +1040,28 @@ func TestAShimOutsideARepositoryRunsOnTheHost(t *testing.T) {
 func TestAHostRunEndedBySignalExitsAsAShellWould(t *testing.T) {
 	if code := hostRun([]string{"sh", "-c", "kill -TERM $$"}, strings.NewReader(""), io.Discard, io.Discard); code != 143 {
 		t.Fatalf("exit %d, want 143", code)
+	}
+}
+
+// A backend that is not answering reaches up, run and status as a cause and a fix, not raw text.
+func TestABackendThatIsDownHasACause(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	vmtest.FailVerb(t, "machine status", "daemon not reachable")
+	var r map[string]map[string]any
+	if code, out := call(t, &r, "status", "--json"); code != 1 || r["error"]["cause"] != "BACKEND_UNAVAILABLE" {
+		t.Fatalf("status: %d %v %s", code, r, out)
+	}
+	if code, out := call(t, nil, "run", "--", "true"); code != 1 || !strings.Contains(out, "BACKEND_UNAVAILABLE") {
+		t.Fatalf("run: %d %s", code, out)
+	}
+}
+
+// An unknown harness to `boxer shell` is a usage error (2), not boxer's failure (1).
+func TestShellUnknownHarnessIsUsageError(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	if code, _ := call(t, nil, "shell", "nope"); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
 	}
 }

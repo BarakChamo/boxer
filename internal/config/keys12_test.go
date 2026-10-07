@@ -163,3 +163,15 @@ func TestBadProgramNamesAreDroppedNotRefused(t *testing.T) {
 		t.Fatalf("kept %v, warned %v", c.InterceptAlso, c.Warnings)
 	}
 }
+
+// intercept = ["*"] keeps meaning everything even when intercept_also adds names: the wildcard was
+// only recognised as the exact list ["*"], so adding a name let unlisted programs run on the host.
+func TestWildcardInterceptSurvivesInterceptAlso(t *testing.T) {
+	c, err := load(t, "intercept = [\"*\"]\nintercept_also = [\"rails\"]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Intercepted(); len(got) != 1 || got[0] != "*" {
+		t.Fatalf("want the wildcard, got %v", got)
+	}
+}

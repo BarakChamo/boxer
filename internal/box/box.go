@@ -107,6 +107,7 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 	if err != nil {
 		return nil, &ConfigError{Err: err}
 	}
+	base := cfg
 	if harness != "" {
 		cfg = cfg.ForHarness(harness)
 	}
@@ -150,10 +151,43 @@ func Resolve(cwd, harness string, id scope.Identity) (*Env, error) {
 		e.Warnings = append(e.Warnings, "isolation degraded: "+s.Reason)
 	}
 	e.Scope = s
+	// Code in the guest can rewrite this worktree's boxer.toml and devcontainer.json, which boxer
+	// reads on the host. Keys that reach the host are held back until a person approves the
+	// configuration with `boxer trust`; the sandbox still runs with boxer's defaults meanwhile.
+	if nb, warn := applyTrust(s.Key, base); warn != "" {
+		cfg := nb
+		if harness != "" {
+			cfg = nb.ForHarness(harness)
+		}
+		e.Cfg = cfg
+		obs.ConfigureFrom(cfg.Telemetry)
+		e.Warnings = append(e.Warnings, warn)
+	}
 	// After e.Scope is set: PrepWarnings reads the worktree to find what it would get wrong.
 	e.Warnings = append(e.Warnings, e.PrepWarnings()...)
 	e.event(obs.Resolve, obs.OK, 0, map[string]any{"isolation": s.Isolation, "degraded": s.Degraded, "warnings": len(e.Warnings)})
 	return e, nil
+}
+
+// BackendError is backendError for callers outside this package (the status command).
+func (e *Env) BackendError(err error) error { return e.backendError(err) }
+
+// backendError presents a backend that is not answering — a stopped docker daemon, a missing
+// smolvm — as an agent-readable refusal rather than the raw "docker ps: ..." text, which has no
+// cause or fix. A known condition (not found, not running) is left as it is.
+func (e *Env) backendError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if vm.IsNotFound(err) || vm.IsAlreadyExists(err) || vm.IsNotRunning(err) || errors.Is(err, vm.ErrUnsupported) {
+		return err
+	}
+	var be *Error
+	if errors.As(err, &be) {
+		return err
+	}
+	return e.fail(&Error{Reason: e.VM.Name() + " is not answering: " + err.Error(), Cause: "BACKEND_UNAVAILABLE",
+		Scope: e.Scope, Fix: "check that " + e.VM.Name() + " is installed and running (boxer doctor)"})
 }
 
 // event records one event for this Env; the scope and harness are always the same two fields.
@@ -374,7 +408,7 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	}
 	m, ok, err := e.Exists()
 	if err != nil {
-		return false, err
+		return false, e.backendError(err)
 	}
 	if ok && recreate {
 		if err := e.deleteVM(); err != nil {
@@ -1456,13 +1490,15 @@ func (e *Env) StopServices() error {
 func (e *Env) RestartServices() error {
 	m, ok, err := e.Exists()
 	if err != nil {
-		return err
+		return e.backendError(err)
 	}
 	if !ok || !m.Running() {
 		return e.fail(&Error{Reason: "this worktree's sandbox is not running", Cause: "NO_SANDBOX", Scope: e.Scope, Fix: "boxer up"})
 	}
 	if err := e.StopServices(); err != nil {
-		return e.fail(&Error{Reason: err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer up --recreate"})
+		// Not --recreate: restart keeps what is in the sandbox (an installed package, a database),
+		// which recreating would wipe. A plain up reattaches to the running sandbox.
+		return e.fail(&Error{Reason: err.Error(), Cause: "START_FAILED", Scope: e.Scope, Fix: "boxer restart; if it persists, boxer up"})
 	}
 	if err := e.startServices(); err != nil {
 		return err
@@ -1731,7 +1767,7 @@ func (e *Env) setupError(what, key string, code int, cmd string, since time.Time
 	if denied := DeniedHosts(e.VM, e.Scope.Key, e.Cfg, since); len(denied) > 0 && code != 137 {
 		return &Error{Reason: fmt.Sprintf("%s step failed (exit %d) because the egress allowlist refused %s: %s", what, code, strings.Join(denied, ", "), cmd),
 			Cause: "SETUP_FAILED", Scope: e.Scope,
-			Fix: fmt.Sprintf("add %s to network.allow_hosts in boxer.toml, then: boxer up", quoteList(denied))}
+			Fix: fmt.Sprintf("add %s to network.allow_hosts in boxer.toml, then: boxer up --recreate (the allowlist is set when the sandbox is created)", quoteList(denied))}
 	}
 	if code == 137 {
 		reason = fmt.Sprintf("%s step was killed, out of memory (exit 137): %s", what, cmd)

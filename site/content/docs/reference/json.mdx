@@ -325,7 +325,10 @@ failed [MCP tool call](/docs/reference/mcp#tools) and a `*boxer.Error` in
 | `NO_SUCH_TASK` | `--task` named a task `boxer.toml` does not declare |
 | `NO_SUCH_PACK` | `pack use` named a pack that was never saved |
 | `NO_IMAGE` | No image could be chosen |
-| `CONFIG_INVALID` | `memory` did not parse at create time |
+| `CONFIG_INVALID` | A value is not valid: `memory`, `build`'s Dockerfile, or an allow list |
+| `BACKEND_UNAVAILABLE` | The backend is not answering: a stopped docker daemon, a missing smolvm |
+| `BUILD_FAILED` | `build`'s image could not be built, or its builder is not installed |
+| `AMBIGUOUS_NAME` | A two-word name matches more than one sandbox; use the key |
 | `UNSUPPORTED` | The backend cannot do what the configuration asks, such as `allowlist` on docker |
 | `CREATE_FAILED` | The backend failed to create the sandbox, or another boxer is still creating it |
 | `START_FAILED` | The sandbox failed to start, or a `start` step could not be launched |

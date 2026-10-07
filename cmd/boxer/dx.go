@@ -113,7 +113,7 @@ func worktreeGit(root string, withPR bool) *gitJSON {
 		return g
 	}
 	g.Exists = true
-	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v2", "--branch").Output()
+	out, err := scope.GitCommand(root, "status", "--porcelain=v2", "--branch").Output()
 	if err != nil {
 		return g
 	}
@@ -703,6 +703,11 @@ func runProbe(backend string) *probe {
 			_ = os.Unsetenv(name)
 			defer os.Setenv(name, v) //nolint:errcheck // restoring what was there
 		}
+	}
+	// The probe's own throwaway repository, with a network it sets itself: boxer's.
+	if _, ok := os.LookupEnv("BOXER_TRUST"); !ok {
+		_ = os.Setenv("BOXER_TRUST", "1")
+		defer os.Unsetenv("BOXER_TRUST") //nolint:errcheck
 	}
 	toml := fmt.Sprintf("backend = %q\nimage = \"mirror.gcr.io/library/alpine:3.20\"\nrequire_worktree = \"off\"\nmemory = \"512M\"\ncpus = 1\nnetwork = { mode = %q }\n", backend, mode)
 	if err := os.WriteFile(filepath.Join(dir, "boxer.toml"), []byte(toml), 0o644); err != nil {

@@ -380,7 +380,9 @@ user = "node"
 ## Prep
 
 `[prep]` runs commands on the host while the sandbox boots. See
-[dependencies](/docs/configure/environment#install-dependencies).
+[dependencies](/docs/configure/environment#install-dependencies). Because these run on the host,
+`prep` is one of the keys held back until a person approves the configuration with
+[`boxer trust`](/docs/reference/cli#boxer-trust).
 
 ### `prep.commands`
 
@@ -527,7 +529,9 @@ restart = "never"
 `table` of strings, default `{}`.
 
 Set in the guest for every command. Part of the environment pack's key and saved in the pack, so
-keep secrets out of it. Names are letters, digits and `_`, not starting with a digit, as are the
+keep secrets out of it. A later file replaces a `secrets` or `env_passthrough` list whole rather
+than adding to it, so a `secrets = [...]` in `boxer.toml` drops the names a devcontainer forwarded;
+list them together if you need both. Names are letters, digits and `_`, not starting with a digit, as are the
 names in `secrets` and `env_passthrough`.
 
 ```toml
@@ -636,9 +640,12 @@ allow_presets = ["npm", "github"]
 
 `[]string`, default `[]`.
 
-Port forwards as `host:guest`, bound to `127.0.0.1`. `auto:<guest>` takes a free host port, so
-worktrees do not collide, and never takes a port a stopped sandbox holds. `boxer status` shows which
-host port it got. When no port is free, the command fails with `NO_FREE_PORT`. A port is 1 to 65535.
+Port forwards. `host:guest` and a bare `guest` are bound to `127.0.0.1`; an explicit address you
+write (`0.0.0.0:8080:3000`, `[::1]:8080:3000`) is kept as written, so only you can publish on every
+interface. A `/tcp`, `/udp` or `/sctp` suffix and one-to-one ranges (`8000-8002:8000-8002`) are
+allowed. `auto:<guest>` takes a free host port, so worktrees do not collide, and never takes a port
+a stopped sandbox holds. `boxer status` shows which host port it got. When no port is free, the
+command fails with `NO_FREE_PORT`. A port is 1 to 65535.
 
 ```toml
 [network]
@@ -714,9 +721,11 @@ names = { "3000" = "web", "8080" = "api" }
 
 `string` or `table`, default none.
 
-A named command line, run with `boxer run --task <name>`. The table form takes `cmd` (required),
-`description`, `junit` (paths or globs), `timeout` (a Go duration) and `env`. Any other key is an
-error. An empty `cmd` or a bad `timeout` is an error. See [tasks](/docs/configure/tasks).
+A named command line, run with `boxer run --task <name>`, or with the `boxer_run` MCP tool's `task`
+argument. The table form takes `cmd` (required), `description`, `junit` (paths or globs), `timeout`
+(a Go duration) and `env`. Any other key is an error. An empty `cmd` or a bad `timeout` is an error.
+A task is replaced whole by a later file, not merged key by key: a later file that sets only
+`description` for a task drops its `cmd`. See [tasks](/docs/configure/tasks).
 
 ```toml
 [tasks]

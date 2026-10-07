@@ -199,6 +199,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return gcCmd(rest, stdout, stderr)
 	case "fork":
 		return forkCmd(rest, stdout, stderr)
+	case "trust":
+		return trustCmd(rest, stdout, stderr)
 	case "pack":
 		return packCmd(rest, stdout, stderr)
 	case "capsule":
@@ -700,6 +702,8 @@ func sortedMapKeys(m map[string]string) []string {
 func statusCmd(e *box.Env, asJSON bool, stdout, stderr io.Writer) int {
 	m, ok, err := e.Exists()
 	if err != nil {
+		err = e.BackendError(err)
+		emit(stdout, errorRow(err), asJSON)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -1125,8 +1129,12 @@ func insideCmd(kind string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	tty := kind == "shell" && cli.IsTerminal(os.Stdin) && cli.IsTerminal(os.Stdout)
 	code, err := inside.Run(e, name, fs.Args(), kind == "acp", inside.Options{TTY: tty, Env: extra, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 	if err != nil {
-		// boxer's failure, not the harness's exit status: 127 read as "command not found".
 		fmt.Fprintln(stderr, err)
+		// An unknown harness or a missing ACP server is a usage error (2); boxer's own failure is
+		// 1. Neither is the harness's exit status, which 127 would read as "command not found".
+		if code == 2 {
+			return 2
+		}
 		return 1
 	}
 	return code
@@ -1722,4 +1730,48 @@ func withTestResults(e *box.Env, t config.Task, flagValue string, failFlag bool,
 func idleSince(name string, idle time.Duration) bool {
 	last := box.LastUsed(name)
 	return idle > 0 && !last.IsZero() && time.Since(last) > idle
+}
+
+// trustCmd approves this worktree's host-affecting configuration, so keys like prep, mounts and a
+// weaker enforcement take effect. It exists because code in the guest can rewrite boxer.toml, and
+// those keys reach the host; boxer holds them back until a person who has seen the configuration
+// approves it.
+func trustCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("trust", flag.ContinueOnError)
+	show := fs.Bool("show", false, "print the host-affecting keys and exit without approving")
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	e, err := box.Resolve("", "", scope.Identity{})
+	if e == nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	// Resolve reads boxer.toml itself; a later unreadable error (no worktree) still lets trust act.
+	cfg, berr := config.Load(e.Scope.Root, repoRootOf(e.Scope.Root))
+	if berr != nil {
+		fmt.Fprintln(stderr, berr)
+		return 1
+	}
+	affecting := cfg.HostAffecting()
+	if len(affecting) == 0 {
+		fmt.Fprintln(stdout, "boxer: this configuration sets nothing that reaches the host; nothing to trust")
+		return 0
+	}
+	fmt.Fprintf(stdout, "boxer: host-affecting keys here: %s\n", strings.Join(affecting, ", "))
+	if *show {
+		return 0
+	}
+	if err := box.Trust(e.Scope.Key, cfg.HostDigest()); err != nil {
+		fmt.Fprintln(stderr, "boxer trust:", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "boxer: trusted; these keys now take effect for this worktree")
+	return 0
+}
+
+func repoRootOf(worktree string) string {
+	_, repo := rootsOf(worktree)
+	return repo
 }
