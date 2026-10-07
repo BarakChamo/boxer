@@ -370,3 +370,37 @@ func TestBrokenConfigRefusesWhatWouldBeSandboxed(t *testing.T) {
 		t.Fatalf("BOXER_MODE=off lets it through: %v", out)
 	}
 }
+
+// What the third review found reaching the host through the hook itself.
+func TestHookPathsReviewThree(t *testing.T) {
+	vmtest.Install(t)
+	pre := func(tool, cmd, cwd string) map[string]any {
+		return map[string]any{"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": map[string]any{"command": cmd}, "cwd": cwd}
+	}
+	// Claude Code's Monitor tool runs a command like Bash does, so it is rewritten like Bash.
+	dir := vmtest.Repo(t, vmtest.NoWorktreeCheck)
+	out, _, _ := call(t, "claude-code", pre("Monitor", "npm test", dir))
+	if in, _ := hso(out)["updatedInput"].(map[string]any); in == nil || in["command"] != "boxer run -c 'npm test'" {
+		t.Fatalf("Monitor must be rewritten into the sandbox: %v", out)
+	}
+	// Kimi's other shell tool name is refused like Bash.
+	dir = vmtest.Repo(t, vmtest.NoWorktreeCheck+"enforcement = \"hook\"\n")
+	if out, _, _ := call(t, "kimi", pre("Shell", "npm test", dir)); hso(out)["permissionDecision"] != "deny" {
+		t.Fatalf("kimi's Shell tool must be refused: %v", out)
+	}
+	// A worktree requirement is a refusal even under passthrough, which is for a sandbox that
+	// cannot start, not for a policy.
+	dir = vmtest.Repo(t, "require_worktree = \"require\"\non_sandbox_unavailable = \"passthrough\"\n")
+	if out, _, _ := call(t, "claude-code", pre("Bash", "npm test", dir)); hso(out)["permissionDecision"] != "deny" {
+		t.Fatalf("require_worktree must refuse under passthrough: %v", out)
+	}
+	// A configuration that fails to load refuses what the repository itself intercepted, not only
+	// the default list.
+	dir = vmtest.Repo(t, "intercept = [\"terraform\"]\nbogus = 1\n")
+	if out, _, _ := call(t, "claude-code", pre("Bash", "terraform apply", dir)); hso(out)["permissionDecision"] != "deny" {
+		t.Fatalf("a broken boxer.toml must not let the repository's own programs through: %v", out)
+	}
+	if out, _, _ := call(t, "claude-code", pre("Bash", "git status", dir)); out != nil {
+		t.Fatalf("passthrough still runs while the config is broken: %v", out)
+	}
+}

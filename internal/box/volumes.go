@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Volumes are the one piece of guest state boxer keeps on purpose. A sandbox is disposable, and
@@ -19,6 +20,15 @@ func VolumeDir() string { return filepath.Join(stateRoot(), "volumes") }
 // rootFile records which worktree a scope's volumes belong to, so the sweep can tell when it is
 // gone without asking a backend that may no longer have the sandbox.
 const rootFile = ".worktree"
+
+// goneFile marks when a scope's worktree was first seen missing; volumeGrace is how long the
+// volumes outlive that (tests shorten it).
+const goneFile = ".worktree-gone"
+
+var (
+	VolumeGrace = 7 * 24 * time.Hour
+	now         = time.Now
+)
 
 // volumeMounts creates the scope's volume directories and returns them as host:guest mounts.
 func (e *Env) volumeMounts() ([]string, error) {
@@ -60,7 +70,18 @@ func OrphanVolumes() []string {
 		if err != nil || len(b) == 0 {
 			continue
 		}
-		if _, err := os.Stat(string(b)); os.IsNotExist(err) {
+		gone := filepath.Join(VolumeDir(), ent.Name(), goneFile)
+		if _, err := os.Stat(string(b)); !os.IsNotExist(err) {
+			_ = os.Remove(gone) // back again: a moved drive was plugged back in
+			continue
+		}
+		// Gone from here is not gone for good: a repository moved or renamed, or a worktree on a
+		// drive that is not plugged in, reads exactly like a deleted one. Volumes hold data boxer
+		// is meant to keep, so they go only once their worktree has been missing for a week.
+		if _, err := os.Stat(gone); os.IsNotExist(err) {
+			_ = os.WriteFile(gone, nil, 0o644) // the first sweep that finds it missing
+		}
+		if st, err := os.Stat(gone); err == nil && now().Sub(st.ModTime()) >= VolumeGrace {
 			out = append(out, ent.Name())
 		}
 	}

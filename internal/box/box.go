@@ -342,6 +342,9 @@ func (e *Env) Ensure(allowCreate, recreate bool) (created bool, err error) {
 	}()
 	// Provisioning is the moment worth sweeping at: it is when boxer is about to spend storage,
 	// and when a host that has drifted full is most likely to be about to fail.
+	// Marked used first: the sweep it starts must not find this sandbox idle and stop it on
+	// the way in, which is the likeliest moment for an idle sandbox to be reclaimed.
+	touchLastUsed(e.Scope.Key)
 	e.ReclaimDetached()
 	unlock, err := lockScope(e.Scope.Key)
 	if err != nil {
@@ -507,7 +510,17 @@ func (e *Env) create() error {
 	// otherwise ask for the same host port, and the second one to start would fail with a message
 	// about a busy address rather than about worktrees. "auto:3000" asks for a free host port
 	// instead, and the mapping is recorded on the machine so `status` can say which one it got.
-	ports, chosen, err := allocatePorts(e.Cfg.Network.Ports)
+	// A stopped sandbox keeps its port in a label with nothing listening on it, so the operating
+	// system would happily hand that port out again, and whichever started second would fail.
+	taken := map[string]bool{}
+	if ms, err := vm.Owned(e.VM); err == nil {
+		for _, m := range ms {
+			for _, host := range PortsOf(m) {
+				taken[host] = true
+			}
+		}
+	}
+	ports, chosen, err := allocatePorts(e.Cfg.Network.Ports, taken)
 	if err != nil {
 		return e.fail(&Error{Reason: err.Error(), Cause: "NO_FREE_PORT", Scope: e.Scope,
 			Fix: "free a port, or give `network.ports` fixed host ports"})
@@ -559,7 +572,14 @@ func (e *Env) create() error {
 			}
 		}
 	}
+	releasePack := func() {}
 	if from != "" {
+		// Held until the machine carries the label: between choosing a pack and labelling the
+		// machine, nothing else tells gc this pack is about to be used. Released right after,
+		// because this process may rebuild the same pack later in Ensure.
+		if unlock, err := lockFileHow(packLock(from), syscall.LOCK_SH); err == nil {
+			releasePack = unlock
+		}
 		labels[vm.LabelPrefix+"pack"] = from // the exact reference gc needs before pruning a pack
 		now := time.Now()
 		_ = os.Chtimes(from, now, now) // a pack's mtime is its last use
@@ -586,7 +606,9 @@ func (e *Env) create() error {
 		Ports:      ports,
 		KeepID:     e.keepID,
 	}
-	if err = e.VM.Create(spec); err != nil && from != "" && badPack(err) {
+	// A pack someone saved by name is theirs: a create that cannot use it says so and stops, rather
+	// than deleting what `boxer pack save` was asked to keep.
+	if err = e.VM.Create(spec); err != nil && from != "" && e.FromPack == "" && badPack(err) {
 		// A pack can be truncated: an interrupted `pack create` leaves a file smaller than its
 		// own footer, and every later create from it fails with the same unhelpful I/O error
 		// until someone deletes it by hand. Delete it and pull the image instead.
@@ -598,12 +620,15 @@ func (e *Env) create() error {
 		// Four parallel provisions cost 27s each rather than 2s, and the pack had to be rebuilt
 		// afterwards. vm.Create now waits out the lock, and a lock error never condemns a pack.
 		fmt.Fprintf(e.Stderr, "boxer: cached image unusable, pulling directly: %v\n", err)
-		_ = os.Remove(from)
+		releasePack()
+		releasePack = func() {}
+		_, _ = removePack(from, true)
 		spec.From = ""
 		delete(labels, vm.LabelPrefix+"pack")
 		spec.Labels = labels
 		err = e.VM.Create(spec)
 	}
+	releasePack()
 	if err != nil {
 		if vm.IsAlreadyExists(err) {
 			// Another boxer (a hook, a detached warm-up, an MCP server) is creating this scope
@@ -785,11 +810,34 @@ func (e *Env) DropEnvPack() (string, error) {
 	if !packReady(side) {
 		return "", nil
 	}
-	if err := os.Remove(side); err != nil {
+	if _, err := removePack(side, true); err != nil {
 		return "", err
 	}
-	_ = os.Remove(strings.TrimSuffix(side, ".smolmachine") + ".lock")
 	return side, nil
+}
+
+func packLock(pack string) string { return strings.TrimSuffix(pack, ".smolmachine") + ".lock" }
+
+// RemovePack deletes a pack nobody is writing or creating from, and its lock. A pack in use is
+// skipped and reported as not removed.
+func RemovePack(pack string) (bool, error) { return removePack(pack, false) }
+
+func removePack(pack string, wait bool) (bool, error) {
+	how := syscall.LOCK_EX
+	if !wait {
+		how |= syscall.LOCK_NB
+	}
+	unlock, err := lockFileHow(packLock(pack), how)
+	if err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, nil
+		}
+		return false, err
+	}
+	err = os.Remove(pack)
+	unlock()
+	removeUnheldLock(packLock(pack))
+	return err == nil, err
 }
 
 // PackEnv snapshots the scope's VM, setup already run, into the pack envPack looks for. Without
@@ -876,7 +924,7 @@ func PortsOf(m vm.Machine) map[string]string {
 // allocatePorts turns the configured list into what smolvm takes, resolving any "auto:<guest>"
 // entry to a free host port. It returns the resolved list and the guest-to-host mapping, so the
 // machine can carry it as labels and a person can find out where their dev server actually is.
-func allocatePorts(spec []string) (resolved []string, chosen map[string]string, err error) {
+func allocatePorts(spec []string, taken map[string]bool) (resolved []string, chosen map[string]string, err error) {
 	chosen = map[string]string{}
 	for _, p := range spec {
 		host, guest, found := strings.Cut(p, ":")
@@ -884,10 +932,19 @@ func allocatePorts(spec []string) (resolved []string, chosen map[string]string, 
 			resolved = append(resolved, p)
 			continue
 		}
-		free, err := freePort()
+		var free string
+		for range 20 {
+			if free, err = freePort(); err != nil || !taken[free] {
+				break
+			}
+		}
+		if err == nil && taken[free] {
+			err = errors.New("every port offered belongs to another sandbox")
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("no free host port for guest port %s: %w", guest, err)
 		}
+		taken[free] = true
 		chosen[guest] = free
 		resolved = append(resolved, free+":"+guest)
 	}
@@ -897,7 +954,7 @@ func allocatePorts(spec []string) (resolved []string, chosen map[string]string, 
 // freePort asks the operating system for one, which is the only answer that is true at the moment
 // it is given. A scan of a range would be a guess, and two boxers starting together would make the
 // same guess.
-func freePort() (string, error) {
+var freePort = func() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err
@@ -947,6 +1004,13 @@ func (e *Env) PackHarness() {
 	if err := os.MkdirAll(filepath.Dir(side), 0o755); err != nil {
 		return
 	}
+	// The pack stops the VM: another boxer arriving meanwhile must wait rather than start it under
+	// the snapshot. Taken before the pack's lock, the order Ensure takes them in.
+	unlockScope, err := lockScope(e.Scope.Key)
+	if err != nil {
+		return
+	}
+	defer unlockScope()
 	unlock, err := lockFile(stub + ".lock")
 	if err != nil {
 		return
@@ -1195,11 +1259,21 @@ const startLog = "/tmp/boxer-start.log"
 // only a post-setup launch can mean it.
 const startMarker = "/tmp/boxer-started"
 
+// bootToken is the start time of the guest's PID 1, which is new for every boot of a VM and every
+// start of a container. The start marker holds it: only smolvm's /tmp is emptied by a stop, and
+// on docker, podman and Apple container a marker that merely existed survived the stop and start,
+// so services were never launched again after idle reclaim or a restart.
+const bootToken = `cut -d' ' -f22 /proc/1/stat`
+
+// startedThisBoot succeeds when the marker names this boot; otherwise it clears the previous
+// boot's pid files, whose numbers now belong to other processes.
+const startedThisBoot = `[ "$(cat ` + startMarker + ` 2>/dev/null)" = "$(` + bootToken + `)" ] || { rm -rf ` + serviceDir + `; exit 1; }`
+
 func (e *Env) startServices() error {
 	if len(e.Cfg.Start) == 0 {
 		return nil
 	}
-	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "test -f "+startMarker)
+	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", startedThisBoot)
 	if err != nil || vm.TransportFailure(out) {
 		return e.fail(&Error{Reason: "could not read the start marker: " + firstNonEmpty(errText(err), strings.TrimSpace(out)), Cause: "TRANSPORT_FAILED", Scope: e.Scope,
 			Fix: "boxer up --recreate"})
@@ -1222,7 +1296,7 @@ func (e *Env) startServices() error {
 				Fix: "check the `start` list in boxer.toml, then: boxer up"})
 		}
 	}
-	_, _, _ = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", "touch "+startMarker)
+	_, _, _ = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", bootToken+" > "+startMarker)
 	return nil
 }
 
@@ -1241,9 +1315,11 @@ func superviseLine(i int, cmd, restart string) string {
 	script := superviseScript(fmt.Sprintf("%s/%d.pid", serviceDir, i), cmd, restart)
 	// setsid, where the image has it, makes the supervisor a process group of its own, so
 	// StopServices can stop the service and everything it spawned with one signal. The whole list
-	// is backgrounded, as a single `&`, so the exec that launches it returns at once.
-	launch := `command -v setsid >/dev/null 2>&1 && exec setsid sh -c "$0"; exec sh -c "$0"`
-	return "mkdir -p " + serviceDir + " && nohup sh -c " + sh.Quote(launch) + " " + sh.Quote(script) + " >>" + startLog + " 2>&1 &"
+	// is backgrounded, as a single `&`, so the exec that launches it returns at once. HUP is
+	// ignored with trap rather than nohup, which some minimal images lack: the launch is
+	// backgrounded, so a missing nohup failed where nothing could see it.
+	launch := `trap "" HUP; command -v setsid >/dev/null 2>&1 && exec setsid sh -c "$0"; exec sh -c "$0"`
+	return "mkdir -p " + serviceDir + " && sh -c " + sh.Quote(launch) + " " + sh.Quote(script) + " >>" + startLog + " 2>&1 &"
 }
 
 // superviseScript is the supervisor itself, a POSIX sh loop, so it needs nothing in the image.
@@ -1273,11 +1349,17 @@ func superviseScript(pid, cmd, restart string) string {
 // StopServices stops every `start` service and its children, and clears the marker that says
 // they are running, so the next startServices launches them again.
 func (e *Env) StopServices() error {
-	// Signal each supervisor's process group, then report any that is still alive. "stuck" is not
-	// an error in the script: the caller decides what to do about it.
+	// Signal each supervisor's process group and wait, up to 5s, for all of it to go: the
+	// supervisor dies at once, but a dev server or a database shutting down still holds its port,
+	// and a relaunch into that fails with "address in use". Then KILL, and report what survives
+	// even that. "stuck" is not an error in the script: the caller decides what to do about it.
+	// `sleep 0.1 || sleep 1`, because a minimal busybox or toybox sleep takes whole seconds only.
+	alive := `{ kill -0 -"$p" 2>/dev/null || kill -0 "$p" 2>/dev/null; }`
 	stop := "for f in " + serviceDir + "/*.pid; do [ -f \"$f\" ] || continue; p=$(cat \"$f\"); " +
 		"kill -TERM -\"$p\" 2>/dev/null || { pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; }; " +
-		"sleep 0.2; kill -0 \"$p\" 2>/dev/null && echo stuck; rm -f \"$f\"; done; rm -f " + startMarker
+		"end=$(( $(date +%s) + 5 )); while " + alive + " && [ $(date +%s) -lt $end ]; do sleep 0.1 2>/dev/null || sleep 1; done; " +
+		"if " + alive + "; then kill -KILL -\"$p\" 2>/dev/null || kill -KILL \"$p\" 2>/dev/null; sleep 1; " + alive + " && echo stuck; fi; " +
+		"rm -f \"$f\"; done; rm -f " + startMarker
 	out, code, err := vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", stop)
 	if err != nil || code != 0 {
 		return fmt.Errorf("stopping services: %s", firstNonEmpty(errText(err), strings.TrimSpace(out)))
@@ -1522,11 +1604,11 @@ stat -c '%%u %%g' . 2>/dev/null || echo unknown`, u, marker)
 	script := fmt.Sprintf(`set -e
 old=$(id -u %[1]s); oldg=$(id -g %[1]s)
 if [ "$old:$oldg" != "%[2]d:%[4]s" ]; then
-  sed -i "s/^%[1]s:\([^:]*\):$old:$oldg:/%[1]s:\1:%[2]d:%[4]s:/" /etc/passwd
+  sed -i "s/^%[5]s:\([^:]*\):$old:$oldg:/%[1]s:\1:%[2]d:%[4]s:/" /etc/passwd
   home=$(awk -F: '$1=="%[1]s"{print $6}' /etc/passwd)
   [ -n "$home" ] && [ -d "$home" ] && chown -R %[2]d:%[4]s "$home"
 fi
-mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker, gid)
+mkdir -p /var/lib/boxer && touch %[3]s`, u, uid, marker, gid, strings.ReplaceAll(u, ".", `\.`))
 	out, code, err = vm.Output(e.VM, e.Scope.Key, "", "sh", "-c", script)
 	if err != nil || code != 0 {
 		return e.fail(&Error{Reason: fmt.Sprintf("could not give guest user %q the worktree owner's uid %d: %s", u, uid, firstNonEmpty(errText(err), strings.TrimSpace(out))),
@@ -1819,14 +1901,27 @@ func lockScope(key string) (func(), error) {
 	return lockFile(filepath.Join(dir, key))
 }
 
+// TryLockScope takes the scope's lock only if nobody holds it. gc uses it so that it never stops
+// or deletes a sandbox while a command is provisioning it, and never waits on one that is.
+func TryLockScope(key string) (unlock func(), ok bool) {
+	dir := filepath.Join(filepath.Dir(LastUsedDir()), "locks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, false
+	}
+	unlock, err := lockFileHow(filepath.Join(dir, key), syscall.LOCK_EX|syscall.LOCK_NB)
+	return unlock, err == nil
+}
+
 // lockFile takes an exclusive flock on path, creating it.
-func lockFile(path string) (func(), error) {
+func lockFile(path string) (func(), error) { return lockFileHow(path, syscall.LOCK_EX) }
+
+func lockFileHow(path string, how int) (func(), error) {
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 		if err != nil {
 			return nil, err
 		}
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		if err := syscall.Flock(int(f.Fd()), how); err != nil {
 			_ = f.Close()
 			return nil, err
 		}
@@ -1863,8 +1958,8 @@ func LastUsedDir() string {
 func (e *Env) KeepAlive() (stop func()) {
 	touchLastUsed(e.Scope.Key)
 	done := make(chan struct{})
+	t := time.NewTicker(keepAliveEvery)
 	go func() {
-		t := time.NewTicker(keepAliveEvery)
 		defer t.Stop()
 		for {
 			select {

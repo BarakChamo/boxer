@@ -14,8 +14,15 @@ description: What the sandbox isolates on each backend, what it does not, and th
 | **Exposed to the host** | Ports in `network.ports`, bound to `127.0.0.1`. |
 | **Threat model** | A careless or destructive agent. boxer is not built to stop an agent that sets out to reach the host. |
 
-boxer protects your machine from what a careless agent runs, such as a dependency's postinstall script, an `rm -rf` in the wrong directory, or a change to system configuration. A postinstall script in the sandbox cannot read your home directory. A command that changes system
-configuration changes only the sandbox, and `boxer down` deletes it.
+boxer protects your machine from what a careless agent's builds, installs and scripts do: a
+dependency's postinstall script, a build step that runs `rm -rf` in the wrong directory, a change to
+system configuration. Those run in the sandbox because the program that starts them (`npm`, `make`,
+`python`, ...) is on the `intercept` list. A postinstall script in the sandbox cannot read your home
+directory, and a command that changes system configuration changes only the sandbox.
+
+A program that is not on the list runs on your machine, and by default that includes `rm`, `mv` and
+`curl` typed on their own. To send them to the sandbox too, add them with `intercept_also`, or set
+`intercept = ["*"]`, which sends everything but `passthrough`.
 
 <Callout type="warn">
 The worktree is your real worktree, mounted read-write. `rm -rf` inside it deletes your files from
@@ -33,7 +40,34 @@ A sandbox sees only what boxer mounts into it:
 - anything you list in `mounts`
 
 On the default backend, smolvm, the network is an allowlist. It holds the registry hosts the image
-needs plus the hosts in `network.allow_hosts`.
+needs plus the hosts in `network.allow_hosts`:
+
+- **Always added:** the image's registry, so the guest can pull it. For Docker Hub that is
+  `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com` and
+  `index.docker.io`; for `ghcr.io`, `mirror.gcr.io` and `public.ecr.aws`, the registry and its blob
+  host. A local image (`./image.tar`, a `build`) adds none.
+- **In inside mode, also:** the npm registry and `deb.debian.org`, to install the harness, the AI
+  Gateway, and every harness's API and login hosts (`api.anthropic.com`, `api.openai.com` and so
+  on), because the harness itself runs in the guest. There is no setting to leave them out.
+- **Names and addresses:** a hostname is matched exactly and resolved once, when the sandbox
+  starts. A name that is not listed does not resolve in the guest, even if its address falls in an
+  allowed CIDR block; reach such a host by address, or list the name.
+- **For the sandbox's whole life:** there are no phases. A host `image_setup` needs, such as
+  `deb.debian.org`, stays reachable while the agent works.
+
+## What the allowlist does not cover
+
+The allowlist is the sandbox's network, and nothing else. The agent's harness runs on your machine
+(outside inside mode) with your machine's network: its web tools, its MCP servers, and every program
+that runs on the host, `git`, `gh` and `ssh` included, reach whatever your machine can. boxer alone
+does not keep an agent off the internet. For that, block the harness's web tools in its own
+settings, and put a proxy or firewall in front of the machine.
+
+Nothing stops an agent from editing boxer's own configuration either. A worktree's `boxer.toml`
+overrides the repository's, and an agent can write one, or edit `.claude/settings.json`, with its
+file tools. There is no layer an administrator controls that a repository cannot override. Review
+changes to `boxer.toml` and the harness settings the way you review CI configuration (a CODEOWNERS
+entry, for one).
 
 ## Backends
 

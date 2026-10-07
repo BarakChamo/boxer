@@ -63,7 +63,31 @@ func WriteRunRecord(r RunRecord) {
 	}
 	// 0600: the record holds the command line verbatim, which is the one place boxer keeps
 	// something a redacting telemetry sink would have stripped.
-	_ = os.WriteFile(RunRecordPath(r.Scope), b, 0o600)
+	_ = writeAtomic(RunRecordPath(r.Scope), b, 0o600)
+}
+
+// writeAtomic replaces path with b in one step. Parallel runs on a scope (an agent's parallel tool
+// calls) each truncated and wrote the same file, and could leave one's bytes over the other's
+// tail. A temporary file left by a killed process carries the scope's name, so the sweep finds it.
+func writeAtomic(path string, b []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), perm)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+	}
+	return err
 }
 
 // ReadRunRecord returns the scope's last run, if there is one.

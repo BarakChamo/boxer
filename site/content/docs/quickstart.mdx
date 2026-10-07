@@ -11,6 +11,17 @@ Using Conductor, T3 Code or another orchestrator? Do step 1, then go to
 [Orchestrators](/docs/orchestrators). Already use Docker? See the note in step 1.
 </Callout>
 
+## What you need
+
+| Your machine | Backend | Notes |
+| --- | --- | --- |
+| Mac with Apple Silicon | smolvm, the default | Apple `container` (macOS 26), docker and podman also work |
+| Intel Mac | docker or podman | smolvm and Apple `container` need Apple Silicon. You get a container per worktree and no egress allowlist |
+| Linux, x86_64 or arm64 | smolvm (needs `/dev/kvm`), docker or podman | |
+| Windows | not supported | boxer ships no Windows build. WSL 2 is Linux, and is untested |
+
+Plus a git repository, and one of the [supported agents](/docs/setup).
+
 ## 1. Install boxer
 
 ```sh
@@ -20,7 +31,12 @@ curl -fsSL https://raw.githubusercontent.com/BarakChamo/boxer/main/install.sh | 
 
 smolvm runs the sandboxes. On Linux, smolvm needs `/dev/kvm` (`sudo usermod -aG kvm $USER`, then log in again).
 
-**Prefer Docker, podman or Apple `container`?** Skip smolvm. Add `backend = "docker"` (or `"podman"`,
+The script installs `boxer` into `~/.local/bin`, so that directory must be on your `PATH`, and it
+checks the download against the release's checksums. `BOXER_VERSION=v1.4.1` pins a version, and
+`BOXER_INSTALL_DIR=/usr/local/bin` changes where it goes (GUI apps such as Conductor need a
+directory they can see).
+
+**On an Intel Mac, or prefer Docker, podman or Apple `container`?** Skip smolvm. Add `backend = "docker"` (or `"podman"`,
 `"container"`) and `[network] mode = "on"` to your `boxer.toml` in step 3. You get a container per worktree instead of a microVM. See
 [Bring your Docker setup](/docs/configure/docker).
 
@@ -131,7 +147,8 @@ To give each worktree a named URL instead of a port, install
 
 ## 4. Work as usual
 
-Start your agent in the repository, or in any worktree of it. At session start, boxer creates the
+Start your agent in the repository, or in any worktree of it. If you never make worktrees, your
+repository folder is the one worktree, and it gets one sandbox. At session start, boxer creates the
 worktree's sandbox, runs `npm ci`, starts the dev server, and tells the agent:
 
 ```text

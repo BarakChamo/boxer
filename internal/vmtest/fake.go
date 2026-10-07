@@ -31,7 +31,13 @@ verb="$1 $2"
 case "$1" in --version) verb="--version";; esac
 faildir="$FAKE_STATE.fail"
 fail="$faildir/$(echo "$verb" | tr ' /-' '___')"
-if [ -f "$fail" ]; then echo "Error: $(cat "$fail")" >&2; exit 1; fi
+if [ -f "$fail" ]; then
+  # smolvm writes a pack in place, so one that fails partway leaves a truncated file behind.
+  if [ "$verb" = "pack create" ]; then
+    prev=""; for a in "$@"; do [ "$prev" = "-o" ] && printf 'fake-pa' > "$a.smolmachine"; prev="$a"; done
+  fi
+  echo "Error: $(cat "$fail")" >&2; exit 1
+fi
 # A verb that fails a fixed number of times and then succeeds, for the retry paths. smolvm keeps
 # its machine records in SQLite, so concurrent creates lose a race with "database is locked"; a
 # fake that can only fail forever cannot tell a caller that retries from one that gives up.
@@ -89,14 +95,15 @@ case "$verb" in
     [ -f "$dir/$name" ] && { echo "Error: config operation failed: create machine: machine '$name' already exists or is being created" >&2; exit 1; }
     # smolvm reads the pack's footer, so a file that is not a whole pack fails here and nowhere
     # earlier: the same shape as a truncated pack on a real host.
-    if [ -n "$pack" ] && [ -f "$pack" ] && [ "$(cat "$pack")" != "fake-pack" ]; then
+    if [ -n "$pack" ] && [ -f "$pack" ] && [ "$(head -n 1 "$pack")" != "fake-pack" ]; then
       echo "Error: agent operation failed: read checkpoint footer: I/O error: sidecar file too small to contain footer" >&2; exit 1
     fi
     printf '%s\n%s\n%s\n%s\n%s\n' "stopped" "$root" "$img" "$pack" "$labels" > "$dir/$name"
     # Restore the guest state the pack carries, so a VM created from it skips what it already has.
-    if [ -n "$pack" ]; then
-      for m in "$pack".marker-*; do
-        [ -f "$m" ] || continue
+    if [ -n "$pack" ] && [ -f "$pack" ]; then
+      id=$(sed -n 2p "$pack")
+      for m in "$dir/pack-$id".marker-*; do
+        [ -n "$id" ] && [ -f "$m" ] || continue
         cp "$m" "$dir/$name.$(basename "$m" | sed 's/^.*\.marker-//')"
       done
     fi ;;
@@ -111,14 +118,18 @@ case "$verb" in
     done
     # A pack has a body: boxer treats an empty file as the truncation an interrupted
     # pack create leaves behind, and refuses to build a machine from it.
-    printf 'fake-pack\n' > "$out"; printf 'fake-pack\n' > "$out.smolmachine"
+    # The second line names the guest state this pack carries, kept in the fake's own state: the
+    # pack is written somewhere temporary and moved, so nothing may live beside it.
+    id=$(printf '%s' "$out" | cksum | cut -d' ' -f1)
+    printf 'fake-pack\n' > "$out"; printf 'fake-pack\n%s\n' "$id" > "$out.smolmachine"
     # A pack of a machine carries that machine's guest state. The markers are what decide whether
     # setup and the harness install run again, so a pack that loses them is not a pack: every VM
     # made from it would repeat the work the pack exists to skip.
+    rm -f "$dir/pack-$id".marker-*
     if [ -n "$fromvm" ]; then
       for m in "$dir/$fromvm".setup "$dir/$fromvm".harness-*; do
         [ -f "$m" ] || continue
-        cp "$m" "$out.smolmachine.marker-$(basename "$m" | sed "s/^$fromvm\.//")"
+        cp "$m" "$dir/pack-$id.marker-$(basename "$m" | sed "s/^$fromvm\.//")"
       done
     fi ;;
   "machine start"|"machine stop")
@@ -209,8 +220,8 @@ case "$verb" in
         *"test -f /var/lib/boxer/image-setup-done"*) [ -f "$dir/$name.setup" ] && exit 0 || exit 1;;
         # The start marker lives in the guest's memory-backed /tmp: it must not survive a restart,
         # and it must never touch the host, which is where an unmodelled marker would land.
-        *"test -f /tmp/boxer-started"*) [ -f "$dir/$name.started" ] && exit 0 || exit 1;;
-        *"touch /tmp/boxer-started"*) touch "$dir/$name.started"; exit 0;;
+        *'cat /tmp/boxer-started'*) [ -f "$dir/$name.started" ] && exit 0 || exit 1;;
+        *"> /tmp/boxer-started"*) touch "$dir/$name.started"; exit 0;;
         # Stopping services kills guest processes by pid file; on the host that would be a kill
         # of whatever those pids are here. Modelled: the marker goes, nothing is signalled.
         *"/tmp/boxer-svc/*.pid"*) rm -f "$dir/$name.started"; [ -f "$FAKE_STATE.stuck" ] && echo stuck; exit 0;;

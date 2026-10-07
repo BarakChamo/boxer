@@ -86,6 +86,12 @@ func (e *Env) SavePack(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The snapshot stops the VM; another boxer must not start it, or run in it, meanwhile.
+	unlock, err := lockScope(e.Scope.Key)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	if _, ok, err := e.Exists(); err != nil {
 		return "", err
 	} else if !ok {
@@ -102,19 +108,12 @@ func (e *Env) SavePack(name string) (string, error) {
 	stub := strings.TrimSuffix(side, ".smolmachine")
 	start := time.Now()
 	// smolvm packs only a stopped VM, so it is stopped and restarted around the snapshot.
-	// Written beside the old pack and moved over it only once whole: a save that fails partway
-	// (a full disk, Ctrl-C, a smolvm error) used to leave the earlier snapshot of this name
-	// truncated or gone, and that snapshot is exactly what someone saved to keep.
-	tmp := fmt.Sprintf("%s.saving-%d", stub, os.Getpid())
+	// PackFromVM moves the pack over the old one only once whole: a save that fails partway (a
+	// full disk, Ctrl-C, a smolvm error) leaves the earlier snapshot of this name as it was.
 	err = e.stopVM()
 	if err == nil {
-		var made string
-		if made, err = packer.PackFromVM(e.Scope.Key, tmp); err == nil {
-			err = os.Rename(made, side)
-		}
+		_, err = packer.PackFromVM(e.Scope.Key, stub)
 	}
-	_ = os.Remove(tmp)
-	_ = os.Remove(tmp + ".smolmachine")
 	serr := e.VM.Start(e.Scope.Key)
 	if serr != nil && err == nil {
 		err = serr

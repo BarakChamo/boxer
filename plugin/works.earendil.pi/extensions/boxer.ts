@@ -14,11 +14,22 @@ function ask(payload: Record<string, unknown>): Promise<Answer> {
     const proc = spawn("boxer", ["hook", "pi"], { stdio: ["pipe", "pipe", "inherit"] });
     let out = "";
     proc.stdout.on("data", (d) => (out += d.toString()));
-    proc.on("close", () => {
+    // Fail closed. A boxer that could not start (not on pi's PATH), crashed, or answered with
+    // something unreadable used to resolve to "no answer", which let the bash command run on the
+    // host. A refusal names what went wrong instead.
+    proc.on("close", (code) => {
       const line = out.trim();
-      resolve(line ? (JSON.parse(line) as Answer) : {});
+      if (!line) {
+        resolve(code === 0 ? {} : { deny: `boxer hook pi exited ${code} without an answer; the command was not run` });
+        return;
+      }
+      try {
+        resolve(JSON.parse(line) as Answer);
+      } catch {
+        resolve({ deny: "boxer hook pi gave an unreadable answer; the command was not run" });
+      }
     });
-    proc.on("error", () => resolve({}));
+    proc.on("error", (err) => resolve({ deny: `could not run boxer (${err.message}); the command was not run` }));
     proc.stdin.end(JSON.stringify(payload));
   });
 }

@@ -594,7 +594,41 @@ func TestUsageNamesEveryInsideHarness(t *testing.T) {
 
 // Idle reclaim stops a sandbox whose worktree is still there rather than deleting it, and a named
 // volume outlives the sandbox until its worktree goes or rm --volumes asks.
+// gc never takes a sandbox a command is provisioning: the command holds the scope's lock, and gc
+// skips what it cannot lock rather than stopping it from under the command.
+func TestGCSkipsASandboxInUse(t *testing.T) {
+	client, _ := vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\n")
+	if code, out := call(t, nil, "up"); code != 0 {
+		t.Fatal(out)
+	}
+	var ls []map[string]any
+	if code, out := call(t, &ls, "ls", "--json"); code != 0 || len(ls) != 1 {
+		t.Fatalf("ls: %d %s", code, out)
+	}
+	key := ls[0]["scope"].(string)
+	ageStamp(t, key)
+	unlock, ok := box.TryLockScope(key)
+	if !ok {
+		t.Fatal("nothing else holds the lock")
+	}
+	var rows []map[string]any
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 0 {
+		t.Fatalf("a locked sandbox must be left alone: %d %v %s", code, rows, out)
+	}
+	unlock()
+	if m, ok, _ := client.Status(key); !ok || !m.Running() {
+		t.Fatalf("it must still be running: %v %v", ok, m.State)
+	}
+	if code, out := call(t, &rows, "gc", "--json"); code != 0 || len(rows) != 1 {
+		t.Fatalf("once free, an idle sandbox is reclaimed: %d %v %s", code, rows, out)
+	}
+}
+
 func TestIdleReclaimStopsAndVolumesSurvive(t *testing.T) {
+	old := box.VolumeGrace
+	box.VolumeGrace = 0 // the week a missing worktree is given is tested on its own
+	t.Cleanup(func() { box.VolumeGrace = old })
 	client, _ := vmtest.Install(t)
 	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"idle_timeout = \"1m\"\nvolumes = [\"data:/data\"]\n")
 	if code, out := call(t, nil, "up"); code != 0 {
@@ -686,5 +720,67 @@ func ageStamp(t *testing.T, key string) {
 	old := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(stamp, old, old); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A backend that does not answer is not a host with no sandboxes: ls, stop and rm say so with
+// exit 1 rather than print an empty list and exit 0.
+func TestListingFailureIsNotAnEmptyList(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	vmtest.FailVerb(t, "machine ls", "daemon not reachable")
+	var rows []map[string]any
+	if code, out := call(t, &rows, "ls", "--json"); code != 1 || len(rows) != 0 {
+		t.Fatalf("ls --json: %d %v %s", code, rows, out)
+	}
+	for _, verb := range []string{"stop", "rm"} {
+		if code, out := call(t, nil, verb, "--all", "-y", "--json"); code != 1 {
+			t.Fatalf("%s --all must fail when the backend does: %d %s", verb, code, out)
+		}
+	}
+}
+
+// down --all goes on past a sandbox it cannot delete, and reports every one it acted on.
+func TestDownAllContinuesPastAFailure(t *testing.T) {
+	vmtest.Install(t)
+	for range 2 {
+		vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+		if code, out := call(t, nil, "up"); code != 0 {
+			t.Fatal(out)
+		}
+	}
+	vmtest.FailVerb(t, "machine delete", "disk on fire")
+	var rows []map[string]any
+	code, out := call(t, &rows, "down", "--all", "--json")
+	if code != 1 || len(rows) != 2 || rows[0]["error"] == nil || rows[1]["error"] == nil {
+		t.Fatalf("each failure must be a row, and the exit 1: %d %v %s", code, rows, out)
+	}
+}
+
+// A flag a command does not read is refused, not ignored: `restart --scope <child>` exited 0 having
+// restarted the current worktree's services.
+func TestScopedCommandsRefuseFlagsTheyIgnore(t *testing.T) {
+	vmtest.Install(t)
+	vmtest.RepoIn(t, vmtest.NoWorktreeCheck)
+	for _, args := range [][]string{{"restart", "--scope", "sb-000000000000"}, {"doctor", "--all"}, {"up", "--scope", "x"}, {"restart", "--json"}} {
+		if code, out := call(t, nil, args...); code != 2 || !strings.Contains(out, "does not take --") {
+			t.Fatalf("%v: %d %s", args, code, out)
+		}
+	}
+	if code, out := call(t, nil, "doctor", "--json", "--session", "s"); code != 0 {
+		t.Fatalf("flags a command reads still work: %d %s", code, out)
+	}
+}
+
+// git and conductor have no user layer; --user used to act on paths relative to the current
+// directory when run outside a repository.
+func TestGitAndConductorRefuseUser(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, verb := range []string{"install", "uninstall"} {
+		for _, target := range []string{"git", "conductor"} {
+			if code, out := call(t, nil, verb, target, "--user"); code != 2 || !strings.Contains(out, "no user layer") {
+				t.Fatalf("%s %s --user: %d %s", verb, target, code, out)
+			}
+		}
 	}
 }

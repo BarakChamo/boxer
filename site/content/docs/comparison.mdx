@@ -26,7 +26,9 @@ It does not separate tasks from each other. Every session still shares your mach
 tools, home directory and running processes. Two dev servers on the same port still collide.
 
 Use boxer instead of it, not on top of it. A hypervisor cannot start inside seatbelt or landlock, so
-turn the agent's own sandbox off when boxer is on. The [Codex page](/docs/setup/codex) shows how.
+turn the agent's own sandbox off when boxer is on. Codex's is on by default, and the
+[Codex page](/docs/setup/codex) shows how. Claude Code's is off unless you turned it on in its
+settings (`sandbox.enabled`).
 
 ## A container per worktree
 

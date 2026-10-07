@@ -23,7 +23,7 @@ backend = "smolvm"     # smolvm | container | docker | podman
 | --- | --- | --- | --- | --- | --- | --- |
 | `smolvm` (default) | a microVM | one per sandbox | yes | yes | yes | through polling, which boxer turns on |
 | `container` (Apple, macOS 26 on Apple Silicon) | a lightweight VM per container | one per sandbox | no | no | no | through polling, which boxer turns on |
-| `docker` | a container | shared by every sandbox on the machine | no | no | no | yes, with OrbStack |
+| `docker` | a container | shared by every sandbox on the machine | no | no | no | yes with OrbStack; Docker Desktop not measured |
 | `podman` | a container | shared by every sandbox on the machine | no | no | no | on a Mac, through polling, which boxer turns on |
 
 - **Kernel.** An escape from a microVM lands in one guest. An escape from a container lands in the

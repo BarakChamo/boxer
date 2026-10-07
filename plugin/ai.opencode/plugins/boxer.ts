@@ -13,10 +13,19 @@ async function ask(payload: Record<string, unknown>): Promise<Answer> {
     stderr: "pipe",
   });
   const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-  await proc.exited;
+  const code = await proc.exited;
   if (err.trim()) console.error(err.trim());
   const line = out.trim();
-  return line ? (JSON.parse(line) as Answer) : {};
+  // Fail closed: a boxer that crashed or answered with nothing it can read must not let the
+  // command through. A missing binary already throws from Bun.spawn, which aborts the tool.
+  if (!line) {
+    return code === 0 ? {} : { deny: `boxer hook opencode exited ${code} without an answer; the command was not run` };
+  }
+  try {
+    return JSON.parse(line) as Answer;
+  } catch {
+    return { deny: "boxer hook opencode gave an unreadable answer; the command was not run" };
+  }
 }
 
 export const BoxerPlugin: Plugin = async ({ directory }) => {

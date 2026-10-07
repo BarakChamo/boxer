@@ -59,8 +59,10 @@ type hostMachine struct {
 }
 
 // listMachines returns boxer's sandboxes on the configured backend, or on every installed one.
-// A backend that is installed but not answering is reported, not fatal: the others still list.
-func listMachines(all bool, stderr io.Writer) []hostMachine {
+// A backend that is installed but not answering is reported, not fatal: the others still list,
+// and ok is false so the command does not exit 0 as if there were nothing.
+func listMachines(all bool, stderr io.Writer) (_ []hostMachine, ok bool) {
+	ok = true
 	names := []string{hostBackend()}
 	if all {
 		names = backendNames
@@ -74,6 +76,7 @@ func listMachines(all bool, stderr io.Writer) []hostMachine {
 		ms, err := vm.Owned(c)
 		if err != nil {
 			fmt.Fprintf(stderr, "boxer: %s: %v\n", c.Name(), err)
+			ok = false
 			continue
 		}
 		for _, m := range ms {
@@ -81,7 +84,7 @@ func listMachines(all bool, stderr io.Writer) []hostMachine {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].m.Name < out[j].m.Name })
-	return out
+	return out, ok
 }
 
 // gitJSON is the state of the worktree a sandbox is attached to.
@@ -187,7 +190,9 @@ func lsCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	out := cli.New(stdout, *asJSON)
 	rows := []lsRow{}
-	for _, h := range listMachines(*all, stderr) {
+	hs, listed := listMachines(*all, stderr)
+	code := map[bool]int{true: 0, false: 1}[listed]
+	for _, h := range hs {
 		row := lsRow{machineJSON: machineRow(h.m), Backend: h.backend, Ports: box.PortsOf(h.m)}
 		if *resources {
 			row.machineJSON = withResources(h.client, h.m, row.machineJSON)
@@ -199,9 +204,12 @@ func lsCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if out.Mode == cli.JSON {
 		emit(stdout, rows, true)
-		return 0
+		return code
 	}
 	if len(rows) == 0 {
+		if !listed {
+			return code
+		}
 		out.Printf("no boxer sandboxes%s\n", map[bool]string{true: " on any backend", false: " on " + vm.Host(hostBackend()).Name()}[*all])
 		if !*all {
 			out.Hint("boxer ls -A", "look on every installed backend")
@@ -269,7 +277,7 @@ func lsCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		out.Hint("boxer rm -i", "choose sandboxes to remove")
 	}
-	return 0
+	return code
 }
 
 // plural is "1 sandbox" or "3 sandboxes".
@@ -391,7 +399,8 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	// is -A, said explicitly. It used to imply -A, and a unit test's `rm --all` reached the real
 	// docker daemon and deleted another test's container — which is exactly what it would have done
 	// to a person's sandboxes on a runtime they were not thinking about.
-	ms := listMachines(*everywhere, stderr)
+	ms, listed := listMachines(*everywhere, stderr)
+	failed := map[bool]int{true: 0, false: 1}[listed]
 	var targets []hostMachine
 	switch {
 	case *all:
@@ -403,8 +412,10 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return 2
 		}
 		if len(ms) == 0 {
-			out.Printf("no boxer sandboxes\n")
-			return 0
+			if listed {
+				out.Printf("no boxer sandboxes\n")
+			}
+			return failed
 		}
 		targets = pick(out, stdin, ms, verb)
 		*yes = true // choosing them was the confirmation
@@ -416,12 +427,12 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 	}
 	if len(targets) == 0 {
-		if out.Mode != cli.JSON {
-			out.Printf("nothing to %s\n", verb)
-		} else {
+		if out.Mode == cli.JSON {
 			emit(stdout, []downJSON{}, true)
+		} else if listed {
+			out.Printf("nothing to %s\n", verb)
 		}
-		return 0
+		return failed
 	}
 	// A filter is a question about what it will match, so a person is shown the answer first; a
 	// sandbox named on the command line was the answer already.
@@ -430,19 +441,23 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return 1
 		}
 	}
-	code := 0
+	code := failed
 	rows := []downJSON{}
 	for _, h := range targets {
 		var err error
+		row := downJSON{Scope: h.m.Name}
 		if verb == "stop" {
 			err = h.client.Stop(h.m.Name)
-		} else {
-			err = h.client.Delete(h.m.Name)
-			if err == nil {
-				vm.ForgetOwned(h.client, h.m.Name)
-				box.ForgetScope(h.m.Name)
-				if *volumes {
-					err = box.RemoveVolumes(h.m.Name)
+		} else if err = h.client.Delete(h.m.Name); err == nil {
+			vm.ForgetOwned(h.client, h.m.Name)
+			box.ForgetScope(h.m.Name)
+			row.Removed = true
+			if *volumes {
+				// The sandbox is gone either way; a row that hid it would say it was not.
+				if verr := box.RemoveVolumes(h.m.Name); verr != nil {
+					fmt.Fprintf(stderr, "boxer: rm %s: volumes: %v\n", h.m.Name, verr)
+					row.Error = "volumes: " + verr.Error()
+					code = 1
 				}
 			}
 		}
@@ -451,7 +466,7 @@ func stopRmCmd(verb string, args []string, stdin io.Reader, stdout, stderr io.Wr
 			code = 1
 			continue
 		}
-		rows = append(rows, downJSON{Scope: h.m.Name, Removed: verb == "rm"})
+		rows = append(rows, row)
 		if out.Mode != cli.JSON {
 			past := map[string]string{"stop": "stopped", "rm": "removed"}[verb]
 			out.Printf("%s %s (%s)\n", out.Green(past), scope.Slug(h.m.Name), h.m.Name)

@@ -817,8 +817,14 @@ func (c Config) Validate() error {
 	if _, err := MemoryMiB(c.Memory); err != nil {
 		return err
 	}
+	// The name reaches the guest's shell, sed and awk unquoted; nothing else is a user name.
+	if c.User != "" && !userName.MatchString(c.User) {
+		return fmt.Errorf("user = %q; want a user name or uid, optionally with :group", c.User)
+	}
 	return nil
 }
+
+var userName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$`)
 
 var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 

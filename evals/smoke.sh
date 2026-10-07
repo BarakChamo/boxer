@@ -439,7 +439,7 @@ echo "# services are supervised, and restart relaunches them"
 # The first crashes by itself after a second; nothing outside signals it, because on Docker under
 # Ubuntu's AppArmor one exec cannot signal a process another exec started, even as root.
 mkrepo "$WORK/sv" "$BASE
-start = [\"echo x >> /workspace/crash.runs; sleep 1; exit 3\", \"echo x >> /workspace/svc.runs; exec sleep 601\"]"
+start = [\"echo x >> /workspace/crash.runs; sleep 1; exit 3\", \"echo x >> /workspace/svc.runs; exec sleep 601\", \"trap '' TERM; exec sleep 602\"]"
 cd "$WORK/sv"
 boxer up >/dev/null 2>&1 || true
 sleep 6
@@ -451,6 +451,14 @@ boxer restart >/dev/null 2>&1 || true
 # one records its start a moment later, and a slow host was checked before it had.
 for _ in $(seq 20); do [ "$(runs svc.runs)" = 2 ] && break; sleep 0.5; done
 check "boxer restart relaunches a service once" '[ "$(runs svc.runs)" = 2 ] && [ "$(boxer run -c "ps -o args | grep -c \"^sleep 601\"" 2>/dev/null)" = 1 ]'
+# A service that ignores TERM used to survive the stop, so restart left two of it.
+check "restart leaves one copy of a service that ignores TERM" '[ "$(boxer run -c "ps -o args | grep -c \"^sleep 602\"" 2>/dev/null)" = 1 ]'
+# A stop empties smolvm's /tmp, but a container's /tmp survives docker stop and start: a start
+# marker that only had to exist kept services from ever being launched again on those backends.
+boxer stop "$(scopekey)" >/dev/null 2>&1 || true
+boxer up >/dev/null 2>&1 || true
+for _ in $(seq 20); do [ "$(runs svc.runs)" = 3 ] && break; sleep 0.5; done
+check "stop then up relaunches a service once" '[ "$(runs svc.runs)" = 3 ] && [ "$(boxer run -c "ps -o args | grep -c \"^sleep 601\"" 2>/dev/null)" = 1 ]'
 boxer down >/dev/null 2>&1 || true
 
 echo "# volumes outlive the sandbox"

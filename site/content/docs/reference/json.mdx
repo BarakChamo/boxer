@@ -156,13 +156,17 @@ scope already had that many.
 
 `down` prints one object. `removed` is `false` when there was no sandbox. `down --all`,
 `down --scope`, `stop` and `rm` print an array, one per sandbox acted on, and `[]` when nothing
-matched. `stop` rows have `removed: false`.
+matched. `stop` rows have `removed: false`. A sandbox that failed has `error`. An `rm --volumes`
+row can have both `removed: true` and `error` when the sandbox went but its volumes did not.
 
 ## `boxer gc --json`
 
 An array of decisions. A sandbox row is the `ls` row without `backend`, `ports` and `git`, plus
 `reason`, `deleted` and, on failure, `error`. A pack row has `pack` (its path), `bytes`, `reason`,
-`deleted` and `error`, with the sandbox fields empty. Under `--dry-run`, `deleted` is `false`.
+`deleted` and `error`, with the sandbox fields empty. A volume row has `volumes` (the scope whose
+volumes they are), `reason`, `deleted` and `error`, with the sandbox fields empty. A sandbox that
+[`idle_action = "stop"`](/docs/reference/configuration#idle_action) stopped has `stopped: true` and
+`deleted: false`. Under `--dry-run`, `deleted` and `stopped` are `false`.
 
 ## `boxer backends --json`
 

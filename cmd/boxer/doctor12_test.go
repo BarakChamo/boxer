@@ -97,6 +97,9 @@ func snapshot(t *testing.T, root string) string {
 
 // `boxer restart` through the CLI, and gc --dry-run's view of idle stops and orphaned volumes.
 func TestRestartCommandAndGCDryRun(t *testing.T) {
+	old := box.VolumeGrace
+	box.VolumeGrace = 0 // the week a missing worktree is given is tested on its own
+	t.Cleanup(func() { box.VolumeGrace = old })
 	vmtest.Install(t)
 	vmtest.RepoIn(t, vmtest.NoWorktreeCheck+"start = [\"echo serving\"]\nidle_timeout = \"1m\"\n")
 	if code, out := call(t, nil, "restart"); code != 1 || !strings.Contains(out, "NO_SANDBOX") {

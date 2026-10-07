@@ -1,11 +1,13 @@
 package vm_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BarakChamo/boxer/internal/vm"
 )
@@ -258,5 +260,36 @@ func TestPublishedPortsBindLoopback(t *testing.T) {
 		if got := vm.LoopbackPortForTest(in); got != want {
 			t.Errorf("%s: got %s, want %s", in, got, want)
 		}
+	}
+}
+
+// A timed-out command ends with everything it started. busybox's timeout (Alpine) killed only the
+// process it ran, and a test runner's workers kept running in the container with nothing to stop
+// them.
+func TestATimeoutEndsTheWholeCommandOnBusybox(t *testing.T) {
+	d := daemon(t, "docker")
+	name := "boxer-test-timeout"
+	_ = d.Delete(name)
+	t.Cleanup(func() { _ = d.Delete(name) })
+	if err := d.Create(vm.CreateSpec{Name: name, Image: testImage, CPUs: 1, MemoryMiB: 256}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(name); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	start := time.Now()
+	code, err := d.Exec(vm.ExecOpts{Name: name, Timeout: 2 * time.Second, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out},
+		"sh", "-c", "sleep 300 & sh -c 'sleep 302 & sleep 303' & sleep 301")
+	if err != nil || code != 137 || time.Since(start) > 10*time.Second {
+		t.Fatalf("a timed-out command exits 137 at its deadline: code %d err %v after %s: %s", code, err, time.Since(start), out.String())
+	}
+	out.Reset()
+	if code, _ := d.Exec(vm.ExecOpts{Name: name, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &out}, "sh", "-c", "sleep 1; ps -o args | grep '^sleep 30'"); code != 1 || out.Len() != 0 {
+		t.Fatalf("nothing it started may be left running: %s", out.String())
+	}
+	out.Reset()
+	if code, _ := d.Exec(vm.ExecOpts{Name: name, Timeout: 30 * time.Second, Stdin: strings.NewReader("hi\n"), Stdout: &out, Stderr: &out}, "sh", "-c", "cat; exit 7"); code != 7 || out.String() != "hi\n" {
+		t.Fatalf("under a deadline, stdin and the exit code pass through: %d %q", code, out.String())
 	}
 }

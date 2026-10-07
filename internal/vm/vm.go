@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -306,21 +307,36 @@ func (c Client) retryWhileLocked(f func() (string, error)) (string, error) {
 // created --from it boot from pre-extracted layers, so the pull happens once per image instead of
 // once per VM. The executable stub smolvm also writes is removed; only the sidecar is kept.
 func (c Client) Pack(image, stub string) (string, error) {
-	if _, err := c.output("pack", "create", "-I", image, "-o", stub, "--no-sign"); err != nil {
+	return packAside(stub, func(tmp string) error {
+		_, err := c.output("pack", "create", "-I", image, "-o", tmp, "--no-sign")
+		return err
+	})
+}
+
+// packAside has smolvm write a pack in a hidden directory beside stub and moves it into place only
+// once whole. smolvm writes in place, and other worktrees boot from any pack that exists: one
+// still being written was booted half-made, failed as corrupt, and was deleted under its writer.
+func packAside(stub string, pack func(tmp string) error) (string, error) {
+	dir, err := os.MkdirTemp(filepath.Dir(stub), ".packing-")
+	if err != nil {
 		return "", err
 	}
-	_ = os.Remove(stub)
-	return stub + ".smolmachine", nil
+	defer os.RemoveAll(dir) //nolint:errcheck // best effort; gc sweeps what a killed pack leaves
+	tmp := filepath.Join(dir, filepath.Base(stub))
+	if err := pack(tmp); err != nil {
+		return "", err
+	}
+	out := stub + ".smolmachine"
+	return out, os.Rename(tmp+".smolmachine", out)
 }
 
 // PackFromVM snapshots a stopped machine's root filesystem into stub+".smolmachine": whatever
 // was installed in it boots pre-installed in machines created --from the pack.
 func (c Client) PackFromVM(name, stub string) (string, error) {
-	if _, err := c.output("pack", "create", "--from-vm", name, "-o", stub, "--no-sign"); err != nil {
-		return "", err
-	}
-	_ = os.Remove(stub)
-	return stub + ".smolmachine", nil
+	return packAside(stub, func(tmp string) error {
+		_, err := c.output("pack", "create", "--from-vm", name, "-o", tmp, "--no-sign")
+		return err
+	})
 }
 
 // Start boots a defined machine.

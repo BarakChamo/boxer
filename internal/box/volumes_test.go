@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -13,6 +14,9 @@ import (
 
 func TestOrphanVolumesAndRemove(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	old := VolumeGrace
+	VolumeGrace = 0 // the week a missing worktree is given is tested on its own
+	t.Cleanup(func() { VolumeGrace = old })
 	live, gone := t.TempDir(), filepath.Join(t.TempDir(), "removed")
 	for key, root := range map[string]string{"sb-live": live, "sb-gone": gone} {
 		d := filepath.Join(VolumeDir(), key)
@@ -145,4 +149,62 @@ func TestKeepAliveRefreshesLastUsed(t *testing.T) {
 		t.Fatal("a running command must keep refreshing last-used")
 	}
 	stop()
+}
+
+// A worktree that disappears may only have moved, or be on a drive that is unplugged: its volumes
+// are kept for a week after it is first seen missing, and kept for good if it comes back.
+func TestVolumesOutliveAMissingWorktreeForAWeek(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	clock := time.Now()
+	oldNow := now
+	now = func() time.Time { return clock }
+	t.Cleanup(func() { now = oldNow })
+	root := filepath.Join(t.TempDir(), "wt")
+	os.MkdirAll(root, 0o755)
+	d := filepath.Join(VolumeDir(), "sb-moved")
+	os.MkdirAll(filepath.Join(d, "pg"), 0o755)
+	os.WriteFile(filepath.Join(d, rootFile), []byte(root), 0o644)
+
+	os.Rename(root, root+"-moved") // the repository moved
+	if got := OrphanVolumes(); len(got) != 0 {
+		t.Fatalf("deleted on first sight: %v", got)
+	}
+	clock = clock.Add(6 * 24 * time.Hour)
+	if got := OrphanVolumes(); len(got) != 0 {
+		t.Fatalf("deleted within the week: %v", got)
+	}
+	os.Rename(root+"-moved", root) // and came back
+	OrphanVolumes()
+	if _, err := os.Stat(filepath.Join(d, goneFile)); !os.IsNotExist(err) {
+		t.Fatal("a worktree that came back must clear the mark")
+	}
+	os.Rename(root, root+"-gone")
+	OrphanVolumes() // marks it now, at the real time
+	clock = time.Now().Add(8 * 24 * time.Hour)
+	if got := OrphanVolumes(); len(got) != 1 {
+		t.Fatalf("a week gone: %v", got)
+	}
+}
+
+// gc never deletes a pack a create holds while it labels the machine that uses it.
+func TestRemovePackSkipsAPackInUse(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "env.smolmachine")
+	if err := os.WriteFile(p, []byte("pack"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := lockFileHow(packLock(p), syscall.LOCK_SH)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := RemovePack(p); removed || err != nil {
+		t.Fatalf("a pack in use must be skipped: %v %v", removed, err)
+	}
+	unlock()
+	if removed, err := RemovePack(p); !removed || err != nil {
+		t.Fatalf("a free pack is removed: %v %v", removed, err)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+		t.Fatalf("the pack and its lock must go: %v", ents)
+	}
 }

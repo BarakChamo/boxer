@@ -75,6 +75,7 @@ for `ready`. It prints the name, the image and why it was chosen, and the mount.
 | `--detach` | `false` | Provision in a background boxer and return at once |
 | `--recreate` | `false` | Delete and recreate the sandbox |
 | `--rebuild` | `false` | Drop the cached environment pack, then recreate. Implies `--recreate` |
+| `--json` | `false` | Print a refusal to resolve the scope as [JSON](/docs/reference/json#errors) on stdout. Provisioning failures are text on stderr only |
 
 ## `boxer run`
 
@@ -96,10 +97,10 @@ created first when [`create_on`](/docs/reference/configuration#create_on) includ
 | `--tty` | `false` | Allocate a terminal in the guest when stdin is not one. Input written before the guest attaches is kept |
 | `--junit PATHS` | | Comma-separated JUnit XML paths, relative to the worktree, to summarise after the run. Overrides the task's `junit` and [`results.auto`](/docs/reference/configuration#results) |
 | `--fail-on-test-failures` | `false` | Exit 1 when the command exited 0 and a test in the reports failed |
-| `--json` | `false` | Print a refusal as [JSON](/docs/reference/json#errors) on stdout |
+| `--json` | `false` | Print a refusal to resolve the scope, an unknown `--task` or an unknown `--scope` as [JSON](/docs/reference/json#errors) on stdout. Other refusals, such as `NO_SANDBOX`, are text on stderr only |
 
 Without `--tty`, boxer allocates a terminal when both stdin and stdout are terminals. Inside a boxer
-guest, `run` executes the command directly. From an agent, prefer `--task`. It runs a command the
+guest, `run` executes the command directly, and exits 127 when the program cannot be started. From an agent, prefer `--task`. It runs a command the
 repository declared, regardless of what [`intercept`](/docs/reference/configuration#intercept) catches.
 
 ## `boxer down`
@@ -108,7 +109,9 @@ repository declared, regardless of what [`intercept`](/docs/reference/configurat
 boxer down [--all | --scope NAME] [--json]
 ```
 
-Deletes this scope's sandbox. A scope with no sandbox is not an error.
+Deletes this scope's sandbox. A scope with no sandbox is not an error. A `--scope` name that matches
+no boxer sandbox is: it exits 1, so a typo is not taken for success. `--all` goes on past a sandbox
+it cannot delete, reports it with an `error`, and exits 1.
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -145,7 +148,8 @@ boxer restart
 
 Stops this scope's [`start`](/docs/reference/configuration#start) services and everything they
 spawned, launches them again, and waits for [`ready`](/docs/reference/configuration#ready). The
-sandbox and what is in it stay: an installed package, a database's files. Use it after changing
+sandbox and what is in it stay: an installed package, a database's files. It acts on this scope
+only and takes no `--scope`. Use it after changing
 something a server reads only at start, or when a service gave up after five quick crashes (see
 [`restart`](/docs/reference/configuration#restart)).
 
@@ -171,6 +175,9 @@ Lists boxer's sandboxes on the configured backend with name, key, state, backend
 | `--no-git` | `false` | Skip reading each worktree's git state |
 | `--json` | `false` | The [row array](/docs/reference/json#boxer-ls---json) |
 
+A backend that does not answer is named on stderr, and `ls` exits 1 after listing the backends
+that did.
+
 ## `boxer stop` and `boxer rm`
 
 ```sh
@@ -195,7 +202,10 @@ two-word name (`swift-crab`).
 | `--json` | `false` | Print what was done |
 
 With no name and no filter, an agent or a pipe gets exit 2 and the command to run instead. A name
-that matches nothing exits 1.
+that matches nothing exits 1. So does a backend that does not answer, even with `--all`, which
+would otherwise look like a host with nothing to act on. A sandbox that fails is reported and the
+rest are still acted on. When `rm --volumes` deletes a sandbox but not its volumes, the sandbox's
+row says `removed: true` with an `error`, and the command exits 1.
 
 ## `boxer gc`
 
@@ -204,7 +214,7 @@ boxer gc [--all] [--dry-run] [--json]
 ```
 
 Deletes sandboxes whose worktree is gone, fork children whose parent is gone, the named
-[`volumes`](/docs/reference/configuration#volumes) of worktrees that are gone, and environment
+[`volumes`](/docs/reference/configuration#volumes) of worktrees gone for 7 days, and environment
 packs past [`idle_timeout`](/docs/reference/configuration#idle_timeout) or beyond
 [`packs_keep_last`](/docs/reference/configuration#packs_keep_last). A running sandbox unused for
 `idle_timeout` is stopped, or deleted with
@@ -456,7 +466,7 @@ may be yours too; the hooks you appended to `~/.kimi-code/config.toml` by hand; 
 
 | Flag | Default | |
 | --- | --- | --- |
-| `--user` | `false` | Remove what `install --user` wrote. `claude-code`, `codex` and `copilot` only |
+| `--user` | `false` | Remove what `install --user` wrote. `claude-code`, `codex` and `copilot` only. `git` and `conductor` refuse it with exit 2 |
 
 ## `boxer shim install`
 
@@ -563,7 +573,7 @@ recorded, else `dev`.
 | --- | --- |
 | `0` | Success. For `status`, running. For `capsule replay`, the failure reproduced |
 | `1` | Refused or failed |
-| `2` | Usage error, such as an unknown command, a bad flag or a missing argument |
+| `2` | Usage error, such as an unknown command, a bad flag, a flag the command does not take (`restart --scope`) or a missing argument |
 | `3` | For `status`, the sandbox exists and is stopped |
 | `4` | For `status`, `url` and `open`, this scope has no sandbox |
 | *n* | For `run`, the command's own exit code |

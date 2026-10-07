@@ -29,7 +29,9 @@ boxer install conductor
 `boxer install conductor` writes `.conductor/settings.toml`. It points
 `claude_code_executable_path`, `codex_executable_path` and `opencode_executable_path` at boxer's
 shims, and adds a setup script that runs `boxer up --detach && boxer doctor`. Conductor starts the
-shim, and the agent runs [inside the sandbox](/docs/use/inside).
+shim, and the agent runs [inside the sandbox](/docs/use/inside). The file holds absolute paths on
+your machine, so keep it out of git (add `.conductor/settings.toml` to `.gitignore`) and run the
+command on each machine.
 
 The setup script warms each workspace's sandbox, so you do not need `boxer install git` here.
 

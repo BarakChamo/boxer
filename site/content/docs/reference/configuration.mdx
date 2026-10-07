@@ -168,7 +168,8 @@ Text in quotes is text: `git commit -m "fix npm test"` stays on the host. A line
 such as one with an unclosed quote, goes to the sandbox. A script run by path (`bash build.sh`,
 `./build.sh`) is one program, its own name, and boxer does not read inside it: add the script's
 name, or intercept the tools it calls through PATH shims (`enforcement = "both"`, the default).
-`["*"]` intercepts every program not in `passthrough`. Not settable from the environment.
+`["*"]` intercepts every program not in `passthrough`. It writes no PATH shims, since there is no
+program to name, so enforcement rests on the hook. Not settable from the environment.
 
 ```toml
 intercept = ["npm", "npx", "pnpm", "yarn", "bun", "bunx", "node", "deno",
@@ -346,9 +347,11 @@ mounts = ["~/.m2:/root/.m2:ro"]
 Named directories that outlive the sandbox, as `name:/guest/path`. Each is a directory on the host,
 `~/.local/state/boxer/volumes/<scope>/<name>`, bind-mounted read-write on every backend. It survives
 `boxer down`, `boxer rm`, `--recreate`, `--rebuild` and idle reclaim, so a database keeps its data.
-It is deleted when its worktree is gone, at the next `boxer gc`, or by `boxer rm --volumes`. An
-orchestrator that deletes a worktree when you archive a task takes its volumes
-with it at the next sweep. Copy out what you want to keep first. A name is letters, digits, `-` and `_`.
+It is deleted by `boxer rm --volumes`, or by `boxer gc` once its worktree has been gone for 7 days.
+The week covers a repository that was moved or a drive that was unplugged: the first sweep that
+finds the worktree missing only marks the volumes, and a worktree that comes back clears the mark.
+An orchestrator that deletes a worktree when you archive a task takes its volumes with it a week
+later. Copy out what you want to keep first. A name is letters, digits, `-` and `_`.
 Volumes are not part of the environment pack.
 
 ```toml
@@ -359,8 +362,8 @@ volumes = ["pgdata:/var/lib/postgresql/data"]
 
 `string`, default `""`.
 
-The guest user for `setup`, `start` and every command, as a name or `uid[:gid]`. Empty uses the
-image's `USER`. `image_setup` always runs as root. When the user cannot write the worktree, boxer
+The guest user for `setup`, `start` and every command, as a name or `uid[:gid]`, made of letters,
+digits, `_`, `.` and `-`. Empty uses the image's `USER`. `image_setup` always runs as root. When the user cannot write the worktree, boxer
 gives it your host uid on smolvm and recreates the sandbox once with `--userns=keep-id` on podman.
 
 ```toml

@@ -64,6 +64,8 @@ type urlRoute struct {
 	Host  string `json:"host"`
 	Name  string `json:"name"` // what was passed to `portless alias`
 	URL   string `json:"url"`
+
+	made time.Time // when the route was registered
 }
 
 func urlsDir() string { return filepath.Join(stateRoot(), "urls") }
@@ -81,6 +83,9 @@ func readRoutes() []urlRoute {
 		}
 		var r urlRoute
 		if json.Unmarshal(b, &r) == nil && r.Name != "" {
+			if info, err := ent.Info(); err == nil {
+				r.made = info.ModTime()
+			}
 			out = append(out, r)
 		}
 	}
@@ -524,7 +529,7 @@ func (e *Env) registerURL(guest, host string, ports int, owner map[string]string
 	r := urlRoute{Scope: e.Scope.Key, Guest: guest, Host: host, Name: name, URL: full}
 	if err := os.MkdirAll(urlsDir(), 0o755); err == nil {
 		if b, err := json.Marshal(r); err == nil {
-			_ = os.WriteFile(filepath.Join(urlsDir(), name), b, 0o644)
+			_ = writeAtomic(filepath.Join(urlsDir(), name), b, 0o644)
 		}
 	}
 	owner[name] = e.Scope.Key
@@ -541,7 +546,9 @@ func unpublishURLs(key string) {
 		if _, err := exec.LookPath(portlessBin()); err == nil {
 			_, _ = portless(os.TempDir(), "alias", "--remove", r.Name)
 		}
-		_ = os.Remove(filepath.Join(urlsDir(), r.Name))
+		if !strings.ContainsAny(r.Name, `/\`) && r.Name != "" && r.Name != "." && r.Name != ".." {
+			_ = os.Remove(filepath.Join(urlsDir(), r.Name)) // the name comes from the file's JSON
+		}
 	}
 	stopIdleProxy()
 }
@@ -576,13 +583,17 @@ func removeRoutesTo(ports map[string]string) {
 	stopIdleProxy()
 }
 
-// PruneURLs removes routes whose sandbox is not in live and whose host port nothing is listening
-// on. Both, because live only covers the configured backend: a route to another backend's running
-// sandbox still has a listener, and is kept.
-func PruneURLs(live map[string]bool) int {
+// PruneURLsAfter is how old a route must be before gc prunes it. gc's list of live sandboxes is
+// taken before it reads the routes, so a sandbox created in between has routes and no entry.
+const PruneURLsAfter = time.Hour
+
+// PruneURLs removes routes older than minAge whose sandbox is not in live and whose host port
+// nothing is listening on. Both, because live only covers the configured backend: a route to
+// another backend's running sandbox still has a listener, and is kept.
+func PruneURLs(live map[string]bool, minAge time.Duration) int {
 	n := 0
 	for _, r := range readRoutes() {
-		if live[r.Scope] {
+		if live[r.Scope] || time.Since(r.made) < minAge {
 			continue
 		}
 		if c, err := net.DialTimeout("tcp", "127.0.0.1:"+r.Host, 200*time.Millisecond); err == nil {

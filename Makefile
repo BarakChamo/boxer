@@ -109,7 +109,9 @@ clean:            ## remove build output and coverage
 	rm -rf bin dist coverage.out
 
 clean-evals:      ## reclaim what the evaluation suite leaves on this host: scratch repos and its pack cache
-	@bin/boxer gc --all >/dev/null 2>&1 || true
+	@# Only the eval's own sandboxes: `gc --all` here once ran with your environment and took every
+	@# stopped sandbox and cached pack you had. These are found by their worktree path.
+	@bin/boxer ls -A --json --no-git 2>/dev/null | python3 -c 'import json,sys; [print(m["scope"]) for m in json.load(sys.stdin) if "/boxer-eval-" in m.get("worktree","") or "/boxer-sdlc-base-" in m.get("worktree","")]' | xargs -n1 bin/boxer rm -A -y --volumes >/dev/null 2>&1 || true
 	rm -rf "$${TMPDIR:-/tmp}"/boxer-eval-[0-9]* "$${TMPDIR:-/tmp}"/boxer-eval-packs \
 	  "$${TMPDIR:-/tmp}"/boxer-sdlc-base-* "$${TMPDIR:-/tmp}"/bxm-* \
 	  "$${TMPDIR:-/tmp}"/matrix-*.agent.log "$${TMPDIR:-/tmp}"/matrix-*.trace.log

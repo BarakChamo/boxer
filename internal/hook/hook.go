@@ -76,12 +76,14 @@ var dshEvents = map[string]string{
 
 // Dialects is every harness the hook binary speaks.
 var Dialects = map[string]Dialect{
-	"claude-code": {Name: "claude-code", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
+	// Monitor runs a command "in the same shell environment as Bash", streaming its output: a
+	// second shell tool, and an unhooked one ran intercepted programs on the host.
+	"claude-code": {Name: "claude-code", MCP: true, ShellTool: "Bash", ShellTool2: "Monitor", Rewrite: true, Family: "claude", Events: claudeEvents},
 	"codex":       {Name: "codex", MCP: true, ShellTool: "Bash", Rewrite: true, Family: "claude", Events: claudeEvents},
 	// Grok sends Claude-compatible field names but its own tool name (verified 2026-09-17).
 	"grok": {Name: "grok", MCP: true, ShellTool: "run_terminal_command", Rewrite: true, Family: "claude", Events: claudeEvents,
 		RunToolHint: "the boxer_run tool: find it with search_tool, then call it with use_tool", NoSessionContext: true},
-	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", Rewrite: false, Family: "claude", Events: claudeEvents},
+	"kimi": {Name: "kimi", MCP: true, ShellTool: "Bash", ShellTool2: "Shell", Rewrite: false, Family: "claude", Events: claudeEvents},
 	// DSH has no hooks of its own; the shipped @deepseek-ai/dsh-hooks-claude-code bridge runs a
 	// Claude Code hooks.json, so the payloads and the output shape are Claude Code's. It honours
 	// deny and ask but logs and ignores updatedInput, and it does not implement SessionEnd. Its
@@ -209,15 +211,27 @@ func Run(harness string, stdin io.Reader, stdout, stderr io.Writer, resolve Reso
 		if purpose == "intercept" && e != nil && e.Cfg.Mode != "off" && e.Cfg.OnSandboxUnavailable == "fail" {
 			return deny(d, stdout, err.Error(), "")
 		}
+		// A policy refusal is not an unavailable sandbox. `require_worktree = "require"` refuses
+		// the main checkout, and passthrough, which exists for a sandbox that cannot start, used to
+		// turn that refusal into a command run on the host.
+		var berr *box.Error
+		if purpose == "intercept" && e != nil && e.Cfg.Mode != "off" && errors.As(err, &berr) &&
+			(berr.Cause == "WORKTREE_REQUIRED" || berr.Cause == "SCOPE_UNRESOLVED") {
+			cmd, _ := toolArgs(d, in)["command"].(string)
+			if decide.Decide(decide.Input{Command: cmd, Mode: e.Cfg.Mode, Intercept: e.Cfg.Intercepted(), Passthrough: e.Cfg.Passthrough}).Action != decide.Allow {
+				return deny(d, stdout, err.Error(), berr.Fix)
+			}
+		}
 		// A configuration that does not load must not turn boxer off. Allowing everything here
 		// once ran every intercepted command on the host, silently, because of a TOML typo. With
-		// no configuration to read, judge the command by the default intercept list and refuse
-		// what would have been sandboxed, naming the error.
+		// no configuration to read, refuse every command that is not passthrough, naming the error.
+		// Judging by the default intercept list instead let through what the repository had added
+		// itself (`intercept = ["terraform"]`, intercept_also), which is the case it meant to cover.
 		var cerr *box.ConfigError
 		if purpose == "intercept" && errors.As(err, &cerr) && os.Getenv("BOXER_MODE") != "off" {
 			cmd, _ := toolArgs(d, in)["command"].(string)
 			def := config.Defaults()
-			if decide.Decide(decide.Input{Command: cmd, Mode: def.Mode, Intercept: def.Intercept, Passthrough: def.Passthrough}).Action != decide.Allow {
+			if decide.Decide(decide.Input{Command: cmd, Mode: def.Mode, Intercept: []string{"*"}, Passthrough: def.Passthrough}).Action != decide.Allow {
 				return deny(d, stdout, "boxer.toml could not be loaded, so this command was not run: "+err.Error(),
 					"fix boxer.toml (boxer doctor shows the error), or set BOXER_MODE=off to run it on the host")
 			}

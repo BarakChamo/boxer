@@ -31,13 +31,17 @@ func TestNewKeysDefaultAndValidate(t *testing.T) {
 		`volumes = ["pg:/a", "pg:/b"]`,
 		"[network]\nallow_presets = [\"npmm\"]",
 		"build = \"Dockerfile\"\nsmolfile = \"Smolfile\"",
+		`user = "node; rm -rf /"`,
+		`user = "a b"`,
 	} {
 		if _, err := load(t, bad); err == nil {
 			t.Errorf("%s must be refused", bad)
 		}
 	}
-	if _, err := load(t, `volumes = ["pg-data_1:/var/lib/postgresql/data"]`); err != nil {
-		t.Fatal(err)
+	for _, good := range []string{`volumes = ["pg-data_1:/var/lib/postgresql/data"]`, `user = "first.last"`, `user = "1000:1000"`, `user = "node:staff"`} {
+		if _, err := load(t, good); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

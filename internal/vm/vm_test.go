@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -313,5 +314,27 @@ func TestAnUnrecognisedFailureIsNotGuessedAt(t *testing.T) {
 		if errors.Is(err, s) {
 			t.Errorf("classified %v as %v", err, s)
 		}
+	}
+}
+
+// A pack appears at its path only whole, and nothing else is left in the pack directory: other
+// worktrees boot from any pack that exists there, and gc globs it.
+func TestPackAppearsOnlyWhole(t *testing.T) {
+	c, _ := vmtest.Install(t)
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "env")
+	got, err := c.Pack("alpine", stub)
+	if err != nil || got != stub+".smolmachine" {
+		t.Fatalf("pack: %q %v", got, err)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 || ents[0].Name() != "env.smolmachine" {
+		t.Fatalf("only the pack may be left: %v", ents)
+	}
+	vmtest.FailVerb(t, "pack create", "disk full")
+	if _, err := c.PackFromVM("sb-x", filepath.Join(dir, "other")); err == nil {
+		t.Fatal("a failed pack must say so")
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("a failed pack must leave nothing: %v", ents)
 	}
 }

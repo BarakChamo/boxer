@@ -220,7 +220,11 @@ func TestPruneURLsKeepsRoutesWithAListener(t *testing.T) {
 	t.Setenv("FAKE_PREFIX", "gone")
 	b := urlEnv(t, "sb-bbbbbbbbbbbb", "/src/wt-gone", true, "auto:3000")
 	b.publishURLs(machineWith(b.Scope.Key, map[string]string{"3000": "1"}), &w) // nothing on port 1
-	if n := PruneURLs(map[string]bool{}); n != 1 {
+	// A route registered since gc listed the sandboxes belongs to one that is still starting.
+	if n := PruneURLs(map[string]bool{}, PruneURLsAfter); n != 0 {
+		t.Fatalf("pruned %d fresh routes, want 0", n)
+	}
+	if n := PruneURLs(map[string]bool{}, 0); n != 1 {
 		t.Fatalf("pruned %d, want 1", n)
 	}
 	if _, err := os.Stat(filepath.Join(state, "gone.myapp")); !os.IsNotExist(err) {
@@ -264,6 +268,18 @@ func TestSweepStateBoundsTheStateDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unlock()
+
+	// A pack whose writer was killed leaves its hidden directory; one being written now does not.
+	t.Setenv("BOXER_PACKS", t.TempDir())
+	packing := func(name string, when time.Time) string {
+		d := filepath.Join(PackDir(), name)
+		_ = os.MkdirAll(d, 0o755)
+		_ = os.WriteFile(filepath.Join(d, "env.smolmachine"), []byte("part"), 0o644)
+		_ = os.Chtimes(d, when, when)
+		return d
+	}
+	gone = append(gone, packing(".packing-1", old))
+	kept = append(kept, packing(".packing-2", time.Now()))
 
 	SweepState(map[string]bool{"sb-222222222222": true}, time.Now())
 	for _, p := range gone {

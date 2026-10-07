@@ -761,12 +761,12 @@ func TestStartAndReady(t *testing.T) {
 	}
 
 	// A second Ensure on the same running VM starts nothing again.
-	before := strings.Count(s, "nohup")
+	before := strings.Count(s, "HUP;")
 	if _, err := e.Ensure(true, false); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(log)
-	if after := strings.Count(string(b), "nohup"); after != before {
+	if after := strings.Count(string(b), "HUP;"); after != before {
 		t.Fatalf("services start once per running VM: %d then %d", before, after)
 	}
 }
@@ -790,7 +790,7 @@ func TestStartAndReadyGetTheEnvironment(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	for _, line := range strings.Split(string(b), "\n") {
-		isStart := strings.Contains(line, "nohup")
+		isStart := strings.Contains(line, "HUP;")
 		isReady := strings.Contains(line, "machine exec") && strings.HasSuffix(strings.TrimSpace(line), " true")
 		if !isStart && !isReady {
 			continue
@@ -802,7 +802,7 @@ func TestStartAndReadyGetTheEnvironment(t *testing.T) {
 			t.Errorf("a secret value reached argv:\n%s", line)
 		}
 	}
-	if !strings.Contains(string(b), "nohup") {
+	if !strings.Contains(string(b), "HUP;") {
 		t.Fatalf("no start exec logged:\n%s", b)
 	}
 }
@@ -1075,8 +1075,21 @@ func TestSetupOutOfMemoryExplainsItself(t *testing.T) {
 // second one to start would fail with a message about a busy address rather than about worktrees,
 // which is the wrong end of the problem. "auto:<guest>" asks for a free one instead, and the
 // mapping is recorded on the machine so a person can find out where their server is.
+// A stopped sandbox holds its port in a label with nothing listening, so the operating system may
+// offer it again. Its owner would fail to start, or its URL would route to the newcomer.
+func TestAutomaticPortsSkipStoppedSandboxes(t *testing.T) {
+	old := freePort
+	t.Cleanup(func() { freePort = old })
+	offers := []string{"4000", "4000", "4001"}
+	freePort = func() (string, error) { p := offers[0]; offers = offers[1:]; return p, nil }
+	_, chosen, err := allocatePorts([]string{"auto:3000"}, map[string]bool{"4000": true})
+	if err != nil || chosen["3000"] != "4001" {
+		t.Fatalf("a port another sandbox holds must be passed over: %v %v", chosen, err)
+	}
+}
+
 func TestAutomaticPortsDoNotCollide(t *testing.T) {
-	fixed, chosen, err := allocatePorts([]string{"8080:80", "auto:3000"})
+	fixed, chosen, err := allocatePorts([]string{"8080:80", "auto:3000"}, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,7 +1101,7 @@ func TestAutomaticPortsDoNotCollide(t *testing.T) {
 		t.Fatalf("the resolved mapping must use the chosen host port: %v %v", fixed, chosen)
 	}
 	// Two allocations in a row must differ, or concurrent worktrees would collide again.
-	_, second, err := allocatePorts([]string{"auto:3000"})
+	_, second, err := allocatePorts([]string{"auto:3000"}, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1383,4 +1396,4 @@ func TestUnsetSecretIsNamedOnce(t *testing.T) {
 
 // launches counts the start services launched, from the fake's log: one line per launch, however
 // the command itself is quoted inside the supervisor.
-func launches(log string) int { return strings.Count(log, "mkdir -p "+serviceDir+" && nohup") }
+func launches(log string) int { return strings.Count(log, "mkdir -p "+serviceDir+" && sh -c") }

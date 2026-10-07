@@ -40,6 +40,22 @@ Any OCI reference works. Without `image`, boxer picks one from the worktree's lo
 | `go.mod` | `golang:1-alpine` |
 | none of these | `debian:bookworm-slim` |
 
+boxer looks only in the worktree's root, and the first file in the table's order wins. A project
+with two languages gets the first one's image: a Django app with a `package-lock.json` for its
+frontend gets Node, with no Python. Name the image yourself and install the other language:
+
+```toml
+image = "mirror.gcr.io/library/python:3.12-slim-bookworm"
+image_setup = ["apt-get update && apt-get install -y --no-install-recommends nodejs npm"]
+setup = ["pip install -r requirements.txt", "cd frontend && npm ci", "python manage.py migrate"]
+```
+
+`setup` lines run in order, each from the worktree root. What they install lands in the worktree
+and is built for the sandbox's Linux: a `node_modules` with native modules will not run on your
+Mac, so running `npm` on the host in the same worktree needs `npm rebuild` there first, and the
+next `setup` undoes it. A file git does not track, such as
+`db.sqlite3` or `.env`, is not in a new worktree, so create it in `setup`.
+
 Ruby and JVM lockfiles win over a `package.json` kept for assets. The default `intercept` list
 covers Node, Python, Rust, Go and make. For Ruby or Java, add your tools with `intercept_also`,
 which keeps the default list: `intercept_also = ["ruby", "bundle", "rails", "rake", "rspec"]`, or

@@ -239,6 +239,18 @@ func identity(name string, args []string) (*flag.FlagSet, *string, *scope.Identi
 	return fs, harness, id
 }
 
+// scopedFlags are the flags each scope-bound command reads, beyond the identity flags.
+var scopedFlags = map[string][]string{
+	"up":      {"recreate", "rebuild", "detach", "json"},
+	"run":     {"scope", "c", "tty", "task", "junit", "fail-on-test-failures", "json"},
+	"down":    {"all", "scope", "json"},
+	"status":  {"scope", "json"},
+	"doctor":  {"json"},
+	"brief":   {"json"},
+	"tasks":   {"json"},
+	"restart": {},
+}
+
 func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs, harness, id := identity(cmd, args)
 	recreate := fs.Bool("recreate", false, "delete and recreate the sandbox (up)")
@@ -258,6 +270,23 @@ func scoped(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	asJSON := fs.Bool("json", false, "print JSON (down, status, doctor)")
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// The flags are registered once for every scope-bound command, so a flag one command does not
+	// use would otherwise parse and be ignored: `restart --scope <child>` exited 0 having
+	// restarted this worktree's services instead.
+	var stray []string
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "harness", "session", "agent":
+		default:
+			if !slices.Contains(scopedFlags[cmd], f.Name) {
+				stray = append(stray, "--"+f.Name)
+			}
+		}
+	})
+	if len(stray) > 0 {
+		fmt.Fprintf(stderr, "boxer %s does not take %s\n", cmd, strings.Join(stray, ", "))
 		return 2
 	}
 	// A sandbox can be taken down by name, from anywhere: a dashboard built on `ls --json` has
@@ -588,6 +617,7 @@ func lastUsedJSON(name string) *string {
 type downJSON struct {
 	Scope   string `json:"scope"`
 	Removed bool   `json:"removed"`
+	Error   string `json:"error,omitempty"`
 }
 
 type statusJSON struct {
@@ -754,17 +784,17 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, m := range ms {
 		root := m.Labels["boxer.root"]
-		reason := ""
+		reason, stop := "", false
 		if parent := box.ParentOf(m.Name); parent != "" && !live[parent] {
 			// A fork child outlives its parent only by accident: nothing addresses it, and it
 			// costs what a sandbox costs.
 			reason = "fork of " + parent + ", which is gone"
-		} else if _, err := os.Stat(root); os.IsNotExist(err) {
+		} else if _, err := os.Stat(root); root != "" && os.IsNotExist(err) {
 			// Only absence. A worktree boxer cannot stat for another reason (permissions, an
 			// unmounted volume) still exists, and deleting its sandbox would be a guess.
 			reason = fmt.Sprintf("worktree %s is gone", root)
-		} else if last := box.LastUsed(m.Name); idle > 0 && !last.IsZero() && time.Since(last) > idle {
-			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", last.Format(time.RFC3339), cfg.IdleTimeout)
+		} else if idleSince(m.Name, idle) {
+			reason = fmt.Sprintf("idle since %s (idle_timeout %s)", box.LastUsed(m.Name).Format(time.RFC3339), cfg.IdleTimeout)
 			// Its worktree still exists, so someone may come back to it. Stopping frees the
 			// memory and keeps what the sandbox holds; an already stopped one has nothing left
 			// to give back but its disk, which --all and min_free_gb deal with.
@@ -772,27 +802,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 				if m.State != "running" {
 					continue
 				}
-				row := gcJSON{machineJSON: machineRow(m), Reason: reason + ", idle_action stop", stop: true}
-				if *dry {
-					rows = append(rows, row)
-					if !*asJSON {
-						fmt.Fprintf(stdout, "would stop %s (%s)\n", m.Name, row.Reason)
-					}
-					continue
-				}
-				if err := client.Stop(m.Name); err != nil {
-					row.Error = err.Error()
-					fmt.Fprintln(stderr, err)
-					code = 1
-				} else {
-					box.Stopped(m.Name)
-					row.Stopped = true
-					if !*asJSON {
-						fmt.Fprintf(stdout, "stopped %s (%s)\n", m.Name, row.Reason)
-					}
-				}
-				rows = append(rows, row)
-				continue
+				reason, stop = reason+", idle_action stop", true
 			}
 		} else if *all && m.State != "running" {
 			reason = "not running (--all)"
@@ -800,28 +810,51 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 		if reason == "" {
 			continue
 		}
-		row := gcJSON{machineJSON: machineRow(m), Reason: reason}
+		row := gcJSON{machineJSON: machineRow(m), Reason: reason, stop: stop}
+		verb := map[bool]string{false: "delete", true: "stop"}[stop]
 		if *dry {
 			rows = append(rows, row)
 			if !*asJSON {
-				fmt.Fprintf(stdout, "would delete %s (%s)\n", m.Name, reason)
+				fmt.Fprintf(stdout, "would %s %s (%s)\n", verb, m.Name, reason)
 			}
 			continue
 		}
-		if err := client.Delete(m.Name); err != nil {
+		// A command provisioning this sandbox holds its lock, and one that got there first has
+		// marked it used. Either way it is not gc's to take.
+		unlock, ok := box.TryLockScope(m.Name)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(reason, "idle") && !idleSince(m.Name, idle) {
+			unlock()
+			continue
+		}
+		var err error
+		if stop {
+			err = client.Stop(m.Name)
+		} else {
+			err = client.Delete(m.Name)
+		}
+		unlock()
+		if err != nil {
 			row.Error = err.Error()
 			rows = append(rows, row)
 			fmt.Fprintln(stderr, err)
 			code = 1
 			continue
 		}
-		// Everything boxer kept about the sandbox goes with it: its run record, its last-used
-		// stamp, its lock, and any URL that pointed at it.
-		box.ForgetScope(m.Name)
-		row.Deleted = true
+		if stop {
+			box.Stopped(m.Name)
+			row.Stopped = true
+		} else {
+			// Everything boxer kept about the sandbox goes with it: its run record, its
+			// last-used stamp, its lock, and any URL that pointed at it.
+			box.ForgetScope(m.Name)
+			row.Deleted = true
+		}
 		rows = append(rows, row)
 		if !*asJSON {
-			fmt.Fprintf(stdout, "deleted %s (%s)\n", m.Name, reason)
+			fmt.Fprintf(stdout, "%s %s (%s)\n", map[bool]string{false: "deleted", true: "stopped"}[stop], m.Name, reason)
 		}
 	}
 	// State for sandboxes that went away without boxer deleting them — `docker rm`, a wiped
@@ -832,7 +865,7 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 				delete(live, r.Scope)
 			}
 		}
-		box.PruneURLs(live)
+		box.PruneURLs(live, box.PruneURLsAfter)
 		box.SweepState(live, time.Now())
 	}
 	// Volumes go with their worktree, and only then, whatever happened to the sandbox.
@@ -879,14 +912,17 @@ func gcCmd(args []string, stdout, stderr io.Writer) int {
 			}
 			continue
 		}
-		if err := os.Remove(p); err != nil {
+		removed, err := box.RemovePack(p)
+		if err != nil {
 			row.Error = err.Error()
 			rows = append(rows, row)
 			fmt.Fprintln(stderr, err)
 			code = 1
 			continue
 		}
-		_ = os.Remove(strings.TrimSuffix(p, ".smolmachine") + ".lock")
+		if !removed { // a create or a pack is using it right now
+			continue
+		}
 		row.Deleted = true
 		rows = append(rows, row)
 		if !*asJSON {
@@ -959,10 +995,14 @@ func downAll(client vm.Backend, asJSON bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 	rows := []downJSON{}
+	code := 0
 	for _, m := range ms {
+		// One sandbox that will not go must not hide the ones that did, or stop the rest.
 		if err := client.Delete(m.Name); err != nil {
 			fmt.Fprintln(stderr, err)
-			return 1
+			rows = append(rows, downJSON{Scope: m.Name, Error: err.Error()})
+			code = 1
+			continue
 		}
 		vm.ForgetOwned(client, m.Name)
 		box.ForgetScope(m.Name)
@@ -973,9 +1013,9 @@ func downAll(client vm.Backend, asJSON bool, stdout, stderr io.Writer) int {
 	}
 	// "Everything" includes routes whose sandbox went away by another path: a `down` run with a
 	// different state directory removes the route but cannot see this directory's record of it.
-	box.PruneURLs(map[string]bool{})
+	box.PruneURLs(map[string]bool{}, 0)
 	emit(stdout, rows, asJSON)
-	return 0
+	return code
 }
 
 // envList collects repeatable -e KEY=VALUE flags.
@@ -1139,6 +1179,12 @@ func installCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: boxer install <harness>|all [--user]   (project layer by default; --user for the files orchestrators seed from)")
 		return 2
 	}
+	// git and conductor are configured per repository and have no user layer; with --user and no
+	// repository, they acted on paths relative to wherever the command ran.
+	if *user && (pos[0] == "git" || pos[0] == "conductor") {
+		fmt.Fprintf(stderr, "boxer install %s has no user layer: run it inside the repository, without --user\n", pos[0])
+		return 2
+	}
 	wt, repo := cwdRoot()
 	if wt == "" && !*user {
 		fmt.Fprintln(stderr, "boxer install: run inside the git repository to configure")
@@ -1224,6 +1270,12 @@ func uninstallCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := fs.Parse(flags); err != nil || len(pos) == 0 {
 		fmt.Fprintln(stderr, "usage: boxer uninstall <harness>|all|git|conductor [--user]")
+		return 2
+	}
+	// git and conductor are configured per repository and have no user layer; with --user and no
+	// repository, they acted on paths relative to wherever the command ran.
+	if *user && (pos[0] == "git" || pos[0] == "conductor") {
+		fmt.Fprintf(stderr, "boxer uninstall %s has no user layer: run it inside the repository, without --user\n", pos[0])
 		return 2
 	}
 	wt, repo := cwdRoot()
@@ -1437,7 +1489,8 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 		if *all {
 			// Every installed backend, as `ls -A` sees them. A backend that fails to answer is
 			// reported and skipped for this round rather than ending the watch.
-			for _, h := range listMachines(true, stderr) {
+			hs, _ := listMachines(true, stderr)
+			for _, h := range hs {
 				ms = append(ms, h.m)
 			}
 		} else {
@@ -1564,4 +1617,10 @@ func withTestResults(e *box.Env, t config.Task, flagValue string, failFlag bool,
 		return 1
 	}
 	return code
+}
+
+// idleSince reports whether the scope has gone unused for longer than idle; 0 disables the rule.
+func idleSince(name string, idle time.Duration) bool {
+	last := box.LastUsed(name)
+	return idle > 0 && !last.IsZero() && time.Since(last) > idle
 }

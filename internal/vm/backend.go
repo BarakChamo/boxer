@@ -208,18 +208,35 @@ func NotOwned(b Backend, name string) error {
 	return fmt.Errorf("%s has no machine boxer made called %q; boxer only stops or deletes its own (boxer ls lists them)", b.Name(), name)
 }
 
-// guestTimeout runs argv under the guest's own `timeout` when the image has one. A deadline kept
-// only on the host kills the docker or container CLI and leaves the command running in the
-// container, where nothing will ever stop it; `docker exec` does not end its process when the
-// client dies. KILL, because a timed-out task is past asking: the code is then 137.
+// guestTimeout runs argv under a deadline kept in the guest. A deadline kept only on the host kills
+// the docker or container CLI and leaves the command running in the container, where nothing will
+// ever stop it; `docker exec` does not end its process when the client dies. KILL, because a
+// timed-out task is past asking: the code is then 137.
+//
+// GNU timeout kills the command's whole process group. busybox's (Alpine) kills only the process
+// it started, so `npm test` timed out and left its workers running; and an image with no timeout
+// had no deadline at all. Without GNU's, a watchdog freezes and kills the command's process tree,
+// found through /proc. Not setsid: Alpine's forks, so the command would not be this shell's child.
+// ponytail: a process that detaches itself (a double fork) leaves the tree and escapes; GNU's
+// process-group kill would catch it, and nothing without a terminal can make a group here.
 func guestTimeout(d time.Duration, argv []string) []string {
-	secs := int((d + time.Second - 1) / time.Second)
-	line := `command -v timeout >/dev/null 2>&1 && exec timeout -s KILL ` + strconv.Itoa(secs) + ` "$@"; exec "$@"`
+	secs := strconv.Itoa(int((d + time.Second - 1) / time.Second))
+	line := `timeout --version 2>/dev/null | grep -q GNU && exec timeout -s KILL ` + secs + ` "$@"
+tree() { kill -STOP $1 2>/dev/null; for d in /proc/[0-9]*; do read -r _ _ _ pp _ < $d/stat 2>/dev/null && [ "$pp" = $1 ] && tree ${d#/proc/}; done; kill -KILL $1 2>/dev/null; }
+exec 3<&0
+"$@" <&3 3<&- &
+c=$!
+exec 3<&-
+(trap 'kill $s 2>/dev/null; exit' TERM; sleep ` + secs + ` & s=$!; wait $s && tree $c) >/dev/null 2>&1 &
+w=$!
+wait $c; code=$?
+kill $w 2>/dev/null
+exit $code`
 	return append([]string{"sh", "-c", line, "boxer-timeout"}, argv...)
 }
 
 // hostBackstop is how much longer than a timeout the host waits before killing the CLI itself,
-// for an image with no `timeout`.
+// for a guest that never got as far as the deadline in guestTimeout.
 const hostBackstop = 3 * time.Second
 
 // Output runs argv in the guest and returns its combined output and exit status. Also a function

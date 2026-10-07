@@ -6,6 +6,54 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Fixes from a third full review (hook paths, destructive paths, concurrency, the CLI contract and
+guest-script portability), each finding reproduced or covered by a test.
+
+### Security
+- Claude Code's `Monitor` tool runs shell commands and is now routed through the hook like `Bash`.
+  Kimi's `Shell` tool is refused in the same way as its other shell tool.
+- `require_worktree` and an unresolved scope refuse a command even under
+  `on_sandbox_unavailable = "passthrough"`, and a broken `boxer.toml` sandboxes every command
+  rather than none.
+- The pi and OpenCode plugins refuse a command when boxer cannot be run or answers with something
+  they cannot read, rather than letting it through.
+- `user` in `boxer.toml` must be a user name or `uid[:gid]`; it reaches the guest's shell unquoted.
+
+### Fixed
+- Services were never launched again after a sandbox was stopped and started on docker, podman
+  and Apple container (idle reclaim, `boxer stop` then `boxer up`): the start marker survived in
+  the container's `/tmp`. It now records the boot it belongs to.
+- `boxer restart` left a second copy of a service that ignored TERM, and did not wait for a
+  service that took a moment to shut down, so the relaunch could find its port still in use. It
+  now waits up to 5 seconds for the service and everything it started, then kills what is left.
+- A command that timed out on Alpine or busybox left its children running; on an image with no
+  `timeout` it had no deadline in the guest at all. Both now end the command's whole process tree.
+- Services launch without `nohup`, which some minimal images lack.
+- `boxer gc` no longer stops or deletes a sandbox a command is provisioning, and the command that
+  starts the sweep marks its sandbox used first.
+- Packs are written aside and moved into place whole, so another worktree never boots a half-written
+  one. gc skips a pack a create is using, and `boxer pack save` and the harness cache hold the
+  sandbox while they stop it.
+- An `auto:` port is never one a stopped sandbox already holds.
+- gc keeps URL routes registered in the last hour, which belong to a sandbox still starting.
+- Run records and URL routes are written atomically.
+- gc keeps the volumes of a missing worktree for 7 days, so a moved repository or an unplugged
+  drive does not lose a database. A sandbox with no worktree label is not taken for one whose
+  worktree is gone.
+- A broken pack saved by name with `boxer pack save` is reported, not deleted.
+- `make clean-evals` removes only the evals' own sandboxes.
+- `boxer ls`, `stop` and `rm` exit 1 when a backend does not answer, instead of reporting an empty
+  host. `down --all` goes on past a sandbox it cannot delete, and `rm --volumes` reports a
+  sandbox it removed even when its volumes could not be.
+- Scope-bound commands refuse flags they do not read (`restart --scope` restarted the current
+  worktree instead), and `install`/`uninstall git|conductor --user` are refused.
+
+### Documentation
+- `down`, `stop` and `rm` rows can carry `error`; gc's `volumes` and `stopped` rows are described.
+- `up --json` and `run --json` say which refusals they print as JSON.
+- New quickstart platform table and install details, and an allowlist section on what it does not
+  cover.
+
 ## [1.4.1] - 2026-10-06
 
 Fixes from a full review of 1.4.0 (six reviewers, each finding verified and covered by a test).
